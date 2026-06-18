@@ -1,0 +1,637 @@
+:root {
+  color: #172033;
+  background: #f4f6f8;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --app-bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --border: #d8dee8;
+  --border-soft: #e7ebf1;
+  --text: #172033;
+  --muted: #697386;
+  --primary: #2563eb;
+  --success: #12805c;
+  --warning: #b45309;
+  --danger: #c2410c;
+  --radius: 8px;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--app-bg);
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: var(--app-bg);
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  width: 248px;
+  height: 100vh;
+  padding: 18px;
+  border-right: 1px solid var(--border);
+  background: #111827;
+  color: #f8fafc;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.brand-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #2563eb;
+  font-weight: 800;
+}
+
+.sidebar-brand strong,
+.sidebar-brand span,
+.topbar-title span,
+.topbar-title small {
+  display: block;
+}
+
+.sidebar-brand span {
+  color: #aab4c2;
+  font-size: 12px;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.nav-item {
+  display: flex;
+  min-height: 48px;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-item span {
+  color: inherit;
+  font-weight: 700;
+}
+
+.nav-item:hover,
+.nav-item.is-active {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.app-body {
+  min-width: 0;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  height: 64px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.mobile-menu-button {
+  display: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.topbar-title span {
+  font-weight: 800;
+}
+
+.topbar-title small {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.topbar-actions,
+.page-header,
+.page-header-actions,
+.button-row,
+.card-title,
+.meta-line,
+.remark-row,
+.wechat-status,
+.model-line,
+.link-cell,
+.tag-row {
+  display: flex;
+  align-items: center;
+}
+
+.topbar-actions {
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.account-button {
+  max-width: 180px;
+  padding: 7px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main {
+  min-width: 0;
+  padding: 24px;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.page-header {
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 72px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.page-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.page-header-actions,
+.button-row {
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.module-content {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.module-section {
+  min-width: 0;
+  scroll-margin-top: 88px;
+}
+
+.module-heading {
+  margin-bottom: 10px;
+}
+
+.module-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.metric-card {
+  min-height: 84px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.metric-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.metric-card.tone-success {
+  border-color: rgba(18, 128, 92, 0.28);
+}
+
+.metric-card.tone-warning {
+  border-color: rgba(180, 83, 9, 0.28);
+}
+
+.metric-card.tone-danger {
+  border-color: rgba(194, 65, 12, 0.28);
+}
+
+.auth-page {
+  display: grid;
+  min-height: calc(100vh - 48px);
+  place-items: center;
+}
+
+.bind-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel,
+.bind-panel,
+.create-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-panel {
+  width: min(420px, calc(100vw - 32px));
+  padding: 28px;
+}
+
+.bind-panel {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.auth-panel h1 {
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.empty-state {
+  display: grid;
+  gap: 18px;
+}
+
+.create-form {
+  padding: 18px;
+}
+
+.status-copy {
+  margin: -6px 0 0;
+  color: var(--muted);
+}
+
+.content-grid,
+.admin-grid,
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.card-title {
+  gap: 8px;
+  font-weight: 800;
+}
+
+.with-action {
+  justify-content: space-between;
+}
+
+.management-form,
+.preset-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.compact-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr);
+  margin-bottom: 0;
+}
+
+.phone-form,
+.bind-link-box {
+  display: grid;
+  gap: 14px;
+}
+
+.instance-expand {
+  padding: 12px 18px;
+  background: var(--surface-subtle);
+}
+
+.preset-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preset-form .el-checkbox {
+  align-self: center;
+}
+
+.link-cell,
+.tag-row {
+  gap: 8px;
+}
+
+.link-cell span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-stack span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wechat-status,
+.model-line {
+  gap: 10px;
+  margin-bottom: 14px;
+  color: #475569;
+}
+
+.qr-box {
+  display: grid;
+  width: 240px;
+  height: 240px;
+  place-items: center;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+}
+
+.qr-box img {
+  width: 220px;
+  height: 220px;
+}
+
+.remark-row {
+  gap: 8px;
+}
+
+.control-ui-cell,
+.instance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.control-ui-cell {
+  justify-content: flex-start;
+}
+
+.instance-actions {
+  justify-content: flex-end;
+}
+
+.control-ui-cell .el-button + .el-button,
+.instance-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.auth-link {
+  display: block;
+  margin: 12px 0;
+  color: #0f766e;
+  overflow-wrap: anywhere;
+}
+
+.output {
+  max-height: 260px;
+  margin: 14px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.server-log {
+  min-height: 220px;
+}
+
+.runner-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-page {
+  max-width: 1120px;
+}
+
+.token-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 14px 0;
+}
+
+.token-created {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.el-card {
+  border-radius: var(--radius);
+}
+
+.el-card.is-never-shadow {
+  border-color: var(--border);
+}
+
+.el-table {
+  --el-table-border-color: var(--border-soft);
+  --el-table-header-bg-color: var(--surface-subtle);
+}
+
+.el-dialog {
+  border-radius: var(--radius);
+}
+
+@media (max-width: 1100px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .content-grid,
+  .admin-grid,
+  .account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .app-sidebar {
+    position: fixed;
+    left: 0;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+  }
+
+  .app-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgba(15, 23, 42, 0.38);
+  }
+
+  .app-topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    height: auto;
+    min-height: 64px;
+    padding: 12px;
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+  }
+
+  .topbar-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .main {
+    padding: 14px;
+  }
+
+  .page-header,
+  .auth-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .page-header-actions,
+  .button-row {
+    justify-content: flex-start;
+  }
+
+  .management-form,
+  .preset-form,
+  .token-form,
+  .token-created {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header h1 {
+    font-size: 21px;
+  }
+
+  .qr-box {
+    width: 100%;
+    max-width: 240px;
+  }
+
+  .account-button {
+    max-width: 120px;
+  }
+}

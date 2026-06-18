@@ -1,0 +1,14 @@
+data/
+.DS_Store
+node_modules/
+backend/target/
+frontend/node_modules/
+frontend/dist/
+*.log
+.idea/.gitignore
+.idea/claw-manager.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
+compose-rebuild-start.bat
+reset-test-env-advanced.bat

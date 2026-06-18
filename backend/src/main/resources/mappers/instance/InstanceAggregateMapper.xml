@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.instance.InstanceAggregateMapper">
+  <resultMap id="InstanceMap" type="com.clawbotforall.instance.InstanceEntity">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="slug" column="slug"/>
+    <result property="status" column="status"/>
+    <result property="port" column="port"/>
+    <result property="dashboardUrl" column="dashboard_url"/>
+    <result property="containerName" column="container_name"/>
+    <result property="gatewayToken" column="gateway_token"/>
+    <result property="pluginsAllow" column="plugins_allow"/>
+    <result property="pluginsEntries" column="plugins_entries"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="InstanceModelMap" type="com.clawbotforall.instance.InstanceModelEntity">
+    <id property="instanceId" column="instance_id"/>
+    <id property="sortOrder" column="sort_order"/>
+    <result property="presetId" column="preset_id"/>
+    <result property="providerKey" column="provider_key"/>
+    <result property="providerId" column="provider_id"/>
+    <result property="modelId" column="model_id"/>
+    <result property="apiMode" column="api_mode"/>
+    <result property="authType" column="auth_type"/>
+    <result property="authProviderId" column="auth_provider_id"/>
+    <result property="authMethodId" column="auth_method_id"/>
+    <result property="baseUrl" column="base_url"/>
+    <result property="apiKey" column="api_key"/>
+    <result property="providerConfig" column="provider_config"/>
+    <result property="extra" column="extra"/>
+  </resultMap>
+
+  <resultMap id="ProvisioningMap" type="com.clawbotforall.instance.InstanceProvisioningEntity">
+    <id property="instanceId" column="instance_id"/>
+    <result property="status" column="status"/>
+    <result property="percent" column="percent"/>
+    <result property="stage" column="stage"/>
+    <result property="message" column="message"/>
+    <result property="gatewayStartedAt" column="gateway_started_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="ModelAuthMap" type="com.clawbotforall.instance.InstanceModelAuthEntity">
+    <id property="instanceId" column="instance_id"/>
+    <result property="status" column="status"/>
+    <result property="message" column="message"/>
+    <result property="outputSnippet" column="output_snippet"/>
+    <result property="authUrl" column="auth_url"/>
+    <result property="promptLabel" column="prompt_label"/>
+    <result property="needsInput" column="needs_input"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="WechatBindingMap" type="com.clawbotforall.instance.InstanceWechatBindingEntity">
+    <id property="instanceId" column="instance_id"/>
+    <result property="status" column="status"/>
+    <result property="qrMode" column="qr_mode"/>
+    <result property="qrPayload" column="qr_payload"/>
+    <result property="qrLink" column="qr_link"/>
+    <result property="outputSnippet" column="output_snippet"/>
+    <result property="runtimeReady" column="runtime_ready"/>
+    <result property="runtimeStatus" column="runtime_status"/>
+    <result property="runtimeMessage" column="runtime_message"/>
+    <result property="runtimeUpdatedAt" column="runtime_updated_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <result property="qrExpiresAt" column="qr_expires_at"/>
+  </resultMap>
+
+  <resultMap id="WechatAccountMap" type="com.clawbotforall.instance.WechatPairedAccountEntity">
+    <id property="accountId" column="account_id"/>
+    <result property="phone" column="phone"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="wechatUserId" column="wechat_user_id"/>
+    <result property="remark" column="remark"/>
+    <result property="baseUrl" column="base_url"/>
+    <result property="savedAt" column="saved_at"/>
+    <result property="boundAt" column="bound_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="InstanceIdFilter">
+    <foreach collection="instanceIds" item="instanceId" open="(" separator="," close=")">
+      #{instanceId}
+    </foreach>
+  </sql>
+
+  <select id="listAll" resultMap="InstanceMap">
+    SELECT *
+    FROM instances
+    ORDER BY created_at DESC
+  </select>
+
+  <select id="listRuntimeActive" resultMap="InstanceMap">
+    SELECT *
+    FROM instances
+    WHERE status NOT IN ('stopped', 'exited', 'dead')
+    ORDER BY updated_at DESC
+  </select>
+
+  <select id="findById" resultMap="InstanceMap">
+    SELECT *
+    FROM instances
+    WHERE id = #{id}
+    LIMIT 1
+  </select>
+
+  <select id="listModelsByInstanceIds" resultMap="InstanceModelMap">
+    SELECT *
+    FROM instance_models
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+    ORDER BY instance_id ASC, sort_order ASC
+  </select>
+
+  <select id="listProvisioningByInstanceIds" resultMap="ProvisioningMap">
+    SELECT *
+    FROM instance_provisioning
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+  </select>
+
+  <select id="listModelAuthByInstanceIds" resultMap="ModelAuthMap">
+    SELECT *
+    FROM instance_model_auth
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+  </select>
+
+  <select id="listWechatBindingByInstanceIds" resultMap="WechatBindingMap">
+    SELECT *
+    FROM instance_wechat_binding
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+  </select>
+
+  <select id="listWechatAccountsByInstanceIds" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+    ORDER BY instance_id ASC, bound_at DESC, account_id ASC
+  </select>
+
+  <select id="listAllWechatAccounts" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    ORDER BY bound_at DESC, account_id ASC
+  </select>
+
+  <select id="findWechatAccountByPhone" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    WHERE phone = #{phone}
+    LIMIT 1
+  </select>
+
+  <select id="findWechatAccountByAccountId" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    WHERE account_id = #{accountId}
+    LIMIT 1
+  </select>
+
+  <select id="countWechatAccountsByInstanceId" resultType="int">
+    SELECT COUNT(*)
+    FROM wechat_paired_accounts
+    WHERE instance_id = #{instanceId}
+  </select>
+</mapper>

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.instance.InstanceMutationMapper">
+  <select id="countAll" resultType="int">
+    SELECT COUNT(*)
+    FROM instances
+  </select>
+
+  <select id="listUsedPorts" resultType="int">
+    SELECT port
+    FROM instances
+  </select>
+
+  <insert id="insertInstance" parameterType="com.clawbotforall.instance.InstanceEntity">
+    INSERT INTO instances
+      (id, name, slug, status, port, dashboard_url, container_name, gateway_token,
+       plugins_allow, plugins_entries, created_at, updated_at)
+    VALUES
+      (#{id}, #{name}, #{slug}, #{status}, #{port}, #{dashboardUrl}, #{containerName}, #{gatewayToken},
+       #{pluginsAllow}, #{pluginsEntries}, #{createdAt}, #{updatedAt})
+  </insert>
+
+  <insert id="insertModel" parameterType="com.clawbotforall.instance.InstanceModelEntity">
+    INSERT INTO instance_models
+      (instance_id, sort_order, preset_id, provider_key, provider_id, model_id, api_mode, auth_type,
+       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra)
+    VALUES
+      (#{instanceId}, #{sortOrder}, #{presetId}, #{providerKey}, #{providerId}, #{modelId}, #{apiMode}, #{authType},
+       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra})
+  </insert>
+
+  <delete id="deleteModelsForInstance">
+    DELETE FROM instance_models
+    WHERE instance_id = #{instanceId}
+  </delete>
+
+  <insert id="insertProvisioning" parameterType="com.clawbotforall.instance.InstanceProvisioningEntity">
+    INSERT INTO instance_provisioning
+      (instance_id, status, percent, stage, message, gateway_started_at, updated_at)
+    VALUES
+      (#{instanceId}, #{status}, #{percent}, #{stage}, #{message}, #{gatewayStartedAt}, #{updatedAt})
+  </insert>
+
+  <insert id="insertModelAuth" parameterType="com.clawbotforall.instance.InstanceModelAuthEntity">
+    INSERT INTO instance_model_auth
+      (instance_id, status, message, output_snippet, auth_url, prompt_label, needs_input, updated_at)
+    VALUES
+      (#{instanceId}, #{status}, #{message}, #{outputSnippet}, #{authUrl}, #{promptLabel}, #{needsInput}, #{updatedAt})
+  </insert>
+
+  <update id="updateModelAuth" parameterType="com.clawbotforall.instance.InstanceModelAuthEntity">
+    UPDATE instance_model_auth
+    SET status = #{status},
+        message = #{message},
+        output_snippet = #{outputSnippet},
+        auth_url = #{authUrl},
+        prompt_label = #{promptLabel},
+        needs_input = #{needsInput},
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+  </update>
+
+  <insert id="insertWechatBinding" parameterType="com.clawbotforall.instance.InstanceWechatBindingEntity">
+    INSERT INTO instance_wechat_binding
+      (instance_id, status, qr_mode, qr_payload, qr_link, output_snippet,
+       runtime_ready, runtime_status, runtime_message, runtime_updated_at, updated_at, qr_expires_at)
+    VALUES
+      (#{instanceId}, #{status}, #{qrMode}, #{qrPayload}, #{qrLink}, #{outputSnippet},
+       #{runtimeReady}, #{runtimeStatus}, #{runtimeMessage}, #{runtimeUpdatedAt}, #{updatedAt}, #{qrExpiresAt})
+  </insert>
+
+  <update id="updateWechatBinding" parameterType="com.clawbotforall.instance.InstanceWechatBindingEntity">
+    UPDATE instance_wechat_binding
+    SET status = #{status},
+        qr_mode = #{qrMode},
+        qr_payload = #{qrPayload},
+        qr_link = #{qrLink},
+        output_snippet = #{outputSnippet},
+        runtime_ready = #{runtimeReady},
+        runtime_status = #{runtimeStatus},
+        runtime_message = #{runtimeMessage},
+        runtime_updated_at = #{runtimeUpdatedAt},
+        updated_at = #{updatedAt},
+        qr_expires_at = #{qrExpiresAt}
+    WHERE instance_id = #{instanceId}
+  </update>
+
+  <delete id="deleteWechatAccountsForInstance">
+    DELETE FROM wechat_paired_accounts
+    WHERE instance_id = #{instanceId}
+  </delete>
+
+  <insert id="insertWechatAccount" parameterType="com.clawbotforall.instance.WechatPairedAccountEntity">
+    INSERT INTO wechat_paired_accounts
+      (account_id, phone, instance_id, wechat_user_id, remark, base_url, saved_at, bound_at, updated_at)
+    VALUES
+      (#{accountId}, #{phone}, #{instanceId}, #{wechatUserId}, #{remark}, #{baseUrl}, #{savedAt}, #{boundAt}, #{updatedAt})
+  </insert>
+
+  <update id="updateWechatAccountRemark">
+    UPDATE wechat_paired_accounts
+    SET remark = #{remark},
+        updated_at = #{updatedAt}
+    WHERE account_id = #{accountId}
+  </update>
+
+  <update id="updateWechatAccountMetadata" parameterType="com.clawbotforall.instance.WechatPairedAccountEntity">
+    UPDATE wechat_paired_accounts
+    SET wechat_user_id = #{wechatUserId},
+        base_url = #{baseUrl},
+        saved_at = #{savedAt},
+        updated_at = #{updatedAt}
+    WHERE account_id = #{accountId}
+  </update>
+
+  <delete id="deleteWechatAccount">
+    DELETE FROM wechat_paired_accounts
+    WHERE instance_id = #{instanceId}
+      AND account_id = #{accountId}
+  </delete>
+
+  <update id="updateProvisioning" parameterType="com.clawbotforall.instance.InstanceProvisioningEntity">
+    UPDATE instance_provisioning
+    SET status = #{status},
+        percent = #{percent},
+        stage = #{stage},
+        message = #{message},
+        gateway_started_at = #{gatewayStartedAt},
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+  </update>
+
+  <update id="updateInstanceStatus">
+    UPDATE instances
+    SET status = #{status},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+</mapper>

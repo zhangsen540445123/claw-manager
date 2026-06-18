@@ -1,0 +1,195 @@
+export interface PublicAdmin {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin";
+  mustChangePassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicModelPreset {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  isConfigured: boolean;
+  providerKey: string;
+  providerId: string;
+  modelId: string;
+  apiMode: string;
+  authType: string;
+  authProviderId: string;
+  authMethodId: string;
+  baseUrl: string;
+  hasBaseUrl: boolean;
+  hasApiKey: boolean;
+  createdAt: string;
+}
+
+export interface ModelProviderDefinition {
+  key: string;
+  label: string;
+  providerId: string;
+  authType: string;
+  authProviderId: string;
+  authMethodId: string;
+  apiMode: string;
+  defaultModelId: string;
+  defaultBaseUrl: string;
+  supportsInteractiveAuth: boolean;
+  forceRemoteOAuth: boolean;
+  fields: ModelProviderField[];
+}
+
+export interface ModelProviderFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface ModelProviderField {
+  name: string;
+  label: string;
+  type: "text" | "password" | "select" | string;
+  required?: boolean;
+  placeholder?: string;
+  options?: ModelProviderFieldOption[];
+}
+
+export interface PublicInstanceProvisioning {
+  status: string;
+  percent: number;
+  stage: string;
+  message: string;
+  gatewayStartedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface PublicInstanceModel {
+  presetId: string;
+  providerKey: string;
+  providerId: string;
+  modelId: string;
+  apiMode: string;
+  authType: string;
+  authProviderId: string;
+  authMethodId: string;
+  baseUrl: string;
+  apiKey: string;
+  extra: Record<string, unknown>;
+}
+
+export interface PublicInstanceModelAuth {
+  status: string;
+  updatedAt?: string | null;
+  message: string;
+  outputSnippet: string;
+  authUrl: string;
+  promptLabel: string;
+  needsInput: boolean;
+}
+
+export interface PublicWechatPairedAccount {
+  accountId: string;
+  phone: string;
+  wechatUserId: string;
+  remark: string;
+  baseUrl: string;
+  savedAt?: string | null;
+  boundAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface PublicWechatBinding {
+  status: string;
+  updatedAt?: string | null;
+  qrExpiresAt?: string | null;
+  qrExpired: boolean;
+  qrMode?: string | null;
+  qrPayload: string;
+  qrLink: string;
+  outputSnippet: string;
+  pairedAccounts: PublicWechatPairedAccount[];
+  runtimeReady: boolean;
+  runtimeStatus: string;
+  runtimeMessage: string;
+  runtimeUpdatedAt?: string | null;
+}
+
+export interface PublicInstance {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  port: number;
+  dashboardUrl: string;
+  containerName: string;
+  gatewayToken: string;
+  createdAt: string;
+  updatedAt: string;
+  provisioning: PublicInstanceProvisioning;
+  model: PublicInstanceModel | null;
+  models: PublicInstanceModel[];
+  modelAuth: PublicInstanceModelAuth;
+  plugins: Record<string, unknown>;
+  wechatBinding: PublicWechatBinding;
+}
+
+export interface PublicWechatBindLink {
+  token: string;
+  mode: "new" | "existing" | string;
+  status: string;
+  phone: string;
+  instanceId: string;
+  instanceName: string;
+  qrMode?: string | null;
+  qrPayload: string;
+  qrLink: string;
+  qrExpiresAt?: string | null;
+  qrExpired: boolean;
+  message: string;
+  bindLink: string;
+}
+
+export interface WechatBindingLookup {
+  accountId: string;
+  phone: string;
+  instanceId: string;
+  wechatUserId: string;
+  remark: string;
+  baseUrl: string;
+  savedAt: string;
+  boundAt: string;
+  updatedAt: string;
+}
+
+export interface ModelPresetUsageInstance {
+  id: string;
+  name: string;
+  status: string;
+  modelIndexes: number[];
+}
+
+export interface ModelPresetUsage {
+  instances: ModelPresetUsageInstance[];
+}
+
+export interface ModelPresetSyncResult {
+  requested: boolean;
+  affectedInstances: number;
+  updatedInstanceIds: string[];
+  restartedInstanceIds: string[];
+}
+
+export interface InstanceStats {
+  cpuPercent?: number;
+  memoryUsageBytes?: number;
+  memoryLimitBytes?: number;
+  memoryPercent?: number;
+}
+
+export interface AppEvent<T = Record<string, unknown>> {
+  type: string;
+  traceId: string;
+  occurredAt: string;
+  payload: T;
+}

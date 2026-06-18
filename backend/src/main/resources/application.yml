@@ -1,0 +1,63 @@
+server:
+  port: ${API_PORT:8080}
+
+spring:
+  application:
+    name: claw-manager-api
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:13306}/${MYSQL_DATABASE:clawbot}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:clawbot}
+    password: ${MYSQL_PASSWORD:clawbot}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis:
+  mapper-locations: classpath*:mappers/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+clawbot:
+  paths:
+    data-dir: ${DATA_DIR:data}
+  admin:
+    email: ${ADMIN_EMAIL:}
+    name: ${ADMIN_NAME:平台管理员}
+    password: ${ADMIN_PASSWORD:}
+  security:
+    session-cookie-name: ${SESSION_COOKIE_NAME:clawbot_session}
+    session-ttl-days: ${SESSION_TTL_DAYS:14}
+  runtime:
+    runner-image: ${OPENCLAW_RUNNER_IMAGE:ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest}
+    runner-pull-timeout-ms: ${OPENCLAW_RUNNER_PULL_TIMEOUT_MS:600000}
+    runner-cpus: ${OPENCLAW_RUNNER_CPUS:1.0}
+    runner-memory: ${OPENCLAW_RUNNER_MEMORY:1g}
+    wechat-bind-timeout-ms: ${OPENCLAW_WECHAT_BIND_TIMEOUT_MS:600000}
+    wechat-qr-ttl-ms: ${OPENCLAW_WECHAT_QR_TTL_MS:120000}
+    gateway-ready-timeout-ms: ${OPENCLAW_GATEWAY_READY_TIMEOUT_MS:1800000}
+    gateway-ready-check-interval-ms: ${OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS:10000}
+    gateway-ready-probe-timeout-ms: ${OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS:5000}
+    model-context-window: ${OPENCLAW_MODEL_CONTEXT_WINDOW:1000000}
+    model-max-tokens: ${OPENCLAW_MODEL_MAX_TOKENS:128000}
+    control-ui-allowed-origins: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:http://localhost:4300,http://127.0.0.1:4300,http://localhost:14300,http://127.0.0.1:14300}

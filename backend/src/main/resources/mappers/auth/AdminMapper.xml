@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.auth.AdminMapper">
+  <resultMap id="AdminMap" type="com.clawbotforall.auth.AdminEntity">
+    <id property="id" column="id"/>
+    <result property="email" column="email"/>
+    <result property="name" column="name"/>
+    <result property="mustChangePassword" column="must_change_password"/>
+    <result property="passwordHash" column="password_hash"/>
+    <result property="passwordSalt" column="password_salt"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="countAll" resultType="long">
+    SELECT COUNT(*) FROM admins
+  </select>
+
+  <select id="findByEmail" resultMap="AdminMap">
+    SELECT *
+    FROM admins
+    WHERE email = #{email}
+    LIMIT 1
+  </select>
+
+  <select id="findById" resultMap="AdminMap">
+    SELECT *
+    FROM admins
+    WHERE id = #{id}
+    LIMIT 1
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.auth.AdminEntity">
+    INSERT INTO admins
+      (id, email, name, must_change_password, password_hash, password_salt, created_at, updated_at)
+    VALUES
+      (#{id}, #{email}, #{name}, #{mustChangePassword}, #{passwordHash}, #{passwordSalt}, #{createdAt}, #{updatedAt})
+  </insert>
+
+  <update id="updateProfile">
+    UPDATE admins
+    SET name = #{name},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+
+  <update id="updatePassword">
+    UPDATE admins
+    SET password_hash = #{passwordHash},
+        password_salt = #{passwordSalt},
+        must_change_password = #{mustChangePassword},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+</mapper>

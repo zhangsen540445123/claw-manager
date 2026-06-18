@@ -1,0 +1,16 @@
+{
+  "name": "claw-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Spring Boot and Vue control plane for multi-tenant OpenClaw instances.",
+  "scripts": {
+    "backend:test": "cd backend && mvn test",
+    "frontend:build": "cd frontend && npm run build",
+    "compose:config": "docker compose config --quiet",
+    "check": "npm run backend:test && npm run frontend:build && npm run compose:config"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

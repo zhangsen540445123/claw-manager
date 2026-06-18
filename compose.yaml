@@ -1,0 +1,90 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: claw-manager-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: clawbot_root
+      MYSQL_DATABASE: clawbot
+      MYSQL_USER: clawbot
+      MYSQL_PASSWORD: clawbot
+    ports:
+      - "${MYSQL_HOST_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uclawbot -pclawbot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: claw-manager-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build:
+      context: ./backend
+    image: ${CLAW_MANAGER_API_IMAGE:-ghcr.io/zhangsen540445123/claw-manager-api:latest}
+    container_name: claw-manager-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_HOST_PORT:-8080}:8080"
+    environment:
+      API_PORT: 8080
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: clawbot
+      MYSQL_USER: clawbot
+      MYSQL_PASSWORD: clawbot
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-14}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_NAME: ${ADMIN_NAME:-平台管理员}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      OPENCLAW_RUNNER_IMAGE: ${OPENCLAW_RUNNER_IMAGE:-ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest}
+      OPENCLAW_RUNNER_PULL_TIMEOUT_MS: ${OPENCLAW_RUNNER_PULL_TIMEOUT_MS:-600000}
+      OPENCLAW_RUNNER_CPUS: "${OPENCLAW_RUNNER_CPUS:-1.0}"
+      OPENCLAW_RUNNER_MEMORY: ${OPENCLAW_RUNNER_MEMORY:-1g}
+      OPENCLAW_WECHAT_BIND_TIMEOUT_MS: ${OPENCLAW_WECHAT_BIND_TIMEOUT_MS:-600000}
+      OPENCLAW_GATEWAY_READY_TIMEOUT_MS: ${OPENCLAW_GATEWAY_READY_TIMEOUT_MS:-1800000}
+      OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS: ${OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS:-10000}
+      OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS: ${OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS:-5000}
+      OPENCLAW_MODEL_CONTEXT_WINDOW: ${OPENCLAW_MODEL_CONTEXT_WINDOW:-1000000}
+      OPENCLAW_MODEL_MAX_TOKENS: ${OPENCLAW_MODEL_MAX_TOKENS:-128000}
+      OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:-http://localhost:4300,http://127.0.0.1:4300,http://localhost:14300,http://127.0.0.1:14300}
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  web:
+    build:
+      context: ./frontend
+    image: ${CLAW_MANAGER_WEB_IMAGE:-ghcr.io/zhangsen540445123/claw-manager-web:latest}
+    container_name: claw-manager-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "${WEB_HOST_PORT:-4300}:80"
+
+volumes:
+  mysql-data:
+  redis-data:

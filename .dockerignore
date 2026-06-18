@@ -1,0 +1,11 @@
+.git/
+data/
+node_modules/
+**/node_modules/
+backend/target/
+frontend/dist/
+.idea/
+.env
+*.bat
+.DS_Store
+*.log

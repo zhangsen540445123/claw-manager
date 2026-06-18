@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.wechat.WechatBindLinkMapper">
+  <resultMap id="WechatBindLinkMap" type="com.clawbotforall.wechat.WechatBindLinkEntity">
+    <id property="token" column="token"/>
+    <result property="mode" column="mode"/>
+    <result property="phone" column="phone"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="expectedAccountId" column="expected_account_id"/>
+    <result property="snapshotAccountIds" column="snapshot_account_ids"/>
+    <result property="status" column="status"/>
+    <result property="qrMode" column="qr_mode"/>
+    <result property="qrPayload" column="qr_payload"/>
+    <result property="qrLink" column="qr_link"/>
+    <result property="qrExpiresAt" column="qr_expires_at"/>
+    <result property="errorMessage" column="error_message"/>
+    <result property="createdByAdminId" column="created_by_admin_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="expiresAt" column="expires_at"/>
+    <result property="completedAt" column="completed_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="findByToken" resultMap="WechatBindLinkMap">
+    SELECT *
+    FROM wechat_bind_links
+    WHERE token = #{token}
+    LIMIT 1
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
+    INSERT INTO wechat_bind_links
+      (token, mode, phone, instance_id, expected_account_id, snapshot_account_ids, status,
+       qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id,
+       created_at, expires_at, completed_at, updated_at)
+    VALUES
+      (#{token}, #{mode}, #{phone}, #{instanceId}, #{expectedAccountId}, #{snapshotAccountIds}, #{status},
+       #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{createdByAdminId},
+       #{createdAt}, #{expiresAt}, #{completedAt}, #{updatedAt})
+  </insert>
+
+  <update id="update" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
+    UPDATE wechat_bind_links
+    SET mode = #{mode},
+        phone = #{phone},
+        instance_id = #{instanceId},
+        expected_account_id = #{expectedAccountId},
+        snapshot_account_ids = #{snapshotAccountIds},
+        status = #{status},
+        qr_mode = #{qrMode},
+        qr_payload = #{qrPayload},
+        qr_link = #{qrLink},
+        qr_expires_at = #{qrExpiresAt},
+        error_message = #{errorMessage},
+        expires_at = #{expiresAt},
+        completed_at = #{completedAt},
+        updated_at = #{updatedAt}
+    WHERE token = #{token}
+  </update>
+
+  <delete id="deleteByPhoneOrAccountId">
+    DELETE FROM wechat_bind_links
+    WHERE phone = #{phone}
+       OR expected_account_id = #{accountId}
+  </delete>
+
+  <delete id="deleteByInstanceId">
+    DELETE FROM wechat_bind_links
+    WHERE instance_id = #{instanceId}
+  </delete>
+</mapper>

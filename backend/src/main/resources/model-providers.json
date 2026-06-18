@@ -1,0 +1,696 @@
+[
+  {
+    "key": "openai-api",
+    "label": "OpenAI API Key",
+    "providerId": "openai",
+    "authType": "api_key",
+    "authProviderId": "openai",
+    "authMethodId": "api-key",
+    "apiMode": "openai-responses",
+    "defaultModelId": "gpt-5.4",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gpt-5.4"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "留空使用官方默认地址"
+      }
+    ]
+  },
+  {
+    "key": "openai-codex",
+    "label": "OpenAI Codex OAuth",
+    "providerId": "openai-codex",
+    "authType": "oauth_redirect_paste",
+    "authProviderId": "openai-codex",
+    "authMethodId": "oauth",
+    "apiMode": "openai-codex-responses",
+    "defaultModelId": "gpt-5.4",
+    "defaultBaseUrl": "https://chatgpt.com/backend-api",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": true,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gpt-5.4"
+      }
+    ]
+  },
+  {
+    "key": "google-api",
+    "label": "Google Gemini API Key",
+    "providerId": "google",
+    "authType": "api_key",
+    "authProviderId": "google",
+    "authMethodId": "api-key",
+    "apiMode": "google-generative-ai",
+    "defaultModelId": "gemini-3.1-pro-preview",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gemini-3.1-pro-preview"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "AIza..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "留空使用官方默认地址"
+      }
+    ]
+  },
+  {
+    "key": "google-gemini-cli",
+    "label": "Gemini CLI OAuth",
+    "providerId": "google-gemini-cli",
+    "authType": "oauth_redirect_paste",
+    "authProviderId": "google-gemini-cli",
+    "authMethodId": "oauth",
+    "apiMode": "google-gemini-cli",
+    "defaultModelId": "gemini-3.1-pro-preview",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": true,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gemini-3.1-pro-preview"
+      }
+    ]
+  },
+  {
+    "key": "anthropic-api",
+    "label": "Anthropic API Key",
+    "providerId": "anthropic",
+    "authType": "api_key",
+    "authProviderId": "anthropic",
+    "authMethodId": "api-key",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "claude-sonnet-4-6",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "claude-sonnet-4-6"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-ant-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "留空使用官方默认地址"
+      }
+    ]
+  },
+  {
+    "key": "anthropic-setup-token",
+    "label": "Anthropic setup-token",
+    "providerId": "anthropic",
+    "authType": "external_token_paste",
+    "authProviderId": "anthropic",
+    "authMethodId": "setup-token",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "claude-sonnet-4-6",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "claude-sonnet-4-6"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "留空使用官方默认地址"
+      }
+    ]
+  },
+  {
+    "key": "qwen-oauth",
+    "label": "Qwen OAuth",
+    "providerId": "qwen-portal",
+    "authType": "device_code",
+    "authProviderId": "qwen-portal",
+    "authMethodId": "device",
+    "apiMode": "openai-completions",
+    "defaultModelId": "coder-model",
+    "defaultBaseUrl": "https://portal.qwen.ai/v1",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "select",
+        "required": true,
+        "options": [
+          {
+            "value": "coder-model",
+            "label": "coder-model"
+          },
+          {
+            "value": "vision-model",
+            "label": "vision-model"
+          }
+        ]
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://portal.qwen.ai/v1"
+      }
+    ]
+  },
+  {
+    "key": "minimax-global-api",
+    "label": "MiniMax API Key (Global)",
+    "providerId": "minimax",
+    "authType": "api_key",
+    "authProviderId": "minimax",
+    "authMethodId": "api-global",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "MiniMax-M2.7",
+    "defaultBaseUrl": "https://api.minimax.io/anthropic",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "MiniMax-M2.7"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-api-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.minimax.io/anthropic"
+      }
+    ]
+  },
+  {
+    "key": "minimax-cn-api",
+    "label": "MiniMax API Key (CN)",
+    "providerId": "minimax",
+    "authType": "api_key",
+    "authProviderId": "minimax",
+    "authMethodId": "api-cn",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "MiniMax-M2.7",
+    "defaultBaseUrl": "https://api.minimaxi.com/anthropic",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "MiniMax-M2.7"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-api-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.minimaxi.com/anthropic"
+      }
+    ]
+  },
+  {
+    "key": "minimax-global-oauth",
+    "label": "MiniMax OAuth (Global)",
+    "providerId": "minimax-portal",
+    "authType": "device_code",
+    "authProviderId": "minimax-portal",
+    "authMethodId": "oauth",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "MiniMax-M2.7",
+    "defaultBaseUrl": "https://api.minimax.io/anthropic",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "MiniMax-M2.7"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.minimax.io/anthropic"
+      }
+    ]
+  },
+  {
+    "key": "minimax-cn-oauth",
+    "label": "MiniMax OAuth (CN)",
+    "providerId": "minimax-portal",
+    "authType": "device_code",
+    "authProviderId": "minimax-portal",
+    "authMethodId": "oauth-cn",
+    "apiMode": "anthropic-messages",
+    "defaultModelId": "MiniMax-M2.7",
+    "defaultBaseUrl": "https://api.minimaxi.com/anthropic",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "MiniMax-M2.7"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.minimaxi.com/anthropic"
+      }
+    ]
+  },
+  {
+    "key": "chutes-api",
+    "label": "Chutes API Key",
+    "providerId": "chutes",
+    "authType": "api_key",
+    "authProviderId": "chutes",
+    "authMethodId": "api-key",
+    "apiMode": "openai-completions",
+    "defaultModelId": "zai-org/GLM-4.7-TEE",
+    "defaultBaseUrl": "https://llm.chutes.ai/v1",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "zai-org/GLM-4.7-TEE"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "留空不可用"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://llm.chutes.ai/v1"
+      }
+    ]
+  },
+  {
+    "key": "chutes-oauth",
+    "label": "Chutes OAuth",
+    "providerId": "chutes",
+    "authType": "oauth_redirect_paste",
+    "authProviderId": "chutes",
+    "authMethodId": "oauth",
+    "apiMode": "openai-completions",
+    "defaultModelId": "zai-org/GLM-4.7-TEE",
+    "defaultBaseUrl": "https://llm.chutes.ai/v1",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": true,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "zai-org/GLM-4.7-TEE"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://llm.chutes.ai/v1"
+      }
+    ]
+  },
+  {
+    "key": "github-copilot",
+    "label": "GitHub Copilot",
+    "providerId": "github-copilot",
+    "authType": "device_code",
+    "authProviderId": "github-copilot",
+    "authMethodId": "device",
+    "apiMode": "openai-responses",
+    "defaultModelId": "gpt-4o",
+    "defaultBaseUrl": "https://api.individual.githubcopilot.com",
+    "supportsInteractiveAuth": true,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gpt-4o"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.individual.githubcopilot.com"
+      }
+    ]
+  },
+  {
+    "key": "moonshot-api",
+    "label": "Moonshot API Key (.ai)",
+    "providerId": "moonshot",
+    "authType": "api_key",
+    "authProviderId": "moonshot",
+    "authMethodId": "api-key",
+    "apiMode": "openai-completions",
+    "defaultModelId": "kimi-k2.5",
+    "defaultBaseUrl": "https://api.moonshot.ai/v1",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "kimi-k2.5"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.moonshot.ai/v1"
+      }
+    ]
+  },
+  {
+    "key": "moonshot-api-cn",
+    "label": "Moonshot API Key (.cn)",
+    "providerId": "moonshot",
+    "authType": "api_key",
+    "authProviderId": "moonshot",
+    "authMethodId": "api-key-cn",
+    "apiMode": "openai-completions",
+    "defaultModelId": "kimi-k2.5",
+    "defaultBaseUrl": "https://api.moonshot.cn/v1",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "kimi-k2.5"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "sk-..."
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.moonshot.cn/v1"
+      }
+    ]
+  },
+  {
+    "key": "zai-api",
+    "label": "Z.AI API Key",
+    "providerId": "zai",
+    "authType": "api_key",
+    "authProviderId": "zai",
+    "authMethodId": "api-key",
+    "apiMode": "openai-completions",
+    "defaultModelId": "glm-5",
+    "defaultBaseUrl": "https://api.z.ai/api/paas/v4",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "glm-5"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "留空不可用"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.z.ai/api/paas/v4"
+      }
+    ]
+  },
+  {
+    "key": "zai-coding-global",
+    "label": "Z.AI Coding Plan Global",
+    "providerId": "zai",
+    "authType": "api_key",
+    "authProviderId": "zai",
+    "authMethodId": "coding-global",
+    "apiMode": "openai-completions",
+    "defaultModelId": "glm-5",
+    "defaultBaseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "glm-5"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "留空不可用"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://api.z.ai/api/coding/paas/v4"
+      }
+    ]
+  },
+  {
+    "key": "zai-coding-cn",
+    "label": "Z.AI Coding Plan CN",
+    "providerId": "zai",
+    "authType": "api_key",
+    "authProviderId": "zai",
+    "authMethodId": "coding-cn",
+    "apiMode": "openai-completions",
+    "defaultModelId": "glm-5",
+    "defaultBaseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "glm-5"
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": true,
+        "placeholder": "留空不可用"
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://open.bigmodel.cn/api/coding/paas/v4"
+      }
+    ]
+  },
+  {
+    "key": "custom-provider",
+    "label": "自定义 Provider",
+    "providerId": "",
+    "authType": "custom_gateway",
+    "authProviderId": "",
+    "authMethodId": "",
+    "apiMode": "openai-completions",
+    "defaultModelId": "",
+    "defaultBaseUrl": "",
+    "supportsInteractiveAuth": false,
+    "forceRemoteOAuth": false,
+    "fields": [
+      {
+        "name": "providerId",
+        "label": "Provider ID",
+        "type": "text",
+        "required": true,
+        "placeholder": "my-provider"
+      },
+      {
+        "name": "modelId",
+        "label": "Model",
+        "type": "text",
+        "required": true,
+        "placeholder": "gpt-4.1"
+      },
+      {
+        "name": "apiMode",
+        "label": "API Mode",
+        "type": "select",
+        "required": true,
+        "options": [
+          {
+            "value": "openai-responses",
+            "label": "openai-responses"
+          },
+          {
+            "value": "openai-completions",
+            "label": "openai-completions"
+          },
+          {
+            "value": "anthropic-messages",
+            "label": "anthropic-messages"
+          },
+          {
+            "value": "google-generative-ai",
+            "label": "google-generative-ai"
+          },
+          {
+            "value": "google-gemini-cli",
+            "label": "google-gemini-cli"
+          }
+        ]
+      },
+      {
+        "name": "baseUrl",
+        "label": "Base URL",
+        "type": "text",
+        "required": false,
+        "placeholder": "https://..."
+      },
+      {
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "password",
+        "required": false,
+        "placeholder": "留空表示不写入 apiKey"
+      }
+    ]
+  }
+]

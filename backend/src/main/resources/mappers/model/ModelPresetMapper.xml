@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.model.ModelPresetMapper">
+  <resultMap id="ModelPresetMap" type="com.clawbotforall.model.ModelPresetEntity">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="isDefault" column="is_default"/>
+    <result property="providerKey" column="provider_key"/>
+    <result property="providerId" column="provider_id"/>
+    <result property="modelId" column="model_id"/>
+    <result property="apiMode" column="api_mode"/>
+    <result property="authType" column="auth_type"/>
+    <result property="authProviderId" column="auth_provider_id"/>
+    <result property="authMethodId" column="auth_method_id"/>
+    <result property="baseUrl" column="base_url"/>
+    <result property="apiKey" column="api_key"/>
+    <result property="providerConfig" column="provider_config"/>
+    <result property="extra" column="extra"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <select id="listAll" resultMap="ModelPresetMap">
+    SELECT *
+    FROM model_presets
+    ORDER BY is_default DESC, created_at DESC
+  </select>
+
+  <select id="countAll" resultType="int">
+    SELECT COUNT(*)
+    FROM model_presets
+  </select>
+
+  <select id="countDefault" resultType="int">
+    SELECT COUNT(*)
+    FROM model_presets
+    WHERE is_default = 1
+  </select>
+
+  <select id="findById" resultMap="ModelPresetMap">
+    SELECT *
+    FROM model_presets
+    WHERE id = #{id}
+    LIMIT 1
+  </select>
+
+  <select id="findDefaultOrLatest" resultMap="ModelPresetMap">
+    SELECT *
+    FROM model_presets
+    ORDER BY is_default DESC, created_at DESC
+    LIMIT 1
+  </select>
+
+  <select id="findFirstByCreatedAtDesc" resultMap="ModelPresetMap">
+    SELECT *
+    FROM model_presets
+    ORDER BY created_at DESC
+    LIMIT 1
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.model.ModelPresetEntity">
+    INSERT INTO model_presets
+      (id, name, is_default, provider_key, provider_id, model_id, api_mode, auth_type,
+       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra, created_at)
+    VALUES
+      (#{id}, #{name}, #{isDefault}, #{providerKey}, #{providerId}, #{modelId}, #{apiMode}, #{authType},
+       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra}, #{createdAt})
+  </insert>
+
+  <update id="update" parameterType="com.clawbotforall.model.ModelPresetEntity">
+    UPDATE model_presets
+    SET name = #{name},
+        is_default = #{isDefault},
+        provider_key = #{providerKey},
+        provider_id = #{providerId},
+        model_id = #{modelId},
+        api_mode = #{apiMode},
+        auth_type = #{authType},
+        auth_provider_id = #{authProviderId},
+        auth_method_id = #{authMethodId},
+        base_url = #{baseUrl},
+        api_key = #{apiKey},
+        provider_config = #{providerConfig},
+        extra = #{extra}
+    WHERE id = #{id}
+  </update>
+
+  <update id="clearDefault">
+    UPDATE model_presets
+    SET is_default = 0
+  </update>
+
+  <update id="setDefault">
+    UPDATE model_presets
+    SET is_default = 1
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM model_presets
+    WHERE id = #{id}
+  </delete>
+</mapper>
