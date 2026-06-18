@@ -294,8 +294,8 @@ public class InstanceController {
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = instanceCommandService.requireInstance(instanceId);
-    wechatAccountSyncService.deleteAllAccounts(instance);
-    boolean gatewayRestarted = restartGatewayIfRunning(instance);
+    boolean deletedAccounts = wechatAccountSyncService.deleteAllAccounts(instance);
+    boolean gatewayRestarted = deletedAccounts && restartGatewayIfRunning(instance);
     PublicInstance publicInstance = publicInstance(instanceId, request);
     eventPublisher.publishInstanceUpdated(publicInstance);
     return Map.of("instance", publicInstance, "gatewayRestarted", gatewayRestarted);

@@ -135,6 +135,31 @@ class WechatAccountSyncServiceTest {
     assertThat(bindingCaptor.getAllValues().getLast().getQrPayload()).isEmpty();
   }
 
+  @Test
+  void deleteAllAccountsReportsWhetherPersistedAccountsExisted() throws Exception {
+    InstanceEntity instance = instanceWithStateAccount();
+    WechatPairedAccountEntity existing = new WechatPairedAccountEntity();
+    existing.setAccountId("wx_1");
+    existing.setInstanceId("inst_1");
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(existing));
+
+    assertThat(service.deleteAllAccounts(instance)).isTrue();
+
+    verify(mutationMapper).deleteWechatAccountsForInstance("inst_1");
+    verify(bindLinkMapper).deleteByInstanceId("inst_1");
+  }
+
+  @Test
+  void deleteAllAccountsReportsFalseWhenNoPersistedAccountExists() throws Exception {
+    InstanceEntity instance = instanceWithStateAccount();
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of());
+
+    assertThat(service.deleteAllAccounts(instance)).isFalse();
+
+    verify(mutationMapper).deleteWechatAccountsForInstance("inst_1");
+    verify(bindLinkMapper).deleteByInstanceId("inst_1");
+  }
+
   private InstanceEntity instanceWithStateAccount() throws Exception {
     Path homeDir = tempDir.resolve("home");
     Path stateDir = homeDir.resolve(".openclaw").resolve("openclaw-weixin");

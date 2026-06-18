@@ -152,12 +152,14 @@ public class WechatAccountSyncService {
    * 删除实例下全部绑定账号及其状态文件。
    */
   @Transactional
-  public void deleteAllAccounts(InstanceEntity instance) {
+  public boolean deleteAllAccounts(InstanceEntity instance) {
+    boolean hadAccounts = !aggregateMapper.listWechatAccountsByInstanceIds(List.of(instance.getId())).isEmpty();
     removeStateDir(fileService.paths(instance.getId()));
     mutationMapper.deleteWechatAccountsForInstance(instance.getId());
     bindLinkMapper.deleteByInstanceId(instance.getId());
     InstanceWechatBindingEntity binding = idleBinding(instance.getId(), "当前微信绑定已解除，可重新生成二维码。");
     mutationMapper.updateWechatBinding(binding);
+    return hadAccounts;
   }
 
   /**
