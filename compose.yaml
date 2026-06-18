@@ -33,8 +33,6 @@ services:
       retries: 30
 
   api:
-    build:
-      context: ./backend
     image: ${CLAW_MANAGER_API_IMAGE:-ghcr.io/zhangsen540445123/claw-manager-api:latest}
     container_name: claw-manager-api
     restart: unless-stopped
@@ -74,8 +72,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   web:
-    build:
-      context: ./frontend
     image: ${CLAW_MANAGER_WEB_IMAGE:-ghcr.io/zhangsen540445123/claw-manager-web:latest}
     container_name: claw-manager-web
     restart: unless-stopped

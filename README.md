@@ -10,7 +10,8 @@ OpenClaw control plane with admin-managed instances, public WeChat binding links
 
 - `backend/`：Spring Boot 3 + JDK 21 + MySQL + MyBatis + Spring Security + Redis + docker-java。
 - `frontend/`：Vue 3 + Vite + TypeScript + Pinia + Element Plus + STOMP WebSocket。
-- `compose.yaml`：本地编排 `mysql`、`redis`、`api`、`web` 四个服务。
+- `compose.yaml`：默认部署编排，只拉取已发布镜像，不做本地构建。
+- `compose.local.yaml`：本地源码构建覆盖文件，需要显式指定才会构建 `api`、`web` 镜像。
 
 默认端口：
 
@@ -38,7 +39,14 @@ cd ..\frontend
 npm run build
 
 cd ..
-docker compose build api web
+docker compose config --quiet
+docker compose -f compose.yaml -f compose.local.yaml config --quiet
+```
+
+如果需要从本地源码构建前后端容器，使用：
+
+```powershell
+docker compose -f compose.yaml -f compose.local.yaml up -d --build
 ```
 
 ## 1. 功能列表
@@ -253,6 +261,12 @@ cd frontend && npm ci && npm run dev
 ```
 
 Open `http://127.0.0.1:5173`.
+
+To build and run the API/web containers from local source instead of pulling published images:
+
+```bash
+docker compose -f compose.yaml -f compose.local.yaml up -d --build
+```
 
 ## 4. License
 

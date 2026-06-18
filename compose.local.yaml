@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: ./backend
+    image: claw-manager-api:local
+
+  web:
+    build:
+      context: ./frontend
+    image: claw-manager-web:local
