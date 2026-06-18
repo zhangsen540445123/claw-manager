@@ -2,12 +2,16 @@ name: Publish Images
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "claw-manager.version"
+      - "containers/openclaw-runner/Dockerfile"
+      - "containers/openclaw-runner/entrypoint.sh"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 env:
@@ -15,22 +19,61 @@ env:
   RUNNER_WECHAT_PLUGIN_SPEC: "@tencent-weixin/openclaw-weixin@2.4.4"
 
 jobs:
+  detect-changes:
+    name: Detect image changes
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      runner: ${{ steps.filter.outputs.runner }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - "claw-manager.version"
+            runner:
+              - "containers/openclaw-runner/Dockerfile"
+              - "containers/openclaw-runner/entrypoint.sh"
+
+      - name: Read image version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < claw-manager.version)"
+          if [[ ! "${version}" =~ ^v[0-9]+(\.[0-9]+){2}([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid claw-manager.version: ${version}" >&2
+            echo "Expected formats like v1.0.0 or v1.0.0-beta.1" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
   build-images:
     name: Build ${{ matrix.label }}
+    needs: detect-changes
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - label: api image
+            group: app
             image_name: claw-manager-api
             context: backend
             dockerfile: backend/Dockerfile
           - label: web image
+            group: app
             image_name: claw-manager-web
             context: frontend
             dockerfile: frontend/Dockerfile
           - label: runner image
+            group: runner
             image_name: claw-manager-openclaw-runner
             context: .
             dockerfile: containers/openclaw-runner/Dockerfile
@@ -39,13 +82,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Decide whether to build
+        id: gate
+        shell: bash
+        run: |
+          should_build=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            should_build=true
+          elif [ "${{ matrix.group }}" = "app" ] && [ "${{ needs.detect-changes.outputs.app }}" = "true" ]; then
+            should_build=true
+          elif [ "${{ matrix.group }}" = "runner" ] && [ "${{ needs.detect-changes.outputs.runner }}" = "true" ]; then
+            should_build=true
+          fi
+          echo "should_build=${should_build}" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU
+        if: steps.gate.outputs.should_build == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.gate.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Prepare image name
+        if: steps.gate.outputs.should_build == 'true'
         id: prep
         shell: bash
         run: |
@@ -53,10 +113,11 @@ jobs:
           echo "image=ghcr.io/${owner}/${{ matrix.image_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare runner metadata
+        if: steps.gate.outputs.should_build == 'true'
         id: runner_meta
         shell: bash
         run: |
-          if [ "${{ matrix.image_name }}" = "claw-manager-openclaw-runner" ]; then
+          if [ "${{ matrix.group }}" = "runner" ]; then
             openclaw_version="${RUNNER_OPENCLAW_VERSION}"
             {
               echo "openclaw_version=${openclaw_version}"
@@ -74,30 +135,32 @@ jobs:
           fi
 
       - name: Extract Docker metadata
+        if: steps.gate.outputs.should_build == 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.prep.outputs.image }}
           tags: |
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
-            type=ref,event=branch
-            type=ref,event=tag
+            type=raw,value=${{ needs.detect-changes.outputs.version }}
+            type=raw,value=latest
             type=sha,prefix=sha-
 
       - name: Log in to GHCR
+        if: steps.gate.outputs.should_build == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and optionally push image
+      - name: Build and push image
+        if: steps.gate.outputs.should_build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
@@ -106,43 +169,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  publish-release:
-    name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-images
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Prepare release notes
-        id: notes
-        shell: bash
-        run: |
-          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          tag="${GITHUB_REF_NAME}"
-          cat > release-notes.md <<EOF
-          ## Container Images
-
-          - API image: \`ghcr.io/${owner}/claw-manager-api:${tag}\`
-          - Web image: \`ghcr.io/${owner}/claw-manager-web:${tag}\`
-          - Runner image: \`ghcr.io/${owner}/claw-manager-openclaw-runner:${tag}\`
-
-          ## Pull Commands
-
-          \`\`\`bash
-          docker pull ghcr.io/${owner}/claw-manager-api:${tag}
-          docker pull ghcr.io/${owner}/claw-manager-web:${tag}
-          docker pull ghcr.io/${owner}/claw-manager-openclaw-runner:${tag}
-          \`\`\`
-
-          ## Latest Aliases
-
-          - \`ghcr.io/${owner}/claw-manager-api:latest\`
-          - \`ghcr.io/${owner}/claw-manager-web:latest\`
-          - \`ghcr.io/${owner}/claw-manager-openclaw-runner:latest\`
-          EOF
-
-      - name: Create or update release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: release-notes.md
-          tag_name: ${{ github.ref_name }}
+      - name: Skip unrelated image
+        if: steps.gate.outputs.should_build != 'true'
+        run: echo "No relevant trigger files changed for ${{ matrix.image_name }}."
