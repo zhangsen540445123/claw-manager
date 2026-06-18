@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -27,6 +29,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Service
 public class ModelPresetService {
+
+  private static final Logger log = LoggerFactory.getLogger(ModelPresetService.class);
 
   private final ModelPresetMapper modelPresetMapper;
   private final ModelPresetNormalizer normalizer;
@@ -105,6 +109,14 @@ public class ModelPresetService {
       modelPresetMapper.clearDefault();
     }
     modelPresetMapper.insert(preset);
+    log.info(
+        "模型预设已创建：presetId={}, name={}, providerKey={}, modelId={}, default={}",
+        preset.getId(),
+        preset.getName(),
+        preset.getProviderKey(),
+        preset.getModelId(),
+        preset.isDefault()
+    );
     return PublicModelPreset.from(preset, normalizer.isConfigured(preset));
   }
 
@@ -146,6 +158,14 @@ public class ModelPresetService {
     ModelPresetSyncResult sync = shouldSyncReferencedInstances
         ? syncReferencedInstances(preset, model, references)
         : ModelPresetSyncResult.notRequested(references.size());
+    log.info(
+        "模型预设已更新：presetId={}, name={}, syncRequested={}, referencedInstances={}, restartedInstances={}",
+        preset.getId(),
+        preset.getName(),
+        shouldSyncReferencedInstances,
+        references.size(),
+        sync.restartedInstanceIds().size()
+    );
     return new ModelPresetUpdateResult(
         PublicModelPreset.from(preset, normalizer.isConfigured(preset)),
         sync
@@ -159,6 +179,7 @@ public class ModelPresetService {
     }
     modelPresetMapper.clearDefault();
     modelPresetMapper.setDefault(presetId);
+    log.info("默认模型预设已切换：presetId={}", presetId);
   }
 
   /**
@@ -180,6 +201,7 @@ public class ModelPresetService {
         modelPresetMapper.setDefault(fallback.getId());
       }
     }
+    log.info("模型预设已删除：presetId={}, deletedDefault={}", presetId, deletingDefault);
   }
 
   private ModelPresetEntity requirePreset(String presetId) {
@@ -230,6 +252,7 @@ public class ModelPresetService {
       return new ModelPresetSyncResult(true, 0, List.of(), List.of());
     }
 
+    log.info("开始同步模型预设到引用实例：presetId={}, affectedInstances={}", preset.getId(), references.size());
     List<String> instanceIds = references.stream()
         .map(reference -> reference.instance().getId())
         .toList();

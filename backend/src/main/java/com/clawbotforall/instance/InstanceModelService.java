@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class InstanceModelService {
+
+  private static final Logger log = LoggerFactory.getLogger(InstanceModelService.class);
 
   private final InstanceCommandService commandService;
   private final InstanceMutationMapper mutationMapper;
@@ -179,6 +183,12 @@ public class InstanceModelService {
       instance.setStatus("running");
     }
     instance.setUpdatedAt(Instant.now().toString());
+    log.info(
+        "实例模型配置已更新：instanceId={}, modelCount={}, restartRequired={}",
+        instance.getId(),
+        models.size(),
+        restartRequired
+    );
     return new InstanceModelUpdateResult(instance, restartRequired);
   }
 

@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class InstanceCommandService {
+
+  private static final Logger log = LoggerFactory.getLogger(InstanceCommandService.class);
 
   private final InstanceMutationMapper instanceMutationMapper;
   private final InstanceAggregateMapper instanceAggregateMapper;
@@ -70,6 +74,13 @@ public class InstanceCommandService {
       throw new ApiException(HttpStatus.CONFLICT, "实例端口或容器名称冲突，请重试。");
     }
 
+    log.info(
+        "OpenClaw 实例记录已创建：instanceId={}, name={}, port={}, presetId={}",
+        draft.instance().getId(),
+        draft.instance().getName(),
+        draft.instance().getPort(),
+        runtimeModel.presetId()
+    );
     return draft.instance();
   }
 
@@ -172,6 +183,7 @@ public class InstanceCommandService {
     binding.setRuntimeUpdatedAt(now);
     binding.setUpdatedAt(now);
     instanceMutationMapper.updateWechatBinding(binding);
+    log.info("已将配对微信账号标记为运行可用：instanceId={}, accountCount={}", instanceId, accounts.size());
   }
 
   private ResolvedRuntimeModel resolveRuntimeModel(Map<String, Object> payload) {

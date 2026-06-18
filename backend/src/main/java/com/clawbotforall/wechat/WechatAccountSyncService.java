@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class WechatAccountSyncService {
+
+  private static final Logger log = LoggerFactory.getLogger(WechatAccountSyncService.class);
 
   private final InstanceAggregateMapper aggregateMapper;
   private final InstanceMutationMapper mutationMapper;
@@ -145,6 +149,7 @@ public class WechatAccountSyncService {
     if (latest.isEmpty()) {
       mutationMapper.updateWechatBinding(idleBinding(instance.getId(), "当前微信绑定已解除，可重新生成二维码。"));
     }
+    log.info("已删除微信绑定账号：instanceId={}, remainingCount={}", instance.getId(), latest.size());
     return latest;
   }
 
@@ -159,6 +164,7 @@ public class WechatAccountSyncService {
     bindLinkMapper.deleteByInstanceId(instance.getId());
     InstanceWechatBindingEntity binding = idleBinding(instance.getId(), "当前微信绑定已解除，可重新生成二维码。");
     mutationMapper.updateWechatBinding(binding);
+    log.info("已删除实例全部微信绑定账号：instanceId={}, hadAccounts={}", instance.getId(), hadAccounts);
     return hadAccounts;
   }
 

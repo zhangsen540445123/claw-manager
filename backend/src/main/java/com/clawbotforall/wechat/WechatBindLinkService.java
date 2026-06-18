@@ -27,6 +27,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class WechatBindLinkService {
+
+  private static final Logger log = LoggerFactory.getLogger(WechatBindLinkService.class);
 
   private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
 
@@ -101,6 +105,7 @@ public class WechatBindLinkService {
     }
 
     linkMapper.insert(link);
+    log.info("管理员创建微信扫码链接：mode={}, instanceId={}", link.getMode(), defaultString(link.getInstanceId()));
     return publicLink(link, origin);
   }
 
@@ -145,6 +150,7 @@ public class WechatBindLinkService {
     }
 
     InstanceEntity instance = chooseBindableInstance();
+    log.info("新用户扫码链接已分配 OpenClaw 实例：instanceId={}", instance.getId());
     link.setPhone(normalizedPhone);
     link.setInstanceId(instance.getId());
     link = startQr(link, false);
@@ -185,6 +191,7 @@ public class WechatBindLinkService {
     linkMapper.update(link);
 
     try {
+      log.info("开始生成微信扫码二维码：mode={}, instanceId={}, forceRegenerate={}", link.getMode(), instance.getId(), force);
       wechatBindService.startBind(instance, force);
     } catch (ApiException error) {
       markFailed(link, error.getMessage());
@@ -300,6 +307,7 @@ public class WechatBindLinkService {
 
     accountSyncService.syncInstanceAccounts(instance);
     markConnected(link);
+    log.info("新用户微信绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
 
@@ -325,6 +333,7 @@ public class WechatBindLinkService {
 
     accountSyncService.syncInstanceAccounts(instance);
     markConnected(link);
+    log.info("老用户微信重新绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
 
@@ -424,6 +433,7 @@ public class WechatBindLinkService {
     link.setErrorMessage(message);
     link.setUpdatedAt(Instant.now().toString());
     linkMapper.update(link);
+    log.warn("微信扫码链接已拒绝：mode={}, instanceId={}, reason={}", link.getMode(), defaultString(link.getInstanceId()), message);
   }
 
   private void markFailed(WechatBindLinkEntity link, String message) {
@@ -432,6 +442,7 @@ public class WechatBindLinkService {
     link.setErrorMessage(defaultString(message).isBlank() ? "二维码生成失败，请稍后重试。" : message);
     link.setUpdatedAt(Instant.now().toString());
     linkMapper.update(link);
+    log.warn("微信扫码链接失败：mode={}, instanceId={}, reason={}", link.getMode(), defaultString(link.getInstanceId()), link.getErrorMessage());
   }
 
   private WechatBindLinkEntity requireLink(String token) {

@@ -25,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -32,6 +34,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class WechatBindService {
+
+  private static final Logger log = LoggerFactory.getLogger(WechatBindService.class);
 
   private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
   private static final String WECHAT_PLUGIN_SPEC = "@tencent-weixin/openclaw-weixin";
@@ -93,16 +97,19 @@ public class WechatBindService {
     RuntimeExecHandle existing = jobs.get(instance.getId());
     boolean qrExpired = isCurrentQrExpired(instance.getId());
     if (existing != null && !forceRegenerate && !qrExpired) {
+      log.info("微信绑定任务已在进行中，复用当前二维码状态：instanceId={}", instance.getId());
       publishCurrent(instance.getId());
       return;
     }
     if (existing != null) {
+      log.info("取消旧微信绑定任务并重新生成二维码：instanceId={}, forceRegenerate={}, qrExpired={}", instance.getId(), forceRegenerate, qrExpired);
       existing.cancel();
       jobs.remove(instance.getId());
     }
 
     fileService.writeInstanceFiles(instance, commandService.listModels(instance.getId()));
     patchBinding(instance, WechatState.starting("正在准备微信扫码绑定，请稍候。"));
+    log.info("开始微信扫码绑定任务：instanceId={}, forceRegenerate={}", instance.getId(), forceRegenerate);
 
     StringBuilder output = new StringBuilder();
     RuntimeExecHandle handle = openClawRuntime.startExec(
@@ -131,11 +138,13 @@ public class WechatBindService {
             try {
               boolean shouldSyncAccounts;
               boolean shouldRestartGateway;
+              boolean successfulLogin;
+              boolean gatewayFailure;
               synchronized (output) {
                 String text = output.toString();
                 WechatState state = inferWechatState(text, exitCode == 0 ? "connected" : "error");
-                boolean gatewayFailure = hasWechatGatewayFailure(text);
-                boolean successfulLogin = hasSuccessfulWechatLogin(text);
+                gatewayFailure = hasWechatGatewayFailure(text);
+                successfulLogin = hasSuccessfulWechatLogin(text);
                 if (gatewayFailure && !successfulLogin) {
                   state = state.withStatus("error");
                 }
@@ -145,6 +154,11 @@ public class WechatBindService {
               }
               if (shouldSyncAccounts) {
                 accountSyncService.syncInstanceAccounts(instance);
+              }
+              if (successfulLogin) {
+                log.info("微信扫码登录凭证已保存：instanceId={}, exitCode={}, gatewayFailure={}", instance.getId(), exitCode, gatewayFailure);
+              } else if (exitCode != 0 || gatewayFailure) {
+                log.warn("微信扫码绑定命令结束但未确认成功：instanceId={}, exitCode={}, gatewayFailure={}", instance.getId(), exitCode, gatewayFailure);
               }
               if (shouldRestartGateway) {
                 restartGatewayAfterSuccessfulLogin(instance);
@@ -162,6 +176,7 @@ public class WechatBindService {
           @Override
           public void onTimeout() {
             try {
+              log.warn("微信扫码绑定任务超时：instanceId={}", instance.getId());
               synchronized (output) {
                 patchBinding(instance, WechatState.error(tailSnippet(output + "\n微信绑定命令执行超时。", 3000)));
               }
@@ -178,6 +193,12 @@ public class WechatBindService {
           @Override
           public void onError(Throwable error) {
             try {
+              log.warn(
+                  "微信扫码绑定任务异常：instanceId={}, reason={}",
+                  instance.getId(),
+                  error.getMessage() == null ? String.valueOf(error) : error.getMessage()
+              );
+              log.debug("微信扫码绑定任务异常详情：instanceId={}", instance.getId(), error);
               patchBinding(instance, WechatState.error(tailSnippet(error.getMessage() == null ? String.valueOf(error) : error.getMessage(), 3000)));
               publishCurrent(instance.getId());
             } finally {
@@ -276,9 +297,16 @@ public class WechatBindService {
 
   private void restartGatewayAfterSuccessfulLogin(InstanceEntity instance) {
     try {
+      log.info("微信登录成功后触发 Gateway 重启：instanceId={}", instance.getId());
       patchRuntimeRestarting(instance);
       provisioningService.startProvisioning(instance.getId());
     } catch (RuntimeException error) {
+      log.warn(
+          "微信登录成功后触发 Gateway 重启失败：instanceId={}, reason={}",
+          instance.getId(),
+          error.getMessage() == null ? String.valueOf(error) : error.getMessage()
+      );
+      log.debug("微信登录成功后触发 Gateway 重启异常详情：instanceId={}", instance.getId(), error);
       patchBinding(instance, WechatState.error(tailSnippet(
           "微信登录凭证已保存，但重启 Gateway 失败：" + (error.getMessage() == null ? String.valueOf(error) : error.getMessage()),
           3000

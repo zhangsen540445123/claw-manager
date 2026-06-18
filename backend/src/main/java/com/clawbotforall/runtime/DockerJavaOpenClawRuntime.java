@@ -42,6 +42,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -52,6 +54,7 @@ import org.springframework.stereotype.Service;
 public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
 
   private static final int GATEWAY_PORT = 18789;
+  private static final Logger log = LoggerFactory.getLogger(DockerJavaOpenClawRuntime.class);
 
   private final DockerClient dockerClient;
   private final ClawbotProperties properties;
@@ -86,6 +89,13 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
 
   @Override
   public RuntimeState startInstance(InstanceEntity instance, InstancePaths paths) {
+    log.info(
+        "准备启动 OpenClaw 实例：instanceId={}, container={}, port={}, image={}",
+        instance.getId(),
+        instance.getContainerName(),
+        instance.getPort(),
+        properties.runtime().runnerImage()
+    );
     ensureRunnerImage();
     stopInstance(instance);
 
@@ -123,7 +133,15 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
     CreateContainerResponse container = createCommand.exec();
 
     dockerClient.startContainerCmd(container.getId()).exec();
-    return inspectInstance(instance);
+    RuntimeState state = inspectInstance(instance);
+    log.info(
+        "OpenClaw 实例容器已启动：instanceId={}, container={}, dockerId={}, status={}",
+        instance.getId(),
+        instance.getContainerName(),
+        container.getId(),
+        state.status()
+    );
+    return state;
   }
 
   /**
@@ -136,6 +154,7 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
       dockerClient.removeContainerCmd(instance.getContainerName())
           .withForce(true)
           .exec();
+      log.info("OpenClaw 实例容器已停止并移除：instanceId={}, container={}", instance.getId(), instance.getContainerName());
     } catch (NotFoundException ignored) {
       return RuntimeState.stopped();
     }
@@ -323,10 +342,12 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
   public RunnerImageStatus refreshRunnerImage() {
     String image = properties.runtime().runnerImage();
     try {
+      log.info("开始刷新 OpenClaw runner 镜像：image={}", image);
       boolean completed = dockerClient.pullImageCmd(image)
           .start()
           .awaitCompletion(properties.runtime().runnerPullTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!completed) {
+        log.warn("刷新 OpenClaw runner 镜像超时：image={}", image);
         return new RunnerImageStatus(
             image,
             "error",
@@ -339,6 +360,7 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         );
       }
       RunnerImageStatus status = getRunnerImageStatus();
+      log.info("OpenClaw runner 镜像刷新完成：image={}, imageId={}", status.image(), status.imageId());
       return new RunnerImageStatus(
           status.image(),
           "ready",
@@ -349,6 +371,7 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
       );
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+      log.warn("刷新 OpenClaw runner 镜像被中断：image={}", image);
       return new RunnerImageStatus(
           image,
           "error",
@@ -358,6 +381,8 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
           Instant.now().toString()
       );
     } catch (Exception error) {
+      log.warn("刷新 OpenClaw runner 镜像失败：image={}, reason={}", image, error.getMessage());
+      log.debug("刷新 OpenClaw runner 镜像异常详情：image={}", image, error);
       return new RunnerImageStatus(
           image,
           "error",
@@ -510,24 +535,29 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
     String image = properties.runtime().runnerImage();
     try {
       dockerClient.inspectImageCmd(image).exec();
+      log.info("OpenClaw runner 镜像本地已存在，跳过拉取：image={}", image);
       return;
     } catch (NotFoundException ignored) {
       // 下方开始拉取数据。
     }
 
     try {
+      log.info("本地未找到 OpenClaw runner 镜像，开始拉取：image={}", image);
       boolean completed = dockerClient.pullImageCmd(image)
           .start()
           .awaitCompletion(properties.runtime().runnerPullTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!completed) {
+        log.warn("拉取 OpenClaw runner 镜像超时：image={}", image);
         throw new IllegalStateException(
             "拉取 OpenClaw runner 镜像超时（"
                 + Math.round(properties.runtime().runnerPullTimeoutMs() / 60000.0)
                 + " 分钟）：" + image
         );
       }
+      log.info("OpenClaw runner 镜像拉取完成：image={}", image);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+      log.warn("拉取 OpenClaw runner 镜像被中断：image={}", image);
       throw new IllegalStateException("拉取 OpenClaw runner 镜像被中断：" + image, error);
     }
   }

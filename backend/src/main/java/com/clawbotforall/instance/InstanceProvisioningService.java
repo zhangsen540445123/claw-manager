@@ -18,6 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -25,6 +27,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class InstanceProvisioningService {
+
+  private static final Logger log = LoggerFactory.getLogger(InstanceProvisioningService.class);
 
   private final InstanceCommandService commandService;
   private final InstanceFileService fileService;
@@ -61,8 +65,10 @@ public class InstanceProvisioningService {
 
   public void startProvisioning(String instanceId) {
     if (jobs.putIfAbsent(instanceId, true) != null) {
+      log.info("OpenClaw 实例启动流程已在进行中，忽略重复请求：instanceId={}", instanceId);
       return;
     }
+    log.info("开始 OpenClaw 实例启动流程：instanceId={}", instanceId);
     executor.submit(() -> {
       try {
         runProvisioning(instanceId);
@@ -114,6 +120,12 @@ public class InstanceProvisioningService {
 
       waitForGatewayReady(instanceId, gatewayStartedAt);
     } catch (Exception error) {
+      log.warn(
+          "OpenClaw 实例启动流程失败：instanceId={}, reason={}",
+          instanceId,
+          error.getMessage() == null ? String.valueOf(error) : error.getMessage()
+      );
+      log.debug("OpenClaw 实例启动流程异常详情：instanceId={}", instanceId, error);
       update(
           instanceId,
           "stopped",
@@ -133,6 +145,7 @@ public class InstanceProvisioningService {
     while (System.currentTimeMillis() < deadline) {
       InstanceEntity instance = commandService.requireInstance(instanceId);
       if (isGatewayReady(instance)) {
+        log.info("OpenClaw Gateway 已就绪：instanceId={}", instanceId);
         update(
             instanceId,
             "running",
