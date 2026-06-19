@@ -6,7 +6,7 @@ import { ApiError } from "../api/http";
 import MetricCard from "../components/MetricCard.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { useAdminStore } from "../stores/admin";
-import type { ModelProviderField, PublicInstance, PublicModelPreset, PublicWechatBindLink } from "../api/types";
+import type { ModelProviderField, PublicInstance, PublicModelPreset, PublicWechatBindLink, WechatBindingLookup } from "../api/types";
 
 const admin = useAdminStore();
 const actionLoading = ref("");
@@ -15,6 +15,8 @@ const presetDialogOpen = ref(false);
 const presetMode = ref<"create" | "edit">("create");
 const generatedLink = ref<PublicWechatBindLink | null>(null);
 const existingPhone = ref("");
+const existingBindingOptions = ref<WechatBindingLookup[]>([]);
+const existingBindingLoading = ref(false);
 const createForm = reactive({ name: "OpenClaw 实例", presetId: "" });
 const presetForm = reactive({
   id: "",
@@ -119,6 +121,28 @@ async function createExistingBindLink() {
     generatedLink.value = await admin.createBindLink("existing", existingPhone.value);
     ElMessage.success("老用户扫码链接已生成。");
   });
+}
+
+async function searchExistingBindings(query: string) {
+  const keyword = query.trim();
+  if (!keyword) {
+    existingBindingOptions.value = [];
+    return;
+  }
+  existingBindingLoading.value = true;
+  try {
+    existingBindingOptions.value = await admin.searchBindingsByPhone(keyword);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "手机号搜索失败";
+    ElMessage.error(error.value);
+  } finally {
+    existingBindingLoading.value = false;
+  }
+}
+
+function existingBindingLabel(binding: WechatBindingLookup) {
+  const remark = binding.remark ? ` · ${binding.remark}` : "";
+  return `${binding.phone}${remark}`;
 }
 
 async function saveRemark(instance: PublicInstance, accountId: string, remark: string) {
@@ -297,6 +321,60 @@ function openControlUi(instance: PublicInstance) {
           </section>
         </section>
 
+        <section id="admin-wechat" class="module-section">
+          <el-card shadow="never">
+            <template #header>
+              <div class="card-title">
+                <Link :size="18" />
+                <span>微信扫码链接</span>
+              </div>
+            </template>
+            <div class="bind-link-box">
+              <div class="bind-actions">
+                <section class="bind-action-panel">
+                  <strong>新用户出码</strong>
+                  <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
+                    为新用户出码
+                  </el-button>
+                </section>
+                <section class="bind-action-panel">
+                  <strong>老用户出码</strong>
+                  <div class="existing-bind-row">
+                    <el-select
+                      v-model="existingPhone"
+                      filterable
+                      remote
+                      reserve-keyword
+                      clearable
+                      placeholder="输入手机号片段搜索已绑定用户"
+                      :remote-method="searchExistingBindings"
+                      :loading="existingBindingLoading"
+                      no-match-text="没有匹配手机号"
+                    >
+                      <el-option
+                        v-for="binding in existingBindingOptions"
+                        :key="binding.accountId"
+                        :label="existingBindingLabel(binding)"
+                        :value="binding.phone"
+                      />
+                    </el-select>
+                    <el-button :loading="actionLoading === 'bind:existing'" @click="createExistingBindLink">
+                      为老用户出码
+                    </el-button>
+                  </div>
+                </section>
+              </div>
+              <el-alert v-if="generatedLink" type="success" show-icon :closable="false">
+                <div class="token-created">
+                  <span>扫码链接</span>
+                  <el-input :model-value="generatedLink.bindLink" readonly />
+                  <el-button :icon="Clipboard" @click="copyText(generatedLink!.bindLink, '链接')">复制</el-button>
+                </div>
+              </el-alert>
+            </div>
+          </el-card>
+        </section>
+
         <section id="admin-presets" class="module-section">
           <el-card shadow="never">
             <template #header>
@@ -378,35 +456,6 @@ function openControlUi(instance: PublicInstance) {
           </el-card>
         </section>
 
-        <section id="admin-wechat" class="module-section">
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-title">
-                <Link :size="18" />
-                <span>微信扫码链接</span>
-              </div>
-            </template>
-            <div class="bind-link-box">
-              <div class="button-row">
-                <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
-                  为新用户出码
-                </el-button>
-                <el-input v-model="existingPhone" placeholder="老用户手机号" />
-                <el-button :loading="actionLoading === 'bind:existing'" @click="createExistingBindLink">
-                  为老用户出码
-                </el-button>
-              </div>
-              <el-alert v-if="generatedLink" type="success" show-icon :closable="false">
-                <div class="token-created">
-                  <span>扫码链接</span>
-                  <el-input :model-value="generatedLink.bindLink" readonly />
-                  <el-button :icon="Clipboard" @click="copyText(generatedLink!.bindLink, '链接')">复制</el-button>
-                </div>
-              </el-alert>
-            </div>
-          </el-card>
-        </section>
-
         <section id="admin-instances" class="module-section">
           <el-card shadow="never">
             <template #header>
@@ -477,7 +526,14 @@ function openControlUi(instance: PublicInstance) {
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column prop="status" label="容器" width="100" />
+              <el-table-column prop="status" label="状态" width="100" />
+              <el-table-column label="容器名称" min-width="220">
+                <template #default="{ row }">
+                  <el-tooltip :content="row.containerName" placement="top">
+                    <span class="container-name-cell">{{ row.containerName }}</span>
+                  </el-tooltip>
+                </template>
+              </el-table-column>
               <el-table-column label="Gateway" min-width="180">
                 <template #default="{ row }">
                   <el-progress :percentage="row.provisioning?.percent || 0" />
@@ -492,33 +548,42 @@ function openControlUi(instance: PublicInstance) {
               <el-table-column label="微信账号" width="110">
                 <template #default="{ row }">{{ row.wechatBinding?.pairedAccounts?.length || 0 }}</template>
               </el-table-column>
-              <el-table-column label="操作" min-width="300" align="right">
+              <el-table-column label="操作" width="150" align="right">
                 <template #default="{ row }">
                   <div class="instance-actions">
-                    <el-button
-                      :icon="Play"
-                      :disabled="row.status === 'running' || row.provisioning?.status === 'running'"
-                      :loading="actionLoading === `start:${row.id}`"
-                      @click="runAction(`start:${row.id}`, () => confirmAction('启动实例', '确认启动该 OpenClaw 容器？', () => admin.startInstance(row.id)))"
-                    >
-                      启动
-                    </el-button>
-                    <el-button
-                      :icon="Square"
-                      :disabled="row.status !== 'running'"
-                      :loading="actionLoading === `stop:${row.id}`"
-                      @click="runAction(`stop:${row.id}`, () => confirmAction('停止实例', '停止后 Control UI 和微信通道会暂时不可用，确认继续？', () => admin.stopInstance(row.id)))"
-                    >
-                      停止
-                    </el-button>
-                    <el-button
-                      :icon="RefreshCw"
-                      :disabled="row.status !== 'running' || row.provisioning?.status === 'running'"
-                      :loading="actionLoading === `gateway:${row.id}`"
-                      @click="runAction(`gateway:${row.id}`, () => confirmAction('重启 Gateway', '重启期间 Control UI 和微信通道可能短暂不可用，确认继续？', () => admin.restartGateway(row.id)))"
-                    >
-                      Gateway
-                    </el-button>
+                    <el-tooltip content="启动实例">
+                      <span>
+                        <el-button
+                          circle
+                          :icon="Play"
+                          :disabled="row.status === 'running' || row.provisioning?.status === 'running'"
+                          :loading="actionLoading === `start:${row.id}`"
+                          @click="runAction(`start:${row.id}`, () => confirmAction('启动实例', '确认启动该 OpenClaw 容器？', () => admin.startInstance(row.id)))"
+                        />
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="停止实例">
+                      <span>
+                        <el-button
+                          circle
+                          :icon="Square"
+                          :disabled="row.status !== 'running'"
+                          :loading="actionLoading === `stop:${row.id}`"
+                          @click="runAction(`stop:${row.id}`, () => confirmAction('停止实例', '停止后 Control UI 和微信通道会暂时不可用，确认继续？', () => admin.stopInstance(row.id)))"
+                        />
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="重启 Gateway">
+                      <span>
+                        <el-button
+                          circle
+                          :icon="RefreshCw"
+                          :disabled="row.status !== 'running' || row.provisioning?.status === 'running'"
+                          :loading="actionLoading === `gateway:${row.id}`"
+                          @click="runAction(`gateway:${row.id}`, () => confirmAction('重启 Gateway', '重启期间 Control UI 和微信通道可能短暂不可用，确认继续？', () => admin.restartGateway(row.id)))"
+                        />
+                      </span>
+                    </el-tooltip>
                   </div>
                 </template>
               </el-table-column>
@@ -553,11 +618,19 @@ function openControlUi(instance: PublicInstance) {
 
             <el-card shadow="never">
               <template #header>
-                <div class="card-title">
+                <div class="card-title with-action">
                   <span>服务日志</span>
+                  <el-button
+                    size="small"
+                    :icon="RefreshCw"
+                    :loading="actionLoading === 'server-logs'"
+                    @click="runAction('server-logs', () => admin.loadServerLogs())"
+                  >
+                    刷新
+                  </el-button>
                 </div>
               </template>
-              <pre class="output server-log">{{ admin.serverLogs || "暂无日志" }}</pre>
+              <pre class="output server-log">{{ admin.serverLogs || "暂无服务日志，请确认后端已重启并启用文件日志。" }}</pre>
             </el-card>
           </div>
         </section>

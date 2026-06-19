@@ -390,6 +390,28 @@ button {
   gap: 14px;
 }
 
+.bind-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bind-action-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+}
+
+.existing-bind-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+}
+
 .instance-expand {
   padding: 12px 18px;
   background: var(--surface-subtle);
@@ -463,8 +485,11 @@ button {
 .control-ui-cell,
 .instance-actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+}
+
+.control-ui-cell {
+  flex-wrap: wrap;
 }
 
 .control-ui-cell {
@@ -472,6 +497,7 @@ button {
 }
 
 .instance-actions {
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
@@ -485,6 +511,14 @@ button {
   margin: 12px 0;
   color: #0f766e;
   overflow-wrap: anywhere;
+}
+
+.container-name-cell {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .output {
@@ -612,7 +646,9 @@ button {
   .management-form,
   .preset-form,
   .token-form,
-  .token-created {
+  .token-created,
+  .bind-actions,
+  .existing-bind-row {
     grid-template-columns: 1fr;
   }
 }

@@ -5,6 +5,7 @@ import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.web.ApiException;
 import com.clawbotforall.web.RequestOrigins;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -54,18 +55,24 @@ public class WechatBindLinkController {
     requireAdmin(authentication);
     WechatPairedAccountEntity account = bindLinkService.findBindingByPhone(phone);
     Map<String, Object> response = new LinkedHashMap<>();
-    response.put("binding", account == null ? null : Map.of(
-        "accountId", account.getAccountId(),
-        "phone", account.getPhone(),
-        "instanceId", account.getInstanceId(),
-        "wechatUserId", defaultString(account.getWechatUserId()),
-        "remark", defaultString(account.getRemark()),
-        "baseUrl", defaultString(account.getBaseUrl()),
-        "savedAt", account.getSavedAt() == null ? "" : account.getSavedAt(),
-        "boundAt", account.getBoundAt() == null ? "" : account.getBoundAt(),
-        "updatedAt", account.getUpdatedAt() == null ? "" : account.getUpdatedAt()
-    ));
+    response.put("binding", account == null ? null : publicBinding(account));
     return response;
+  }
+
+  /**
+   * 管理员按手机号片段搜索已绑定微信账号。
+   */
+  @GetMapping("/api/admin/wechat-bindings/search")
+  public Map<String, Object> searchBindingsByPhone(
+      @RequestParam(defaultValue = "") String phone,
+      Authentication authentication
+  ) {
+    requireAdmin(authentication);
+    List<Map<String, Object>> bindings = bindLinkService.searchBindingsByPhoneKeyword(phone)
+        .stream()
+        .map(WechatBindLinkController::publicBinding)
+        .toList();
+    return Map.of("bindings", bindings);
   }
 
   /**
@@ -112,6 +119,20 @@ public class WechatBindLinkController {
 
   private static String defaultString(String value) {
     return value == null ? "" : value;
+  }
+
+  private static Map<String, Object> publicBinding(WechatPairedAccountEntity account) {
+    return Map.of(
+        "accountId", account.getAccountId(),
+        "phone", account.getPhone(),
+        "instanceId", account.getInstanceId(),
+        "wechatUserId", defaultString(account.getWechatUserId()),
+        "remark", defaultString(account.getRemark()),
+        "baseUrl", defaultString(account.getBaseUrl()),
+        "savedAt", account.getSavedAt() == null ? "" : account.getSavedAt(),
+        "boundAt", account.getBoundAt() == null ? "" : account.getBoundAt(),
+        "updatedAt", account.getUpdatedAt() == null ? "" : account.getUpdatedAt()
+    );
   }
 
   public record PhoneRequest(String phone) {}

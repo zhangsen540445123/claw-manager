@@ -314,6 +314,14 @@ class ApplicationIntegrationTest {
         .andExpect(jsonPath("$.binding.accountId").value("wx_existing"))
         .andExpect(jsonPath("$.binding.instanceId").value(instanceId));
 
+    mockMvc.perform(get("/api/admin/wechat-bindings/search")
+            .cookie(adminCookie)
+            .param("phone", "5728"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.bindings.length()").value(1))
+        .andExpect(jsonPath("$.bindings[0].accountId").value("wx_existing"))
+        .andExpect(jsonPath("$.bindings[0].phone").value("13572873189"));
+
     mockMvc.perform(post("/api/admin/wechat-bind-links")
             .cookie(adminCookie)
             .header("X-Forwarded-Proto", "https")

@@ -152,6 +152,14 @@
     LIMIT 1
   </select>
 
+  <select id="searchWechatAccountsByPhoneKeyword" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    WHERE phone LIKE CONCAT('%', #{keyword}, '%')
+    ORDER BY bound_at DESC, phone ASC
+    LIMIT 10
+  </select>
+
   <select id="findWechatAccountByAccountId" resultMap="WechatAccountMap">
     SELECT *
     FROM wechat_paired_accounts

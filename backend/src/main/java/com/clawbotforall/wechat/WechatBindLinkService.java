@@ -118,6 +118,18 @@ public class WechatBindLinkService {
   }
 
   /**
+   * 管理员按手机号片段搜索已绑定关系。
+   */
+  @Transactional(readOnly = true)
+  public List<WechatPairedAccountEntity> searchBindingsByPhoneKeyword(String phoneKeyword) {
+    String keyword = normalizePhoneKeyword(phoneKeyword);
+    if (keyword.isBlank()) {
+      return List.of();
+    }
+    return aggregateMapper.searchWechatAccountsByPhoneKeyword(keyword);
+  }
+
+  /**
    * 读取公开绑定链接状态；老用户链接首次访问时自动启动出码。
    */
   @Transactional
@@ -567,6 +579,10 @@ public class WechatBindLinkService {
       throw new ApiException(HttpStatus.BAD_REQUEST, "手机号格式无效。");
     }
     return normalized;
+  }
+
+  private String normalizePhoneKeyword(String phone) {
+    return defaultString(phone).replaceAll("\\s+", "");
   }
 
   private boolean isExpired(String expiresAt) {

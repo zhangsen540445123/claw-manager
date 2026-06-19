@@ -126,6 +126,22 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void searchesBindingsByPhoneKeyword() {
+    WechatPairedAccountEntity account = pairedAccount("wx_existing", "13572873189", "inst_1");
+    when(aggregateMapper.searchWechatAccountsByPhoneKeyword("5728")).thenReturn(List.of(account));
+
+    List<WechatPairedAccountEntity> result = service.searchBindingsByPhoneKeyword(" 57 28 ");
+
+    assertThat(result).containsExactly(account);
+    verify(aggregateMapper).searchWechatAccountsByPhoneKeyword("5728");
+  }
+
+  @Test
+  void returnsNoBindingsForBlankPhoneKeyword() {
+    assertThat(service.searchBindingsByPhoneKeyword("  ")).isEmpty();
+  }
+
+  @Test
   void rejectsNewPhoneWhenItAlreadyHasABinding() {
     WechatBindLinkEntity stored = newLink("token_1");
     stored.setStatus("phone_required");

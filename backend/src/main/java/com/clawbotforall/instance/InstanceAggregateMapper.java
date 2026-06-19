@@ -30,6 +30,8 @@ public interface InstanceAggregateMapper {
 
   WechatPairedAccountEntity findWechatAccountByPhone(@Param("phone") String phone);
 
+  List<WechatPairedAccountEntity> searchWechatAccountsByPhoneKeyword(@Param("keyword") String keyword);
+
   WechatPairedAccountEntity findWechatAccountByAccountId(@Param("accountId") String accountId);
 
   int countWechatAccountsByInstanceId(@Param("instanceId") String instanceId);

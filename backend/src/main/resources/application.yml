@@ -32,6 +32,10 @@ management:
       exposure:
         include: health,info
 
+logging:
+  file:
+    name: ${DATA_DIR:data}/logs/server.log
+
 springdoc:
   api-docs:
     path: /v3/api-docs

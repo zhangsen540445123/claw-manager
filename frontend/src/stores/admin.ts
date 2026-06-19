@@ -85,6 +85,10 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<{ image: RunnerImageStatus }>("/api/admin/runner-image");
       this.runnerImage = response.image;
     },
+    async loadServerLogs() {
+      const response = await api<{ logs: { text: string } }>("/api/admin/server-logs");
+      this.serverLogs = response.logs.text;
+    },
     async refreshRunnerImage() {
       const response = await api<{ image: RunnerImageStatus }>("/api/admin/runner-image/refresh", { method: "POST" });
       this.runnerImage = response.image;
@@ -137,6 +141,12 @@ export const useAdminStore = defineStore("admin", {
     async findBindingByPhone(phone: string) {
       const response = await api<{ binding: WechatBindingLookup | null }>(`/api/admin/wechat-bindings?phone=${encodeURIComponent(phone)}`);
       return response.binding;
+    },
+    async searchBindingsByPhone(phone: string) {
+      const response = await api<{ bindings: WechatBindingLookup[] }>(
+        `/api/admin/wechat-bindings/search?phone=${encodeURIComponent(phone)}`
+      );
+      return response.bindings;
     },
     async createPreset(payload: Record<string, unknown>) {
       const response = await api<{ preset: PublicModelPreset }>("/api/admin/model-presets", {
