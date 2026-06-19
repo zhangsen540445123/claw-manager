@@ -13,6 +13,7 @@ import com.clawbotforall.web.ApiException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ public class WechatBindLinkService {
   private static final Logger log = LoggerFactory.getLogger(WechatBindLinkService.class);
 
   private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
+  private static final Duration LINK_TTL = Duration.ofDays(1);
 
   private final WechatBindLinkMapper linkMapper;
   private final InstanceAggregateMapper aggregateMapper;
@@ -88,6 +90,7 @@ public class WechatBindLinkService {
     link.setStatus("new".equals(mode) ? "phone_required" : "created");
     link.setCreatedByAdminId(admin.id());
     link.setCreatedAt(now);
+    link.setExpiresAt(Instant.parse(now).plus(LINK_TTL).toString());
     link.setUpdatedAt(now);
 
     if ("existing".equals(mode)) {
@@ -130,11 +133,64 @@ public class WechatBindLinkService {
   }
 
   /**
+   * 管理员查询扫码链接历史。
+   */
+  @Transactional(readOnly = true)
+  public AdminLinkPage listAdminLinks(
+      String mode,
+      String status,
+      String phone,
+      int page,
+      int pageSize,
+      String origin
+  ) {
+    String normalizedMode = normalizeOptionalMode(mode);
+    String normalizedStatus = defaultString(status).trim();
+    String normalizedPhone = normalizePhoneKeyword(phone);
+    int normalizedPageSize = Math.max(5, Math.min(100, pageSize));
+    int normalizedPage = Math.max(1, page);
+    int offset = (normalizedPage - 1) * normalizedPageSize;
+    String now = Instant.now().toString();
+    List<PublicWechatBindLink> links = linkMapper
+        .listAdminLinks(normalizedMode, normalizedStatus, normalizedPhone, now, offset, normalizedPageSize)
+        .stream()
+        .map(link -> publicLink(link, origin))
+        .toList();
+    int total = linkMapper.countAdminLinks(normalizedMode, normalizedStatus, normalizedPhone, now);
+    return new AdminLinkPage(links, total, normalizedPage, normalizedPageSize);
+  }
+
+  /**
+   * 管理员读取单条扫码链接详情。
+   */
+  @Transactional(readOnly = true)
+  public PublicWechatBindLink adminLinkDetail(String token, String origin) {
+    return publicLink(requireLink(token), origin);
+  }
+
+  /**
+   * 管理员手动失效扫码链接。
+   */
+  @Transactional
+  public PublicWechatBindLink revokeLink(String token, String origin) {
+    WechatBindLinkEntity link = requireLink(token);
+    clearQr(link);
+    link.setStatus("revoked");
+    link.setErrorMessage("扫码链接已手动失效。");
+    link.setUpdatedAt(Instant.now().toString());
+    linkMapper.update(link);
+    return publicLink(linkMapper.findByToken(link.getToken()), origin);
+  }
+
+  /**
    * 读取公开绑定链接状态；老用户链接首次访问时自动启动出码。
    */
   @Transactional
   public PublicWechatBindLink getPublicStatus(String token, String origin) {
-    WechatBindLinkEntity link = requireLink(token);
+    WechatBindLinkEntity link = expireIfNeeded(requireLink(token));
+    if (hasLinkTtlExpired(link)) {
+      return publicLink(link, origin);
+    }
     if ("existing".equals(link.getMode()) && "created".equals(link.getStatus())) {
       link = startQr(link, false);
     }
@@ -147,7 +203,10 @@ public class WechatBindLinkService {
    */
   @Transactional
   public PublicWechatBindLink submitPhone(String token, String phone, String origin) {
-    WechatBindLinkEntity link = requireLink(token);
+    WechatBindLinkEntity link = expireIfNeeded(requireLink(token));
+    if (hasLinkTtlExpired(link)) {
+      return publicLink(link, origin);
+    }
     if (!"new".equals(link.getMode())) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "该扫码链接不需要填写手机号。");
     }
@@ -174,7 +233,10 @@ public class WechatBindLinkService {
    */
   @Transactional
   public PublicWechatBindLink refreshQr(String token, String origin) {
-    WechatBindLinkEntity link = requireLink(token);
+    WechatBindLinkEntity link = expireIfNeeded(requireLink(token));
+    if (hasLinkTtlExpired(link)) {
+      return publicLink(link, origin);
+    }
     if ("new".equals(link.getMode()) && !hasText(link.getPhone())) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "请先填写手机号。");
     }
@@ -457,6 +519,14 @@ public class WechatBindLinkService {
     log.warn("微信扫码链接失败：mode={}, instanceId={}, reason={}", link.getMode(), defaultString(link.getInstanceId()), link.getErrorMessage());
   }
 
+  private void markExpired(WechatBindLinkEntity link) {
+    clearQr(link);
+    link.setStatus("expired");
+    link.setErrorMessage("扫码链接已过期，请联系管理员重新生成。");
+    link.setUpdatedAt(Instant.now().toString());
+    linkMapper.update(link);
+  }
+
   private WechatBindLinkEntity requireLink(String token) {
     String normalized = token == null ? "" : token.trim();
     WechatBindLinkEntity link = linkMapper.findByToken(normalized);
@@ -464,6 +534,14 @@ public class WechatBindLinkService {
       throw new ApiException(HttpStatus.NOT_FOUND, "扫码链接不存在。");
     }
     return link;
+  }
+
+  private WechatBindLinkEntity expireIfNeeded(WechatBindLinkEntity link) {
+    if (!isLinkExpired(link)) {
+      return link;
+    }
+    markExpired(link);
+    return linkMapper.findByToken(link.getToken());
   }
 
   private InstanceEntity requireInstance(String instanceId) {
@@ -487,8 +565,10 @@ public class WechatBindLinkService {
     InstanceProvisioningEntity provisioning = instance == null
         ? null
         : aggregateMapper.listProvisioningByInstanceIds(List.of(instance.getId())).stream().findFirst().orElse(null);
+    boolean linkExpired = hasLinkTtlExpired(link) && !isTerminal(link.getStatus());
     boolean qrExpired = isExpired(link.getQrExpiresAt());
-    String status = qrExpired && "waiting_scan".equals(link.getStatus()) ? "expired" : defaultString(link.getStatus());
+    boolean hiddenQr = linkExpired || (qrExpired && "waiting_scan".equals(link.getStatus()));
+    String status = effectiveStatus(link);
     return new PublicWechatBindLink(
         link.getToken(),
         defaultString(link.getMode()),
@@ -496,14 +576,30 @@ public class WechatBindLinkService {
         defaultString(link.getPhone()),
         defaultString(link.getInstanceId()),
         instance == null ? "" : defaultString(instance.getName()),
-        qrExpired ? null : link.getQrMode(),
-        qrExpired ? "" : defaultString(link.getQrPayload()),
-        qrExpired ? "" : defaultString(link.getQrLink()),
+        hiddenQr ? null : link.getQrMode(),
+        hiddenQr ? "" : defaultString(link.getQrPayload()),
+        hiddenQr ? "" : defaultString(link.getQrLink()),
         link.getQrExpiresAt(),
-        qrExpired,
+        linkExpired || qrExpired,
         message(link, status, provisioning),
+        link.getExpiresAt(),
+        link.getCompletedAt(),
+        link.getCreatedAt(),
+        link.getUpdatedAt(),
+        statusLabel(status),
+        modeLabel(link.getMode()),
         bindLink(origin, link.getToken())
     );
+  }
+
+  private String effectiveStatus(WechatBindLinkEntity link) {
+    if (hasLinkTtlExpired(link) && !isTerminal(link.getStatus())) {
+      return "expired";
+    }
+    if (isExpired(link.getQrExpiresAt()) && "waiting_scan".equals(link.getStatus())) {
+      return "expired";
+    }
+    return defaultString(link.getStatus());
   }
 
   private String message(WechatBindLinkEntity link, String status, InstanceProvisioningEntity provisioning) {
@@ -519,6 +615,7 @@ public class WechatBindLinkService {
       case "expired" -> "二维码已过期，请重新生成后扫码绑定。";
       case "rejected" -> "本次绑定已拒绝，请联系管理员。";
       case "failed" -> "二维码生成失败，请稍后重试。";
+      case "revoked" -> "扫码链接已失效，请联系管理员重新生成。";
       default -> "";
     };
   }
@@ -573,6 +670,17 @@ public class WechatBindLinkService {
     throw new ApiException(HttpStatus.BAD_REQUEST, "扫码链接类型无效。");
   }
 
+  private String normalizeOptionalMode(String mode) {
+    String normalized = defaultString(mode).trim().toLowerCase(Locale.ROOT);
+    if (normalized.isBlank()) {
+      return "";
+    }
+    if ("new".equals(normalized) || "existing".equals(normalized)) {
+      return normalized;
+    }
+    throw new ApiException(HttpStatus.BAD_REQUEST, "扫码链接类型无效。");
+  }
+
   private String normalizePhone(String phone) {
     String normalized = defaultString(phone).replaceAll("\\s+", "");
     if (!PHONE_PATTERN.matcher(normalized).matches()) {
@@ -596,8 +704,43 @@ public class WechatBindLinkService {
     }
   }
 
+  private boolean isLinkExpired(WechatBindLinkEntity link) {
+    if (link == null || "expired".equals(link.getStatus()) || isTerminal(link.getStatus())) {
+      return false;
+    }
+    return hasLinkTtlExpired(link);
+  }
+
+  private boolean hasLinkTtlExpired(WechatBindLinkEntity link) {
+    return link != null && isExpired(link.getExpiresAt());
+  }
+
   private boolean isTerminal(String status) {
-    return "connected".equals(status) || "rejected".equals(status);
+    return "connected".equals(status) || "rejected".equals(status) || "revoked".equals(status);
+  }
+
+  private static String statusLabel(String status) {
+    return switch (defaultString(status)) {
+      case "phone_required" -> "待填写手机号";
+      case "created" -> "已创建";
+      case "starting" -> "出码中";
+      case "waiting_scan" -> "等待扫码";
+      case "scanned" -> "已扫码";
+      case "connected" -> "已连接";
+      case "expired" -> "已过期";
+      case "rejected" -> "已拒绝";
+      case "failed" -> "出码失败";
+      case "revoked" -> "已失效";
+      default -> defaultString(status);
+    };
+  }
+
+  private static String modeLabel(String mode) {
+    return switch (defaultString(mode)) {
+      case "new" -> "新用户";
+      case "existing" -> "老用户";
+      default -> defaultString(mode);
+    };
   }
 
   private static String randomToken() {
@@ -613,4 +756,6 @@ public class WechatBindLinkService {
   }
 
   public record CreateBindLinkRequest(String mode, String phone) {}
+
+  public record AdminLinkPage(List<PublicWechatBindLink> links, int total, int page, int pageSize) {}
 }

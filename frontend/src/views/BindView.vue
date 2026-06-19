@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { RefreshCw, Smartphone } from "lucide-vue-next";
 import { ApiError, api, jsonBody } from "../api/http";
 import type { PublicWechatBindLink } from "../api/types";
+import { bindStatusLabel, bindStatusTagType, isLinkExpired } from "../utils/adminUi";
 
 const route = useRoute();
 const link = ref<PublicWechatBindLink | null>(null);
@@ -18,6 +19,10 @@ const needsPhone = computed(() => link.value?.status === "phone_required");
 const showQr = computed(() => {
   const current = link.value;
   return Boolean(current && current.status === "waiting_scan" && !current.qrExpired && (current.qrPayload || current.qrLink));
+});
+const canRefreshQr = computed(() => {
+  const current = link.value;
+  return Boolean(current && (current.status === "expired" || current.status === "failed") && !isLinkExpired(current.expiresAt));
 });
 const qrSource = computed(() => {
   const current = link.value;
@@ -85,12 +90,6 @@ async function refreshQr() {
   }
 }
 
-function tagType(status: string) {
-  if (status === "connected") return "success";
-  if (status === "failed" || status === "rejected" || status === "expired") return "danger";
-  if (status === "waiting_scan" || status === "scanned") return "warning";
-  return "info";
-}
 </script>
 
 <template>
@@ -107,7 +106,7 @@ function tagType(status: string) {
 
       <template v-if="link">
         <div class="wechat-status">
-          <el-tag :type="tagType(link.status)" effect="plain">{{ link.status }}</el-tag>
+          <el-tag :type="bindStatusTagType(link.status)" effect="plain">{{ bindStatusLabel(link.status, link.statusLabel) }}</el-tag>
           <span>{{ link.message }}</span>
         </div>
 
@@ -127,7 +126,7 @@ function tagType(status: string) {
 
         <div class="button-row">
           <el-button
-            v-if="link.status === 'expired' || link.status === 'failed'"
+            v-if="canRefreshQr"
             :icon="RefreshCw"
             :loading="actionLoading === 'refresh'"
             @click="refreshQr"

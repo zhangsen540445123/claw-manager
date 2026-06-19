@@ -31,7 +31,14 @@ async function submit() {
 <template>
   <section class="auth-page">
     <el-form class="auth-panel" label-position="top" @submit.prevent="submit">
-      <h1>登录</h1>
+      <div class="auth-brand">
+        <div class="brand-mark">C</div>
+        <div>
+          <strong>Claw Manager</strong>
+          <span>OpenClaw Console</span>
+        </div>
+      </div>
+      <h1>管理员登录</h1>
       <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
       <el-form-item label="邮箱">
         <el-input v-model="form.email" autocomplete="email" />

@@ -45,6 +45,62 @@ public class WechatBindLinkController {
   }
 
   /**
+   * 管理员查询扫码链接历史。
+   */
+  @GetMapping("/api/admin/wechat-bind-links")
+  public Map<String, Object> listBindLinks(
+      @RequestParam(defaultValue = "") String mode,
+      @RequestParam(defaultValue = "") String status,
+      @RequestParam(defaultValue = "") String phone,
+      @RequestParam(defaultValue = "1") int page,
+      @RequestParam(defaultValue = "20") int pageSize,
+      Authentication authentication,
+      HttpServletRequest servletRequest
+  ) {
+    requireAdmin(authentication);
+    WechatBindLinkService.AdminLinkPage result = bindLinkService.listAdminLinks(
+        mode,
+        status,
+        phone,
+        page,
+        pageSize,
+        RequestOrigins.resolve(servletRequest)
+    );
+    return Map.of(
+        "links", result.links(),
+        "total", result.total(),
+        "page", result.page(),
+        "pageSize", result.pageSize()
+    );
+  }
+
+  /**
+   * 管理员读取扫码链接详情。
+   */
+  @GetMapping("/api/admin/wechat-bind-links/{token}")
+  public Map<String, Object> bindLinkDetail(
+      @PathVariable String token,
+      Authentication authentication,
+      HttpServletRequest servletRequest
+  ) {
+    requireAdmin(authentication);
+    return Map.of("link", bindLinkService.adminLinkDetail(token, RequestOrigins.resolve(servletRequest)));
+  }
+
+  /**
+   * 管理员手动失效扫码链接。
+   */
+  @PostMapping("/api/admin/wechat-bind-links/{token}/revoke")
+  public Map<String, Object> revokeBindLink(
+      @PathVariable String token,
+      Authentication authentication,
+      HttpServletRequest servletRequest
+  ) {
+    requireAdmin(authentication);
+    return Map.of("link", bindLinkService.revokeLink(token, RequestOrigins.resolve(servletRequest)));
+  }
+
+  /**
    * 管理员按手机号查询已绑定微信账号。
    */
   @GetMapping("/api/admin/wechat-bindings")

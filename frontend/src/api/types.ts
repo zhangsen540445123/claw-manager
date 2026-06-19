@@ -147,7 +147,20 @@ export interface PublicWechatBindLink {
   qrExpiresAt?: string | null;
   qrExpired: boolean;
   message: string;
+  expiresAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  statusLabel: string;
+  modeLabel: string;
   bindLink: string;
+}
+
+export interface WechatBindLinkPage {
+  links: PublicWechatBindLink[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface WechatBindingLookup {

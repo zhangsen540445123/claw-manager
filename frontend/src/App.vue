@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppShell from "./components/AppShell.vue";
 import { connectAppWebSocket, disconnectAppWebSocket } from "./ws/client";
@@ -15,17 +15,24 @@ const publicRoute = computed(() => route.name === "bind");
 const authRoute = computed(() => route.name === "login");
 const passwordRoute = computed(() => route.name === "change-password");
 const forcedPasswordRoute = computed(() => passwordRoute.value && route.query.forced === "1");
-const adminSections = new Set(["overview", "presets", "create", "wechat", "instances", "ops"]);
 const activeShellRoute = computed(() => {
   if (passwordRoute.value) {
     return "account";
   }
-  if (route.name === "admin") {
-    const section = route.hash.replace(/^#admin-/, "");
-    return adminSections.has(section) ? section : "overview";
+  if (typeof route.meta.shellKey === "string") {
+    return route.meta.shellKey;
   }
   return String(route.name || "");
 });
+
+const adminRoutePaths = {
+  overview: "/admin/overview",
+  presets: "/admin/model-presets",
+  create: "/admin/instances/new",
+  wechat: "/admin/wechat-links",
+  instances: "/admin/instances",
+  ops: "/admin/ops"
+} as const;
 
 async function redirectUnauthenticated() {
   if (publicRoute.value || authRoute.value) return;
@@ -38,9 +45,9 @@ async function enterAuthenticatedArea() {
   if (session.user?.mustChangePassword && !passwordRoute.value) {
     await router.replace({ path: "/change-password", query: { forced: "1" } });
   } else if (!session.user?.mustChangePassword && forcedPasswordRoute.value) {
-    await router.replace("/admin");
+    await router.replace("/admin/overview");
   } else if (authRoute.value || route.path === "/") {
-    await router.replace("/admin");
+    await router.replace("/admin/overview");
   }
 }
 
@@ -95,12 +102,7 @@ async function navigate(routeName: "overview" | "presets" | "create" | "wechat" 
     void router.push("/change-password");
     return;
   }
-  if (!adminSections.has(routeName)) {
-    return;
-  }
-  await router.push({ path: "/admin", hash: `#admin-${routeName}` });
-  await nextTick();
-  document.getElementById(`admin-${routeName}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  await router.push(adminRoutePaths[routeName]);
 }
 </script>
 

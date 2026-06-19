@@ -1,6 +1,7 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.web.RequestOrigins;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -192,40 +193,17 @@ public class PublicInstanceFactory {
   }
 
   private String dashboardUrl(InstanceEntity instance, HttpServletRequest request) {
+    String proxyPath = "/proxy/" + instance.getId();
+    String tokenFragment = "#token="
+        + UriUtils.encodeFragment(defaultString(instance.getGatewayToken()), StandardCharsets.UTF_8);
     if (request != null) {
-      String proxyPath = "/proxy/" + instance.getId();
-      String gatewayUrl = requestScheme(request).replace("http", "ws") + "://"
-          + requestHost(request)
-          + proxyPath;
+      String origin = RequestOrigins.resolve(request);
+      String gatewayUrl = origin.replaceFirst("^http", "ws") + proxyPath;
       return proxyPath + "/?gatewayUrl="
           + URLEncoder.encode(gatewayUrl, StandardCharsets.UTF_8)
-          + "#token="
-          + UriUtils.encodeFragment(defaultString(instance.getGatewayToken()), StandardCharsets.UTF_8);
+          + tokenFragment;
     }
-    return defaultString(instance.getDashboardUrl());
-  }
-
-  private static String requestScheme(HttpServletRequest request) {
-    String forwardedProto = request.getHeader("X-Forwarded-Proto");
-    if (forwardedProto != null && !forwardedProto.isBlank()) {
-      return forwardedProto.split(",")[0].trim();
-    }
-    return request.getScheme();
-  }
-
-  private static String requestHost(HttpServletRequest request) {
-    String forwardedHost = request.getHeader("X-Forwarded-Host");
-    if (forwardedHost != null && !forwardedHost.isBlank()) {
-      return forwardedHost.split(",")[0].trim();
-    }
-    String host = request.getHeader("Host");
-    if (host != null && !host.isBlank()) {
-      return host;
-    }
-    int port = request.getServerPort();
-    boolean defaultPort = ("http".equals(request.getScheme()) && port == 80)
-        || ("https".equals(request.getScheme()) && port == 443);
-    return defaultPort ? request.getServerName() : request.getServerName() + ":" + port;
+    return proxyPath + "/" + tokenFragment;
   }
 
   private Map<String, Object> readJsonMap(String rawJson) {

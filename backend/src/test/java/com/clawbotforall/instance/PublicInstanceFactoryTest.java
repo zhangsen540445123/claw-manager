@@ -101,6 +101,41 @@ class PublicInstanceFactoryTest {
   }
 
   @Test
+  void dashboardUrlUsesForwardedOriginForGatewayUrl() {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.addHeader("X-Forwarded-Proto", "https");
+    request.addHeader("X-Forwarded-Host", "admin.example.test");
+
+    PublicInstance publicInstance = factory.from(
+        baseInstance(),
+        List.of(),
+        null,
+        null,
+        null,
+        List.of(),
+        request
+    );
+
+    assertThat(publicInstance.dashboardUrl())
+        .isEqualTo("/proxy/inst_1/?gatewayUrl=wss%3A%2F%2Fadmin.example.test%2Fproxy%2Finst_1#token=token-1");
+  }
+
+  @Test
+  void dashboardUrlFallsBackToRelativeProxyUrlWithoutRequest() {
+    PublicInstance publicInstance = factory.from(
+        baseInstance(),
+        List.of(),
+        null,
+        null,
+        null,
+        List.of(),
+        null
+    );
+
+    assertThat(publicInstance.dashboardUrl()).isEqualTo("/proxy/inst_1/#token=token-1");
+  }
+
+  @Test
   void marksWaitingWechatQrAsExpiredAfterTtl() {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
@@ -180,5 +215,22 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.wechatBinding().qrExpired()).isFalse();
     assertThat(publicInstance.wechatBinding().qrPayload()).isEqualTo("data:image/png;base64,abc");
     assertThat(publicInstance.wechatBinding().qrLink()).isEqualTo("https://example.com/qr");
+  }
+
+  private static InstanceEntity baseInstance() {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    instance.setName("测试实例");
+    instance.setSlug("test");
+    instance.setStatus("running");
+    instance.setPort(19001);
+    instance.setDashboardUrl("http://127.0.0.1:19001/");
+    instance.setContainerName("clawbot-openclaw-inst_1");
+    instance.setGatewayToken("token-1");
+    instance.setPluginsAllow("[]");
+    instance.setPluginsEntries("{}");
+    instance.setCreatedAt("2026-06-14T00:00:00Z");
+    instance.setUpdatedAt("2026-06-14T00:01:00Z");
+    return instance;
   }
 }

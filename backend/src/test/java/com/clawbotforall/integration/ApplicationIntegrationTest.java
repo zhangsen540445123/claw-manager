@@ -279,7 +279,10 @@ class ApplicationIntegrationTest {
             .content("{\"mode\":\"new\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.link.mode").value("new"))
+        .andExpect(jsonPath("$.link.modeLabel").value("新用户"))
         .andExpect(jsonPath("$.link.status").value("phone_required"))
+        .andExpect(jsonPath("$.link.statusLabel").value("待填写手机号"))
+        .andExpect(jsonPath("$.link.expiresAt").exists())
         .andExpect(jsonPath("$.link.bindLink").value(org.hamcrest.Matchers.startsWith("https://admin.example.test/bind/")))
         .andReturn();
     String newBindToken = objectMapper.readTree(newBindLinkResponse.getResponse().getContentAsString())
@@ -289,6 +292,33 @@ class ApplicationIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.link.status").value("phone_required"))
         .andExpect(jsonPath("$.link.message").value("请先填写手机号获取微信扫码二维码。"));
+
+    mockMvc.perform(get("/api/admin/wechat-bind-links")
+            .cookie(adminCookie)
+            .param("mode", "new")
+            .param("status", "phone_required")
+            .param("page", "1")
+            .param("pageSize", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.total").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+        .andExpect(jsonPath("$.links[0].statusLabel").value("待填写手机号"));
+
+    mockMvc.perform(get("/api/admin/wechat-bind-links/" + newBindToken)
+            .cookie(adminCookie))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.link.token").value(newBindToken))
+        .andExpect(jsonPath("$.link.expiresAt").exists());
+
+    mockMvc.perform(post("/api/admin/wechat-bind-links/" + newBindToken + "/revoke")
+            .cookie(adminCookie))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.link.status").value("revoked"))
+        .andExpect(jsonPath("$.link.statusLabel").value("已失效"));
+
+    mockMvc.perform(get("/api/public/wechat-bind-links/" + newBindToken))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.link.status").value("revoked"))
+        .andExpect(jsonPath("$.link.statusLabel").value("已失效"));
 
     jdbcTemplate.update(
         """
@@ -330,7 +360,9 @@ class ApplicationIntegrationTest {
             .content("{\"mode\":\"existing\",\"phone\":\"13572873189\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.link.mode").value("existing"))
+        .andExpect(jsonPath("$.link.modeLabel").value("老用户"))
         .andExpect(jsonPath("$.link.status").value("created"))
+        .andExpect(jsonPath("$.link.statusLabel").value("已创建"))
         .andExpect(jsonPath("$.link.phone").value("13572873189"))
         .andExpect(jsonPath("$.link.instanceId").value(instanceId))
         .andExpect(jsonPath("$.link.bindLink").value(org.hamcrest.Matchers.startsWith("https://admin.example.test/bind/")));

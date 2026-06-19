@@ -28,6 +28,54 @@
     LIMIT 1
   </select>
 
+  <sql id="AdminLinkFilters">
+    <where>
+      <if test="mode != null and mode != ''">
+        mode = #{mode}
+      </if>
+      <if test="phone != null and phone != ''">
+        AND phone LIKE CONCAT('%', #{phone}, '%')
+      </if>
+      <if test="status != null and status != ''">
+        <choose>
+          <when test="status == 'expired'">
+            AND (
+              status = 'expired'
+              OR (
+                expires_at IS NOT NULL
+                AND expires_at &lt;= #{now}
+                AND status NOT IN ('connected', 'rejected', 'revoked')
+              )
+            )
+          </when>
+          <otherwise>
+            AND status = #{status}
+            AND NOT (
+              expires_at IS NOT NULL
+              AND expires_at &lt;= #{now}
+              AND status NOT IN ('connected', 'rejected', 'revoked', 'expired')
+            )
+          </otherwise>
+        </choose>
+      </if>
+    </where>
+  </sql>
+
+  <select id="listAdminLinks" resultMap="WechatBindLinkMap">
+    SELECT *
+    FROM wechat_bind_links
+    <include refid="AdminLinkFilters"/>
+    ORDER BY created_at DESC, token ASC
+    LIMIT #{pageSize}
+    OFFSET #{offset}
+  </select>
+
+  <select id="countAdminLinks" resultType="int">
+    SELECT COUNT(*)
+    FROM wechat_bind_links
+    <include refid="AdminLinkFilters"/>
+  </select>
+
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
     INSERT INTO wechat_bind_links
       (token, mode, phone, instance_id, expected_account_id, snapshot_account_ids, status,

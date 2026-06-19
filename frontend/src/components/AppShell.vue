@@ -22,11 +22,21 @@ const navItems = computed(() => {
     { key: "overview" as const, label: "运行总览", icon: Activity },
     { key: "presets" as const, label: "模型预设", icon: SlidersHorizontal },
     { key: "create" as const, label: "创建实例", icon: PlusSquare },
-    { key: "wechat" as const, label: "微信扫码", icon: QrCode },
+    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "instances" as const, label: "实例管理", icon: Boxes },
     { key: "ops" as const, label: "系统运维", icon: Server }
   ];
 });
+
+const routeTitles: Record<string, string> = {
+  overview: "运行总览",
+  presets: "模型预设",
+  create: "创建实例",
+  wechat: "扫码链接",
+  instances: "实例管理",
+  ops: "系统运维",
+  account: "账号设置"
+};
 
 function navigate(route: ShellNavKey) {
   mobileNavOpen.value = false;
@@ -46,8 +56,8 @@ function logout() {
         <div class="sidebar-brand">
           <div class="brand-mark">C</div>
           <div>
-            <strong>Clawbot</strong>
-            <span>Control Plane</span>
+            <strong>Claw Manager</strong>
+            <span>OpenClaw Console</span>
           </div>
         </div>
 
@@ -76,7 +86,7 @@ function logout() {
           <X v-else :size="18" />
         </button>
         <div class="topbar-title">
-          <span>{{ activeRoute === "account" ? "账号设置" : "后台管理" }}</span>
+          <span>{{ routeTitles[activeRoute] || "后台管理" }}</span>
           <small>OpenClaw 实例、模型与微信绑定</small>
         </div>
         <div class="topbar-actions">

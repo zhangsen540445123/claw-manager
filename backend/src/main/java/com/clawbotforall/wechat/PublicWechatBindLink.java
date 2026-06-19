@@ -16,5 +16,11 @@ public record PublicWechatBindLink(
     String qrExpiresAt,
     boolean qrExpired,
     String message,
+    String expiresAt,
+    String completedAt,
+    String createdAt,
+    String updatedAt,
+    String statusLabel,
+    String modeLabel,
     String bindLink
 ) {}

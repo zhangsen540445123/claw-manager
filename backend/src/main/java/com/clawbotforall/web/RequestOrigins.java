@@ -23,7 +23,10 @@ public final class RequestOrigins {
       host = request.getHeader("host");
     }
     if (host == null || host.isBlank()) {
-      return "";
+      int port = request.getServerPort();
+      boolean defaultPort = ("http".equals(proto) && port == 80)
+          || ("https".equals(proto) && port == 443);
+      host = defaultPort ? request.getServerName() : request.getServerName() + ":" + port;
     }
     return proto.trim() + "://" + host.trim();
   }

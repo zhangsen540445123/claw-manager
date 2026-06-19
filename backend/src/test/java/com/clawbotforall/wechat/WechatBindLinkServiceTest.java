@@ -82,7 +82,10 @@ class WechatBindLinkServiceTest {
     assertThat(stored.getMode()).isEqualTo("new");
     assertThat(stored.getStatus()).isEqualTo("phone_required");
     assertThat(stored.getCreatedByAdminId()).isEqualTo("admin_1");
+    assertThat(Instant.parse(stored.getExpiresAt())).isAfter(Instant.now().plusSeconds(86_000));
     assertThat(link.status()).isEqualTo("phone_required");
+    assertThat(link.statusLabel()).isEqualTo("待填写手机号");
+    assertThat(link.modeLabel()).isEqualTo("新用户");
     assertThat(link.message()).isEqualTo("请先填写手机号获取微信扫码二维码。");
     assertThat(link.bindLink()).startsWith("https://admin.example.test/bind/wbl_");
   }
@@ -246,6 +249,71 @@ class WechatBindLinkServiceTest {
     assertThat(link.message()).isEqualTo("微信已绑定成功，OpenClaw 正在重启微信通道，通常需要 1-3 分钟，请稍后再使用。");
   }
 
+  @Test
+  void publicStatusExpiresLinkAfterOneDay() {
+    WechatBindLinkEntity stored = newLink("token_expired");
+    stored.setStatus("phone_required");
+    stored.setExpiresAt(Instant.now().minusSeconds(1).toString());
+    stored.setQrPayload("data:image/png;base64,abc");
+    stored.setQrLink("https://qr.example.test");
+    when(linkMapper.findByToken("token_expired")).thenReturn(stored);
+
+    PublicWechatBindLink link = service.getPublicStatus("token_expired", "https://admin.example.test");
+
+    ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
+    verify(linkMapper).update(captor.capture());
+    assertThat(captor.getValue().getStatus()).isEqualTo("expired");
+    assertThat(captor.getValue().getQrPayload()).isEmpty();
+    assertThat(link.status()).isEqualTo("expired");
+    assertThat(link.statusLabel()).isEqualTo("已过期");
+    assertThat(link.message()).isEqualTo("扫码链接已过期，请联系管理员重新生成。");
+  }
+
+  @Test
+  void refreshAllowsQrExpiredLinkWhenOneDayTtlIsStillValid() {
+    WechatBindLinkEntity stored = existingLink("token_qr_expired", "inst_1");
+    stored.setStatus("expired");
+    stored.setErrorMessage("二维码已过期，请重新生成后扫码绑定。");
+    stored.setExpiresAt(Instant.now().plusSeconds(3600).toString());
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_qr_expired")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+    when(accountSyncService.readRawAccountIds(instance)).thenReturn(List.of("wx_existing"));
+
+    PublicWechatBindLink link = service.refreshQr("token_qr_expired", "https://admin.example.test");
+
+    assertThat(link.status()).isEqualTo("starting");
+    assertThat(link.message()).isEqualTo("正在准备微信扫码二维码，请稍候。");
+    verify(wechatBindService).startBind(instance, true);
+  }
+
+  @Test
+  void adminCanRevokeLink() {
+    WechatBindLinkEntity stored = existingLink("token_revoke", "inst_1");
+    stored.setStatus("waiting_scan");
+    stored.setQrPayload("data:image/png;base64,abc");
+    stored.setQrLink("https://qr.example.test");
+    when(linkMapper.findByToken("token_revoke")).thenReturn(stored);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink link = service.revokeLink("token_revoke", "https://admin.example.test");
+
+    ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
+    verify(linkMapper).update(captor.capture());
+    assertThat(captor.getValue().getStatus()).isEqualTo("revoked");
+    assertThat(captor.getValue().getQrPayload()).isEmpty();
+    assertThat(link.status()).isEqualTo("revoked");
+    assertThat(link.statusLabel()).isEqualTo("已失效");
+    assertThat(link.message()).isEqualTo("扫码链接已手动失效。");
+  }
+
   private static AuthenticatedAdmin admin() {
     return new AuthenticatedAdmin(
         "admin_1",
@@ -263,6 +331,7 @@ class WechatBindLinkServiceTest {
     link.setMode("new");
     link.setCreatedByAdminId("admin_1");
     link.setCreatedAt("2026-06-18T00:00:00Z");
+    link.setExpiresAt(Instant.now().plusSeconds(3600).toString());
     link.setUpdatedAt("2026-06-18T00:00:00Z");
     return link;
   }

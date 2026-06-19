@@ -12,6 +12,7 @@ import type {
   PublicModelPreset,
   PublicWechatBindLink,
   PublicWechatBinding,
+  WechatBindLinkPage,
   WechatBindingLookup
 } from "../api/types";
 
@@ -135,6 +136,25 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<{ link: PublicWechatBindLink }>("/api/admin/wechat-bind-links", {
         method: "POST",
         ...jsonBody({ mode, phone })
+      });
+      return response.link;
+    },
+    async loadWechatLinks(params: { mode?: string; status?: string; phone?: string; page?: number; pageSize?: number } = {}) {
+      const search = new URLSearchParams();
+      if (params.mode) search.set("mode", params.mode);
+      if (params.status) search.set("status", params.status);
+      if (params.phone) search.set("phone", params.phone);
+      search.set("page", String(params.page || 1));
+      search.set("pageSize", String(params.pageSize || 20));
+      return api<WechatBindLinkPage>(`/api/admin/wechat-bind-links?${search.toString()}`);
+    },
+    async loadWechatLinkDetail(token: string) {
+      const response = await api<{ link: PublicWechatBindLink }>(`/api/admin/wechat-bind-links/${encodeURIComponent(token)}`);
+      return response.link;
+    },
+    async revokeWechatLink(token: string) {
+      const response = await api<{ link: PublicWechatBindLink }>(`/api/admin/wechat-bind-links/${encodeURIComponent(token)}/revoke`, {
+        method: "POST"
       });
       return response.link;
     },
