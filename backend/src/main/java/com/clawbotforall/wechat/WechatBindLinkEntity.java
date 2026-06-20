@@ -10,6 +10,7 @@ public class WechatBindLinkEntity {
   private String phone;
   private String instanceId;
   private String expectedAccountId;
+  private String pendingAccountId;
   private String snapshotAccountIds;
   private String status;
   private String qrMode;
@@ -61,6 +62,14 @@ public class WechatBindLinkEntity {
 
   public void setExpectedAccountId(String expectedAccountId) {
     this.expectedAccountId = expectedAccountId;
+  }
+
+  public String getPendingAccountId() {
+    return pendingAccountId;
+  }
+
+  public void setPendingAccountId(String pendingAccountId) {
+    this.pendingAccountId = pendingAccountId;
   }
 
   public String getSnapshotAccountIds() {

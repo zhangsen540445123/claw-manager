@@ -95,7 +95,7 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.model().extra()).containsEntry("note", "demo");
     assertThat(publicInstance.models()).hasSize(1);
     assertThat(publicInstance.modelChain()).hasSize(1);
-    assertThat(publicInstance.plugins().get("allow")).asList().contains("openclaw-weixin");
+    assertThat(publicInstance.plugins().get("allow")).asList().isEmpty();
     assertThat(publicInstance.wechatBinding().pairedAccounts()).hasSize(1);
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().remark()).isEqualTo("战神");
   }

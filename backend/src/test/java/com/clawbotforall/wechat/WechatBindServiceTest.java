@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,6 +70,12 @@ class WechatBindServiceTest {
   @Mock
   RuntimeExecHandle execHandle;
 
+  @Mock
+  WechatPluginService pluginService;
+
+  @Mock
+  OpenClawGatewayRpcService gatewayRpcService;
+
   WechatBindService service;
 
   @BeforeEach
@@ -83,12 +90,15 @@ class WechatBindServiceTest {
         queryService,
         eventPublisher,
         accountSyncService,
-        testProperties()
+        pluginService,
+        gatewayRpcService,
+        testProperties(),
+        Runnable::run
     );
   }
 
   @Test
-  void restartsGatewayWhenLoginSavedAuthButRunningGatewayCannotStartChannel() {
+  void startsCliLoginAndDoesNotRestartAfterConnected() {
     InstanceEntity instance = instance();
     InstancePaths paths = new InstancePaths(
         Path.of("instances", "inst_1"),
@@ -96,35 +106,51 @@ class WechatBindServiceTest {
         Path.of("instances", "inst_1", "workspace"),
         Path.of("instances", "inst_1", "logs")
     );
-    ArgumentCaptor<RuntimeExecListener> listenerCaptor = ArgumentCaptor.forClass(RuntimeExecListener.class);
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning()));
     when(aggregateMapper.listWechatBindingByInstanceIds(List.of("inst_1"))).thenReturn(List.of());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-18T00:00:00Z"));
     when(commandService.listModels("inst_1")).thenReturn(List.of());
     when(fileService.writeInstanceFiles(eq(instance), any())).thenReturn(paths);
     when(queryService.findPublicInstance(eq("inst_1"), any())).thenReturn(Optional.empty());
+    when(pluginService.isWechatPluginInstalled(instance)).thenReturn(true);
+    when(accountSyncService.readRawAccountIds(instance)).thenReturn(List.of("eb3fd7bd7101-im-bot"));
     when(openClawRuntime.startExec(
         eq(instance),
-        anyString(),
-        anyLong(),
+        eq(List.of("openclaw", "channels", "login", "--channel", "openclaw-weixin")),
+        eq(600_000L),
         anyMap(),
-        listenerCaptor.capture()
-    )).thenReturn(execHandle);
+        any(RuntimeExecListener.class)
+    )).thenAnswer(invocation -> {
+      RuntimeExecListener listener = invocation.getArgument(4);
+      listener.onOutput("若二维码未能显示或无法使用，你可以访问以下链接以继续：\n");
+      listener.onOutput("https://liteapp.weixin.qq.com/q/test\n");
+      listener.onComplete(0);
+      return execHandle;
+    });
 
-    service.startBind(instance, false);
-    listenerCaptor.getValue().onOutput("""
-        已将此 OpenClaw 连接到微信。
-        Local login saved auth for openclaw-weixin/default, but the running gateway did not restart it: invalid channels.start channel
-        """);
-    listenerCaptor.getValue().onComplete(1);
+    WechatBindService.BindStartResult result = service.startBind(instance, false, "cmwx_token_1");
+
+    assertThat(result.accountId()).isEqualTo("cmwx_token_1");
+    assertThat(result.sessionKey()).isNull();
+    assertThat(result.qrMode()).isEqualTo("link");
+    assertThat(result.qrLink()).isEqualTo("https://liteapp.weixin.qq.com/q/test");
 
     verify(accountSyncService).syncInstanceAccounts(instance);
-    verify(provisioningService).startProvisioning("inst_1");
+    verify(gatewayRpcService).startWechatChannel(instance, List.of("eb3fd7bd7101-im-bot"));
+    verify(provisioningService, never()).startProvisioning(anyString());
+    verify(openClawRuntime, never()).startExec(eq(instance), anyString(), anyLong(), anyMap(), any(RuntimeExecListener.class));
+    verify(openClawRuntime).startExec(
+        eq(instance),
+        eq(List.of("openclaw", "channels", "login", "--channel", "openclaw-weixin")),
+        eq(600_000L),
+        anyMap(),
+        any(RuntimeExecListener.class)
+    );
 
     ArgumentCaptor<InstanceWechatBindingEntity> bindingCaptor = ArgumentCaptor.forClass(InstanceWechatBindingEntity.class);
     verify(mutationMapper, atLeastOnce()).updateWechatBinding(bindingCaptor.capture());
     assertThat(bindingCaptor.getAllValues().getLast().getStatus()).isEqualTo("connected");
-    assertThat(bindingCaptor.getAllValues().getLast().getRuntimeStatus()).isEqualTo("restarting");
+    assertThat(bindingCaptor.getAllValues().getLast().getRuntimeStatus()).isEqualTo("ready");
   }
 
   private static InstanceEntity instance() {

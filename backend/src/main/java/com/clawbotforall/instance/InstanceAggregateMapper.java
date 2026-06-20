@@ -34,5 +34,7 @@ public interface InstanceAggregateMapper {
 
   WechatPairedAccountEntity findWechatAccountByAccountId(@Param("accountId") String accountId);
 
+  WechatPairedAccountEntity findWechatAccountByWechatUserId(@Param("wechatUserId") String wechatUserId);
+
   int countWechatAccountsByInstanceId(@Param("instanceId") String instanceId);
 }

@@ -32,7 +32,7 @@ class InstanceRecordFactoryTest {
     assertThat(draft.instance().getStatus()).isEqualTo("stopped");
     assertThat(draft.instance().getDashboardUrl()).isEqualTo("http://127.0.0.1:19001/");
     assertThat(draft.instance().getContainerName()).startsWith("clawbot-openclaw-");
-    assertThat(draft.instance().getPluginsAllow()).contains("openclaw-weixin");
+    assertThat(draft.instance().getPluginsAllow()).isEqualTo("[]");
     assertThat(draft.model().getPresetId()).isEqualTo("preset_1");
     assertThat(draft.model().getProviderId()).isEqualTo("openai");
     assertThat(draft.provisioning().getStatus()).isEqualTo("running");

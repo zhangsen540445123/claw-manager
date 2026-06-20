@@ -406,11 +406,35 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
       Map<String, String> env,
       RuntimeExecListener listener
   ) {
+    return startExecInternal(instance, List.of("/bin/sh", "-lc", command), timeoutMs, env, listener);
+  }
+
+  @Override
+  public RuntimeExecHandle startExec(
+      InstanceEntity instance,
+      List<String> command,
+      long timeoutMs,
+      Map<String, String> env,
+      RuntimeExecListener listener
+  ) {
+    if (command == null || command.isEmpty() || command.stream().anyMatch(item -> item == null || item.isBlank())) {
+      throw new IllegalArgumentException("容器命令不能为空。");
+    }
+    return startExecInternal(instance, command, timeoutMs, env, listener);
+  }
+
+  private RuntimeExecHandle startExecInternal(
+      InstanceEntity instance,
+      List<String> command,
+      long timeoutMs,
+      Map<String, String> env,
+      RuntimeExecListener listener
+  ) {
     var createCmd = dockerClient.execCreateCmd(instance.getContainerName())
         .withAttachStdout(true)
         .withAttachStderr(true)
         .withAttachStdin(true)
-        .withCmd("/bin/sh", "-lc", command)
+        .withCmd(command.toArray(String[]::new))
         .withTty(false);
     if (env != null && !env.isEmpty()) {
       createCmd.withEnv(env.entrySet().stream()

@@ -7,6 +7,7 @@
     <result property="phone" column="phone"/>
     <result property="instanceId" column="instance_id"/>
     <result property="expectedAccountId" column="expected_account_id"/>
+    <result property="pendingAccountId" column="pending_account_id"/>
     <result property="snapshotAccountIds" column="snapshot_account_ids"/>
     <result property="status" column="status"/>
     <result property="qrMode" column="qr_mode"/>
@@ -78,11 +79,13 @@
 
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
     INSERT INTO wechat_bind_links
-      (token, mode, phone, instance_id, expected_account_id, snapshot_account_ids, status,
+      (token, mode, phone, instance_id, expected_account_id, pending_account_id,
+       snapshot_account_ids, status,
        qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id,
        created_at, expires_at, completed_at, updated_at)
     VALUES
-      (#{token}, #{mode}, #{phone}, #{instanceId}, #{expectedAccountId}, #{snapshotAccountIds}, #{status},
+      (#{token}, #{mode}, #{phone}, #{instanceId}, #{expectedAccountId}, #{pendingAccountId},
+       #{snapshotAccountIds}, #{status},
        #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{createdByAdminId},
        #{createdAt}, #{expiresAt}, #{completedAt}, #{updatedAt})
   </insert>
@@ -93,6 +96,7 @@
         phone = #{phone},
         instance_id = #{instanceId},
         expected_account_id = #{expectedAccountId},
+        pending_account_id = #{pendingAccountId},
         snapshot_account_ids = #{snapshotAccountIds},
         status = #{status},
         qr_mode = #{qrMode},

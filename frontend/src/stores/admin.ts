@@ -12,6 +12,7 @@ import type {
   PublicModelPreset,
   PublicWechatBindLink,
   PublicWechatBinding,
+  PublicWechatPluginStatus,
   WechatBindLinkPage,
   WechatBindingLookup
 } from "../api/types";
@@ -43,6 +44,8 @@ export const useAdminStore = defineStore("admin", {
     runnerImage: null as RunnerImageStatus | null,
     serverLogs: "",
     statsByInstanceId: {} as Record<string, InstanceStats | null>,
+    wechatPluginStatusByInstanceId: {} as Record<string, PublicWechatPluginStatus>,
+    wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
     loading: false,
@@ -139,6 +142,27 @@ export const useAdminStore = defineStore("admin", {
       });
       return response.link;
     },
+    async loadWechatPluginStatus(instanceId: string, checkLatest = false) {
+      const response = await api<{ plugin: PublicWechatPluginStatus }>(
+        `/api/admin/instances/${instanceId}/wechat-plugin?checkLatest=${checkLatest ? "true" : "false"}`
+      );
+      this.wechatPluginStatusByInstanceId = {
+        ...this.wechatPluginStatusByInstanceId,
+        [instanceId]: response.plugin
+      };
+      return response.plugin;
+    },
+    async installWechatPlugin(instanceId: string) {
+      const response = await api<{ plugin: PublicWechatPluginStatus }>(
+        `/api/admin/instances/${instanceId}/wechat-plugin/install`,
+        { method: "POST" }
+      );
+      this.wechatPluginStatusByInstanceId = {
+        ...this.wechatPluginStatusByInstanceId,
+        [instanceId]: response.plugin
+      };
+      return response.plugin;
+    },
     async loadWechatLinks(params: { mode?: string; status?: string; phone?: string; page?: number; pageSize?: number } = {}) {
       const search = new URLSearchParams();
       if (params.mode) search.set("mode", params.mode);
@@ -218,6 +242,20 @@ export const useAdminStore = defineStore("admin", {
       if (event.type === "wechat.binding.updated") {
         const payload = event.payload as { instanceId: string; binding: PublicWechatBinding };
         this.patchInstance(payload.instanceId, { wechatBinding: payload.binding });
+      }
+      if (event.type === "wechat.plugin.updated") {
+        const payload = event.payload as { instanceId: string; plugin: PublicWechatPluginStatus };
+        this.wechatPluginStatusByInstanceId = {
+          ...this.wechatPluginStatusByInstanceId,
+          [payload.instanceId]: payload.plugin
+        };
+      }
+      if (event.type === "wechat.bindLink.updated") {
+        const payload = event.payload as { token: string; link: PublicWechatBindLink };
+        this.wechatBindLinkByToken = {
+          ...this.wechatBindLinkByToken,
+          [payload.token]: payload.link
+        };
       }
       if (event.type === "modelAuth.updated") {
         const payload = event.payload as { instanceId: string; modelAuth: PublicInstanceModelAuth };

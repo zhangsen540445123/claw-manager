@@ -38,7 +38,7 @@ class InstanceFileServiceTest {
         instanceDir.resolve("home").resolve("openclaw.json").toFile(),
         new TypeReference<>() {}
     );
-    assertThat(config).containsKeys("gateway", "agents", "models", "plugins", "channels", "session");
+    assertThat(config).containsKeys("gateway", "agents", "models", "plugins", "session");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> gateway = (Map<String, Object>) config.get("gateway");
@@ -71,11 +71,14 @@ class InstanceFileServiceTest {
         .containsKey("openai");
 
     @SuppressWarnings("unchecked")
-    Map<String, Object> channels = (Map<String, Object>) config.get("channels");
-    assertThat(channels).containsKey("openclaw-weixin");
-    assertThat(channels.get("openclaw-weixin"))
+    Map<String, Object> plugins = (Map<String, Object>) config.get("plugins");
+    assertThat(plugins.get("allow"))
+        .asList()
+        .isEmpty();
+    assertThat(plugins.get("entries"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("enabled", true);
+        .isEmpty();
+    assertThat(config).doesNotContainKey("channels");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> session = (Map<String, Object>) config.get("session");
@@ -85,7 +88,7 @@ class InstanceFileServiceTest {
   }
 
   @Test
-  void preservesExistingChannelsAndEnablesWechatChannel() throws Exception {
+  void preservesExistingChannelsWithoutForcingWechatChannel() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
     InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
@@ -115,7 +118,7 @@ class InstanceFileServiceTest {
         .containsEntry("custom", "keep");
     assertThat(channels.get("openclaw-weixin"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("enabled", true)
+        .containsEntry("enabled", false)
         .containsEntry("botAgent", "CustomBot/1.0");
     assertThat(config.get("session"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
@@ -124,6 +127,29 @@ class InstanceFileServiceTest {
     assertThat(config.get("meta"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
         .containsEntry("source", "existing");
+  }
+
+  @Test
+  void enablesWechatChannelWhenPluginIsAllowedOnInstance() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    draft.instance().setPluginsAllow("[\"openclaw-weixin\"]");
+    draft.instance().setPluginsEntries("{\"openclaw-weixin\":{\"enabled\":true}}");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    @SuppressWarnings("unchecked")
+    Map<String, Object> channels = (Map<String, Object>) config.get("channels");
+    assertThat(channels.get("openclaw-weixin"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("enabled", true)
+        .containsEntry("replyProgressMessages", true);
   }
 
   private ClawbotProperties testProperties() {

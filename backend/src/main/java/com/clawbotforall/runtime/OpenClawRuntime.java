@@ -1,6 +1,7 @@
 package com.clawbotforall.runtime;
 
 import com.clawbotforall.instance.InstanceEntity;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -66,6 +67,29 @@ public interface OpenClawRuntime {
   RuntimeExecHandle startExec(
       InstanceEntity instance,
       String command,
+      long timeoutMs,
+      Map<String, String> env,
+      RuntimeExecListener listener
+  );
+
+  /**
+   * 在实例容器内以 argv 形式启动命令，不经过 shell 解析。
+   */
+  default RuntimeExecHandle startExec(
+      InstanceEntity instance,
+      List<String> command,
+      long timeoutMs,
+      RuntimeExecListener listener
+  ) {
+    return startExec(instance, command, timeoutMs, Map.of(), listener);
+  }
+
+  /**
+   * 在实例容器内以 argv 形式启动命令，并向监听器流式回调生命周期事件。
+   */
+  RuntimeExecHandle startExec(
+      InstanceEntity instance,
+      List<String> command,
       long timeoutMs,
       Map<String, String> env,
       RuntimeExecListener listener

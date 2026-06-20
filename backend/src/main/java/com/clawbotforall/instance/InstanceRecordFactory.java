@@ -17,8 +17,6 @@ public class InstanceRecordFactory {
 
   public static final int INSTANCE_BASE_PORT = 19000;
 
-  private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
-
   private final ObjectMapper objectMapper;
 
   public InstanceRecordFactory(ObjectMapper objectMapper) {
@@ -50,8 +48,8 @@ public class InstanceRecordFactory {
     instance.setDashboardUrl("http://127.0.0.1:" + port + "/");
     instance.setContainerName("clawbot-openclaw-" + id);
     instance.setGatewayToken(id + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10));
-    instance.setPluginsAllow(writeJson(new String[] {WECHAT_CHANNEL_ID}));
-    instance.setPluginsEntries(writeJson(Map.of(WECHAT_CHANNEL_ID, Map.of("enabled", true))));
+    instance.setPluginsAllow(writeJson(new String[] {}));
+    instance.setPluginsEntries(writeJson(Map.of()));
     instance.setCreatedAt(now);
     instance.setUpdatedAt(now);
 

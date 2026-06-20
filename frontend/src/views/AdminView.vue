@@ -14,6 +14,7 @@ const error = ref("");
 const presetDialogOpen = ref(false);
 const presetMode = ref<"create" | "edit">("create");
 const generatedLink = ref<PublicWechatBindLink | null>(null);
+const newPhone = ref("");
 const existingPhone = ref("");
 const existingBindingOptions = ref<WechatBindingLookup[]>([]);
 const existingBindingLoading = ref(false);
@@ -107,8 +108,9 @@ async function copyText(value: string, label = "链接") {
 
 async function createNewBindLink() {
   await runAction("bind:new", async () => {
-    generatedLink.value = await admin.createBindLink("new");
-    ElMessage.success("新用户扫码链接已生成。");
+    generatedLink.value = await admin.createBindLink("new", newPhone.value);
+    newPhone.value = "";
+    ElMessage.success("新用户二维码已生成。");
   });
 }
 
@@ -333,9 +335,12 @@ function openControlUi(instance: PublicInstance) {
               <div class="bind-actions">
                 <section class="bind-action-panel">
                   <strong>新用户出码</strong>
-                  <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
-                    为新用户出码
-                  </el-button>
+                  <div class="existing-bind-row">
+                    <el-input v-model="newPhone" inputmode="tel" placeholder="输入新用户手机号" clearable />
+                    <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
+                      为新用户出码
+                    </el-button>
+                  </div>
                 </section>
                 <section class="bind-action-panel">
                   <strong>老用户出码</strong>

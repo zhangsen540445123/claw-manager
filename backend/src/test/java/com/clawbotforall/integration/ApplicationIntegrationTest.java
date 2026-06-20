@@ -2,6 +2,8 @@ package com.clawbotforall.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -14,9 +16,13 @@ import com.clawbotforall.runtime.InstanceStats;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.ProxyTarget;
 import com.clawbotforall.runtime.RunnerImageStatus;
+import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -94,6 +100,23 @@ class ApplicationIntegrationTest {
         Long.class
     ))
         .isZero();
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM (
+              SELECT index_name
+              FROM information_schema.statistics
+              WHERE table_schema = DATABASE()
+                AND table_name = 'wechat_paired_accounts'
+                AND non_unique = 0
+              GROUP BY index_name
+              HAVING COUNT(*) = 1
+                 AND MAX(column_name) IN ('account_id', 'phone', 'wechat_user_id')
+            ) unique_single_column_indexes
+            """,
+        Long.class
+    ))
+        .isEqualTo(3);
 
     mockMvc.perform(get("/api/health"))
         .andExpect(status().isOk())
@@ -147,6 +170,30 @@ class ApplicationIntegrationTest {
     when(openClawRuntime.getLogs(any(), any(Integer.class))).thenReturn("line1\nline2");
     when(openClawRuntime.getStats(any())).thenReturn(new InstanceStats("1.2", "12 MiB / 1 GiB", "1.1", "0B / 0B", "4"));
     when(openClawRuntime.resolveProxyTarget(any())).thenReturn(new ProxyTarget("127.0.0.1", 19001, "test", ""));
+    when(openClawRuntime.startExec(any(), any(java.util.List.class), anyLong(), anyMap(), any(RuntimeExecListener.class)))
+        .thenAnswer(invocation -> {
+          @SuppressWarnings("unchecked")
+          List<String> command = invocation.getArgument(1);
+          RuntimeExecListener listener = invocation.getArgument(4);
+          if (command.contains("login")) {
+            listener.onOutput("https://liteapp.weixin.qq.com/q/integration\n");
+          } else {
+            listener.onOutput("{\"channel\":\"openclaw-weixin\",\"started\":true}\n");
+            listener.onComplete(0);
+          }
+          return new com.clawbotforall.runtime.RuntimeExecHandle() {
+            @Override
+            public void sendInput(String input) {}
+
+            @Override
+            public void cancel() {}
+
+            @Override
+            public boolean isCancelled() {
+              return false;
+            }
+          };
+        });
 
     Cookie adminCookie = loginAdmin();
 
@@ -197,6 +244,19 @@ class ApplicationIntegrationTest {
         .andReturn();
     String instanceId = objectMapper.readTree(instanceResponse.getResponse().getContentAsString())
         .at("/instance/id").asText();
+    Path pluginPackage = Path.of(
+        "target",
+        "integration-data",
+        "instances",
+        instanceId,
+        "home",
+        ".openclaw",
+        "extensions",
+        "openclaw-weixin",
+        "package.json"
+    );
+    Files.createDirectories(pluginPackage.getParent());
+    Files.writeString(pluginPackage, "{\"version\":\"2.5.0\"}");
 
     mockMvc.perform(get("/api/admin/instances/" + instanceId + "/logs").cookie(adminCookie))
         .andExpect(status().isOk())
@@ -276,32 +336,35 @@ class ApplicationIntegrationTest {
             .header("X-Forwarded-Proto", "https")
             .header("X-Forwarded-Host", "admin.example.test")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"mode\":\"new\"}"))
+            .content("{\"mode\":\"new\",\"phone\":\"13900000002\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.link.mode").value("new"))
         .andExpect(jsonPath("$.link.modeLabel").value("新用户"))
-        .andExpect(jsonPath("$.link.status").value("phone_required"))
-        .andExpect(jsonPath("$.link.statusLabel").value("待填写手机号"))
+        .andExpect(jsonPath("$.link.status").value("created"))
+        .andExpect(jsonPath("$.link.statusLabel").value("已创建"))
+        .andExpect(jsonPath("$.link.phone").value("13900000002"))
         .andExpect(jsonPath("$.link.expiresAt").exists())
         .andExpect(jsonPath("$.link.bindLink").value(org.hamcrest.Matchers.startsWith("https://admin.example.test/bind/")))
         .andReturn();
     String newBindToken = objectMapper.readTree(newBindLinkResponse.getResponse().getContentAsString())
         .at("/link/token").asText();
+    waitForAdminLinkStatus(adminCookie, newBindToken, "waiting_scan");
 
     mockMvc.perform(get("/api/public/wechat-bind-links/" + newBindToken))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.link.status").value("phone_required"))
-        .andExpect(jsonPath("$.link.message").value("请先填写手机号获取微信扫码二维码。"));
+        .andExpect(jsonPath("$.link.status").value("waiting_scan"))
+        .andExpect(jsonPath("$.link.qrLink").value("https://liteapp.weixin.qq.com/q/integration"))
+        .andExpect(jsonPath("$.link.message").value("请使用微信扫描二维码完成绑定。"));
 
     mockMvc.perform(get("/api/admin/wechat-bind-links")
             .cookie(adminCookie)
             .param("mode", "new")
-            .param("status", "phone_required")
+            .param("status", "waiting_scan")
             .param("page", "1")
             .param("pageSize", "10"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.total").value(org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
-        .andExpect(jsonPath("$.links[0].statusLabel").value("待填写手机号"));
+        .andExpect(jsonPath("$.links[0].statusLabel").value("等待扫码"));
 
     mockMvc.perform(get("/api/admin/wechat-bind-links/" + newBindToken)
             .cookie(adminCookie))
@@ -352,7 +415,7 @@ class ApplicationIntegrationTest {
         .andExpect(jsonPath("$.bindings[0].accountId").value("wx_existing"))
         .andExpect(jsonPath("$.bindings[0].phone").value("13572873189"));
 
-    mockMvc.perform(post("/api/admin/wechat-bind-links")
+    MvcResult existingBindLinkResponse = mockMvc.perform(post("/api/admin/wechat-bind-links")
             .cookie(adminCookie)
             .header("X-Forwarded-Proto", "https")
             .header("X-Forwarded-Host", "admin.example.test")
@@ -365,7 +428,35 @@ class ApplicationIntegrationTest {
         .andExpect(jsonPath("$.link.statusLabel").value("已创建"))
         .andExpect(jsonPath("$.link.phone").value("13572873189"))
         .andExpect(jsonPath("$.link.instanceId").value(instanceId))
-        .andExpect(jsonPath("$.link.bindLink").value(org.hamcrest.Matchers.startsWith("https://admin.example.test/bind/")));
+        .andExpect(jsonPath("$.link.bindLink").value(org.hamcrest.Matchers.startsWith("https://admin.example.test/bind/")))
+        .andReturn();
+    String existingBindToken = objectMapper.readTree(existingBindLinkResponse.getResponse().getContentAsString())
+        .at("/link/token").asText();
+    waitForAdminLinkStatus(adminCookie, existingBindToken, "waiting_scan");
+  }
+
+  private void waitForAdminLinkStatus(Cookie adminCookie, String token, String expectedStatus) throws Exception {
+    AssertionError lastError = null;
+    long deadline = System.currentTimeMillis() + 5_000;
+    while (System.currentTimeMillis() < deadline) {
+      MvcResult result = mockMvc.perform(get("/api/admin/wechat-bind-links/" + token)
+              .cookie(adminCookie))
+          .andReturn();
+      try {
+        assertThat(result.getResponse().getStatus()).isEqualTo(200);
+        String status = objectMapper.readTree(result.getResponse().getContentAsString())
+            .at("/link/status")
+            .asText();
+        if (expectedStatus.equals(status)) {
+          return;
+        }
+        lastError = new AssertionError("Expected link status " + expectedStatus + " but was " + status);
+      } catch (AssertionError error) {
+        lastError = error;
+      }
+      Thread.sleep(100);
+    }
+    throw lastError == null ? new AssertionError("Timed out waiting for link status " + expectedStatus) : lastError;
   }
 
   private Cookie loginAdmin() throws Exception {

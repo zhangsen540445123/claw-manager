@@ -22,8 +22,6 @@ import org.springframework.web.util.UriUtils;
 @Component
 public class PublicInstanceFactory {
 
-  private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
-
   private final ObjectMapper objectMapper;
   private final ClawbotProperties properties;
 
@@ -173,18 +171,7 @@ public class PublicInstanceFactory {
 
   private Map<String, Object> plugins(InstanceEntity instance) {
     List<Object> allow = readJsonList(instance.getPluginsAllow());
-    if (!allow.contains(WECHAT_CHANNEL_ID)) {
-      allow = new ArrayList<>(allow);
-      allow.add(WECHAT_CHANNEL_ID);
-    }
-
     Map<String, Object> entries = readJsonMap(instance.getPluginsEntries());
-    Object wechatEntry = entries.get(WECHAT_CHANNEL_ID);
-    Map<String, Object> normalizedWechatEntry = wechatEntry instanceof Map<?, ?> map
-        ? stringKeyMap(map)
-        : new LinkedHashMap<>();
-    normalizedWechatEntry.putIfAbsent("enabled", true);
-    entries.put(WECHAT_CHANNEL_ID, normalizedWechatEntry);
 
     Map<String, Object> plugins = new LinkedHashMap<>();
     plugins.put("allow", allow);

@@ -156,6 +156,17 @@ export interface PublicWechatBindLink {
   bindLink: string;
 }
 
+export interface PublicWechatPluginStatus {
+  installed: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  upgradable: boolean;
+  status: string;
+  message: string;
+  outputSnippet: string;
+  updatedAt: string;
+}
+
 export interface WechatBindLinkPage {
   links: PublicWechatBindLink[];
   total: number;

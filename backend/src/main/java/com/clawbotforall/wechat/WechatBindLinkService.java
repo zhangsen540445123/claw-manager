@@ -4,6 +4,7 @@ import com.clawbotforall.auth.AuthenticatedAdmin;
 import com.clawbotforall.config.ClawbotProperties;
 import com.clawbotforall.instance.InstanceAggregateMapper;
 import com.clawbotforall.instance.InstanceEntity;
+import com.clawbotforall.instance.InstanceEventPublisher;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceProvisioningEntity;
 import com.clawbotforall.instance.InstanceWechatBindingEntity;
@@ -23,6 +24,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -30,8 +35,11 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 管理员扫码链接、新用户手机号绑定和老用户回原实例绑定流程服务。
@@ -52,7 +60,11 @@ public class WechatBindLinkService {
   private final InstanceFileService fileService;
   private final ClawbotProperties properties;
   private final ObjectMapper objectMapper;
+  private final InstanceEventPublisher eventPublisher;
+  private final Executor executor;
+  private final ConcurrentMap<String, Boolean> qrJobs = new ConcurrentHashMap<>();
 
+  @Autowired
   public WechatBindLinkService(
       WechatBindLinkMapper linkMapper,
       InstanceAggregateMapper aggregateMapper,
@@ -61,7 +73,34 @@ public class WechatBindLinkService {
       WechatAccountSyncService accountSyncService,
       InstanceFileService fileService,
       ClawbotProperties properties,
-      ObjectMapper objectMapper
+      ObjectMapper objectMapper,
+      InstanceEventPublisher eventPublisher
+  ) {
+    this(
+        linkMapper,
+        aggregateMapper,
+        mutationMapper,
+        wechatBindService,
+        accountSyncService,
+        fileService,
+        properties,
+        objectMapper,
+        eventPublisher,
+        defaultExecutor()
+    );
+  }
+
+  WechatBindLinkService(
+      WechatBindLinkMapper linkMapper,
+      InstanceAggregateMapper aggregateMapper,
+      InstanceMutationMapper mutationMapper,
+      WechatBindService wechatBindService,
+      WechatAccountSyncService accountSyncService,
+      InstanceFileService fileService,
+      ClawbotProperties properties,
+      ObjectMapper objectMapper,
+      InstanceEventPublisher eventPublisher,
+      Executor executor
   ) {
     this.linkMapper = linkMapper;
     this.aggregateMapper = aggregateMapper;
@@ -71,6 +110,8 @@ public class WechatBindLinkService {
     this.fileService = fileService;
     this.properties = properties;
     this.objectMapper = objectMapper;
+    this.eventPublisher = eventPublisher;
+    this.executor = executor;
   }
 
   /**
@@ -87,7 +128,7 @@ public class WechatBindLinkService {
     WechatBindLinkEntity link = new WechatBindLinkEntity();
     link.setToken(randomToken());
     link.setMode(mode);
-    link.setStatus("new".equals(mode) ? "phone_required" : "created");
+    link.setStatus("created");
     link.setCreatedByAdminId(admin.id());
     link.setCreatedAt(now);
     link.setExpiresAt(Instant.parse(now).plus(LINK_TTL).toString());
@@ -104,11 +145,18 @@ public class WechatBindLinkService {
       link.setInstanceId(instance.getId());
       link.setExpectedAccountId(account.getAccountId());
     } else {
-      requireAnyBindableInstance();
+      String phone = normalizePhone(request == null ? "" : request.phone());
+      if (aggregateMapper.findWechatAccountByPhone(phone) != null) {
+        throw new ApiException(HttpStatus.CONFLICT, "该手机号已绑定，请使用老用户出码。");
+      }
+      InstanceEntity instance = chooseBindableInstance();
+      link.setPhone(phone);
+      link.setInstanceId(instance.getId());
     }
 
     linkMapper.insert(link);
     log.info("管理员创建微信扫码链接：mode={}, instanceId={}", link.getMode(), defaultString(link.getInstanceId()));
+    scheduleQrAfterCommit(link.getToken(), false, origin);
     return publicLink(link, origin);
   }
 
@@ -191,8 +239,8 @@ public class WechatBindLinkService {
     if (hasLinkTtlExpired(link)) {
       return publicLink(link, origin);
     }
-    if ("existing".equals(link.getMode()) && "created".equals(link.getStatus())) {
-      link = startQr(link, false);
+    if ("created".equals(link.getStatus())) {
+      scheduleQrAfterCommit(link.getToken(), false, origin);
     }
     link = reconcile(link);
     return publicLink(link, origin);
@@ -203,29 +251,7 @@ public class WechatBindLinkService {
    */
   @Transactional
   public PublicWechatBindLink submitPhone(String token, String phone, String origin) {
-    WechatBindLinkEntity link = expireIfNeeded(requireLink(token));
-    if (hasLinkTtlExpired(link)) {
-      return publicLink(link, origin);
-    }
-    if (!"new".equals(link.getMode())) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, "该扫码链接不需要填写手机号。");
-    }
-    if (isTerminal(link.getStatus())) {
-      return publicLink(link, origin);
-    }
-
-    String normalizedPhone = normalizePhone(phone);
-    if (aggregateMapper.findWechatAccountByPhone(normalizedPhone) != null) {
-      markRejected(link, "该手机号已绑定，请联系管理员获取老用户扫码链接。");
-      return publicLink(link, origin);
-    }
-
-    InstanceEntity instance = chooseBindableInstance();
-    log.info("新用户扫码链接已分配 OpenClaw 实例：instanceId={}", instance.getId());
-    link.setPhone(normalizedPhone);
-    link.setInstanceId(instance.getId());
-    link = startQr(link, false);
-    return publicLink(link, origin);
+    throw new ApiException(HttpStatus.BAD_REQUEST, "手机号由管理员创建扫码链接时填写。");
   }
 
   /**
@@ -237,24 +263,56 @@ public class WechatBindLinkService {
     if (hasLinkTtlExpired(link)) {
       return publicLink(link, origin);
     }
-    if ("new".equals(link.getMode()) && !hasText(link.getPhone())) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, "请先填写手机号。");
-    }
     if (isTerminal(link.getStatus())) {
       return publicLink(link, origin);
     }
-    link = startQr(link, true);
+    link = markQrStarting(link);
+    publishLink(link, origin);
+    scheduleQrAfterCommit(link.getToken(), true, origin);
     return publicLink(link, origin);
   }
 
-  private WechatBindLinkEntity startQr(WechatBindLinkEntity link, boolean force) {
+  private void scheduleQrAfterCommit(String token, boolean force, String origin) {
+    Runnable task = () -> startQrAsync(token, force, origin);
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          task.run();
+        }
+      });
+      return;
+    }
+    task.run();
+  }
+
+  private void startQrAsync(String token, boolean force, String origin) {
+    if (qrJobs.putIfAbsent(token, true) != null) {
+      return;
+    }
+    executor.execute(() -> {
+      try {
+        WechatBindLinkEntity link = linkMapper.findByToken(token);
+        if (link == null || hasLinkTtlExpired(link) || isTerminal(link.getStatus())) {
+          return;
+        }
+        startQr(link, force, origin);
+      } finally {
+        qrJobs.remove(token);
+      }
+    });
+  }
+
+  private WechatBindLinkEntity markQrStarting(WechatBindLinkEntity link) {
     InstanceEntity instance = requireBindableInstance(
         link.getInstanceId(),
         "当前 OpenClaw 实例暂不可用，请稍后再试。"
     );
     List<String> snapshot = accountSyncService.readRawAccountIds(instance);
+    String pendingAccountId = pendingAccountId(link);
     String now = Instant.now().toString();
     link.setSnapshotAccountIds(writeJson(snapshot));
+    link.setPendingAccountId(pendingAccountId);
     link.setStatus("starting");
     link.setQrMode(null);
     link.setQrPayload("");
@@ -263,16 +321,39 @@ public class WechatBindLinkService {
     link.setErrorMessage(null);
     link.setUpdatedAt(now);
     linkMapper.update(link);
+    return link;
+  }
+
+  private WechatBindLinkEntity startQr(WechatBindLinkEntity link, boolean force, String origin) {
+    InstanceEntity instance = requireBindableInstance(
+        link.getInstanceId(),
+        "当前 OpenClaw 实例暂不可用，请稍后再试。"
+    );
+    link = markQrStarting(link);
+    publishLink(link, origin);
 
     try {
       log.info("开始生成微信扫码二维码：mode={}, instanceId={}, forceRegenerate={}", link.getMode(), instance.getId(), force);
-      wechatBindService.startBind(instance, force);
+      WechatBindService.BindStartResult started = wechatBindService.startBind(instance, force, link.getPendingAccountId());
+      link.setPendingAccountId(started.accountId());
+      link.setStatus("waiting_scan");
+      link.setQrMode(started.qrMode());
+      link.setQrPayload(defaultString(started.qrPayload()));
+      link.setQrLink(defaultString(started.qrLink()));
+      link.setQrExpiresAt(qrExpiresAt());
+      link.setErrorMessage(null);
+      link.setUpdatedAt(Instant.now().toString());
+      linkMapper.update(link);
+      publishLink(link, origin);
     } catch (ApiException error) {
       markFailed(link, error.getMessage());
     } catch (RuntimeException error) {
       markFailed(link, error.getMessage() == null ? "生成二维码失败。" : error.getMessage());
     }
-    return linkMapper.findByToken(link.getToken());
+    WechatBindLinkEntity latest = linkMapper.findByToken(link.getToken());
+    WechatBindLinkEntity result = latest == null ? link : latest;
+    publishLink(result, origin);
+    return result;
   }
 
   private WechatBindLinkEntity reconcile(WechatBindLinkEntity link) {
@@ -285,6 +366,16 @@ public class WechatBindLinkService {
         .stream()
         .findFirst()
         .orElse(null);
+
+    if ("waiting_scan".equals(link.getStatus()) && isExpired(link.getQrExpiresAt())) {
+      link.setStatus("expired");
+      clearQr(link);
+      link.setErrorMessage("二维码已过期，请重新生成后扫码绑定。");
+      link.setUpdatedAt(Instant.now().toString());
+      linkMapper.update(link);
+      return link;
+    }
+
     if (binding == null) {
       return link;
     }
@@ -351,6 +442,14 @@ public class WechatBindLinkService {
     }
 
     String accountId = added.getFirst();
+    WechatPairedAccountEntity rawAccount = rawAccount(instance, accountId);
+    String wechatUserId = rawAccount == null ? "" : defaultString(rawAccount.getWechatUserId()).trim();
+    if (wechatUserId.isBlank()) {
+      cleanupAddedAccounts(instance, added);
+      markRejected(link, "无法识别扫码微信用户，请重新扫码或联系管理员处理。");
+      return linkMapper.findByToken(link.getToken());
+    }
+
     WechatPairedAccountEntity existingByAccount = aggregateMapper.findWechatAccountByAccountId(accountId);
     if (existingByAccount != null) {
       cleanupAddedAccounts(instance, added);
@@ -358,13 +457,19 @@ public class WechatBindLinkService {
       return linkMapper.findByToken(link.getToken());
     }
 
-    WechatPairedAccountEntity rawAccount = rawAccount(instance, accountId);
+    WechatPairedAccountEntity existingByWechatUser = aggregateMapper.findWechatAccountByWechatUserId(wechatUserId);
+    if (existingByWechatUser != null) {
+      cleanupAddedAccounts(instance, added);
+      markRejected(link, "该微信已绑定到其他手机号或实例，请联系管理员处理。");
+      return linkMapper.findByToken(link.getToken());
+    }
+
     WechatPairedAccountEntity account = new WechatPairedAccountEntity();
     String now = Instant.now().toString();
     account.setAccountId(accountId);
     account.setPhone(link.getPhone());
     account.setInstanceId(instance.getId());
-    account.setWechatUserId(rawAccount == null ? "" : rawAccount.getWechatUserId());
+    account.setWechatUserId(wechatUserId);
     account.setRemark("");
     account.setBaseUrl(rawAccount == null ? "" : rawAccount.getBaseUrl());
     account.setSavedAt(rawAccount == null ? null : rawAccount.getSavedAt());
@@ -622,10 +727,10 @@ public class WechatBindLinkService {
 
   private String connectedMessage(InstanceProvisioningEntity provisioning) {
     if (provisioning != null && "error".equals(provisioning.getStatus())) {
-      return "微信已绑定，但 OpenClaw 通道重启失败，请联系管理员处理。";
+      return "微信已绑定，但 OpenClaw 实例当前异常，请联系管理员处理。";
     }
     if (provisioning != null && !"ready".equals(provisioning.getStatus())) {
-      return "微信已绑定成功，OpenClaw 正在重启微信通道，通常需要 1-3 分钟，请稍后再使用。";
+      return "微信已绑定成功，OpenClaw 实例正在准备中，请稍后再使用。";
     }
     return "微信绑定成功，可以使用微信连接 OpenClaw。";
   }
@@ -633,6 +738,27 @@ public class WechatBindLinkService {
   private String bindLink(String origin, String token) {
     String base = origin == null || origin.isBlank() ? "" : origin.replaceAll("/+$", "");
     return base + "/bind/" + token;
+  }
+
+  private void publishLink(WechatBindLinkEntity link, String origin) {
+    eventPublisher.publishWechatBindLinkUpdated(link.getToken(), publicLink(link, origin));
+  }
+
+  private String pendingAccountId(WechatBindLinkEntity link) {
+    if ("existing".equals(link.getMode())) {
+      String expectedAccountId = defaultString(link.getExpectedAccountId()).trim();
+      if (expectedAccountId.isBlank()) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "老用户扫码链接缺少历史微信账号。");
+      }
+      return expectedAccountId;
+    }
+    String normalizedToken = defaultString(link.getToken()).replaceAll("[^A-Za-z0-9_-]", "");
+    String accountId = "cmwx_" + normalizedToken;
+    return accountId.length() <= 255 ? accountId : accountId.substring(0, 255);
+  }
+
+  private String qrExpiresAt() {
+    return Instant.now().plusMillis(Math.max(1, properties.runtime().wechatQrTtlMs())).toString();
   }
 
   private List<String> readSnapshot(String rawJson) {
@@ -745,6 +871,14 @@ public class WechatBindLinkService {
 
   private static String randomToken() {
     return "wbl_" + UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+  }
+
+  private static Executor defaultExecutor() {
+    return Executors.newCachedThreadPool(task -> {
+      Thread thread = new Thread(task, "wechat-bind-link-" + System.nanoTime());
+      thread.setDaemon(true);
+      return thread;
+    });
   }
 
   private static boolean hasText(String value) {

@@ -136,4 +136,12 @@
         updated_at = #{updatedAt}
     WHERE id = #{id}
   </update>
+
+  <update id="updateInstancePlugins">
+    UPDATE instances
+    SET plugins_allow = #{pluginsAllow},
+        plugins_entries = #{pluginsEntries},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
 </mapper>

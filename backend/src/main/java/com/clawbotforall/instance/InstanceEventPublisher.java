@@ -1,6 +1,8 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.runtime.InstanceStats;
+import com.clawbotforall.wechat.PublicWechatBindLink;
+import com.clawbotforall.wechat.PublicWechatPluginStatus;
 import com.clawbotforall.ws.AppEvent;
 import com.clawbotforall.ws.AppEventPublisher;
 import java.util.LinkedHashMap;
@@ -64,6 +66,20 @@ public class InstanceEventPublisher {
     payload.put("instanceId", instanceId);
     payload.put("binding", binding);
     appEventPublisher.sendToTopic(ADMIN_WECHAT_TOPIC, AppEvent.of("wechat.binding.updated", traceId(), payload));
+  }
+
+  public void publishWechatPluginUpdated(String instanceId, PublicWechatPluginStatus plugin) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("instanceId", instanceId);
+    payload.put("plugin", plugin);
+    appEventPublisher.sendToTopic(ADMIN_WECHAT_TOPIC, AppEvent.of("wechat.plugin.updated", traceId(), payload));
+  }
+
+  public void publishWechatBindLinkUpdated(String token, PublicWechatBindLink link) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("token", token);
+    payload.put("link", link);
+    appEventPublisher.sendToTopic(ADMIN_WECHAT_TOPIC, AppEvent.of("wechat.bindLink.updated", traceId(), payload));
   }
 
   public void publishModelAuthUpdated(String instanceId, PublicInstanceModelAuth modelAuth) {

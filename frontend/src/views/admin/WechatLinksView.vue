@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { Ban, Clipboard, Eye, Link as LinkIcon, QrCode, RefreshCw, Search } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
-import type { PublicWechatBindLink, WechatBindingLookup } from "../../api/types";
+import type { PublicWechatBindLink, PublicWechatPluginStatus, WechatBindingLookup } from "../../api/types";
 import {
   bindStatusLabel,
   bindStatusTagType,
@@ -13,6 +13,7 @@ import {
   formatDateTime,
   isLinkExpired
 } from "../../utils/adminUi";
+import { renderQrDataUrl } from "../../utils/qr";
 
 const admin = useAdminStore();
 const error = ref("");
@@ -24,9 +25,14 @@ const links = ref<PublicWechatBindLink[]>([]);
 const total = ref(0);
 const detailOpen = ref(false);
 const selectedLink = ref<PublicWechatBindLink | null>(null);
+const selectedLinkQrSource = ref("");
+const newPhone = ref("");
 const existingPhone = ref("");
 const existingBindingOptions = ref<WechatBindingLookup[]>([]);
 const existingBindingLoading = ref(false);
+const pluginInstanceId = ref("");
+const pluginStatus = ref<PublicWechatPluginStatus | null>(null);
+const pluginLoading = ref("");
 const filters = reactive({
   mode: "",
   status: "",
@@ -43,7 +49,6 @@ const modeOptions = [
 
 const statusOptions = [
   { label: "全部状态", value: "" },
-  { label: "待填写手机号", value: "phone_required" },
   { label: "已创建", value: "created" },
   { label: "出码中", value: "starting" },
   { label: "等待扫码", value: "waiting_scan" },
@@ -55,11 +60,32 @@ const statusOptions = [
   { label: "已失效", value: "revoked" }
 ];
 
-const selectedLinkQrSource = computed(() => qrSource(selectedLink.value));
+const instanceOptions = computed(() => admin.instances);
 
 onMounted(() => {
   void loadLinks();
+  void loadInstancesForPlugin();
 });
+
+watch(
+  () => pluginInstanceId.value ? admin.wechatPluginStatusByInstanceId[pluginInstanceId.value] : null,
+  (status) => {
+    if (status) {
+      pluginStatus.value = status;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => admin.wechatBindLinkByToken,
+  (updates) => {
+    for (const link of Object.values(updates)) {
+      applyLinkUpdate(link);
+    }
+  },
+  { deep: true }
+);
 
 async function loadLinks() {
   tableLoading.value = true;
@@ -117,8 +143,9 @@ async function runAction(name: string, action: () => Promise<unknown>) {
 
 async function createNewBindLink() {
   await runAction("bind:new", async () => {
-    generatedLink.value = await admin.createBindLink("new");
-    ElMessage.success("新用户扫码链接已生成。");
+    generatedLink.value = await admin.createBindLink("new", newPhone.value);
+    newPhone.value = "";
+    ElMessage.success("新用户扫码链接已创建，二维码生成中。");
     await loadLinks();
   });
 }
@@ -130,7 +157,7 @@ async function createExistingBindLink() {
       throw new Error("该手机号尚未绑定微信账号。");
     }
     generatedLink.value = await admin.createBindLink("existing", existingPhone.value);
-    ElMessage.success("老用户扫码链接已生成。");
+    ElMessage.success("老用户扫码链接已创建，二维码生成中。");
     await loadLinks();
   });
 }
@@ -163,6 +190,7 @@ async function openDetail(token: string) {
   error.value = "";
   try {
     selectedLink.value = await admin.loadWechatLinkDetail(token);
+    await updateSelectedQr();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "扫码链接详情读取失败";
     ElMessage.error(error.value);
@@ -187,6 +215,7 @@ async function revokeLink(link: PublicWechatBindLink) {
     replaceLink(revoked);
     if (selectedLink.value?.token === revoked.token) {
       selectedLink.value = revoked;
+      void updateSelectedQr();
     }
     if (generatedLink.value?.token === revoked.token) {
       generatedLink.value = revoked;
@@ -202,6 +231,17 @@ function replaceLink(link: PublicWechatBindLink) {
   }
 }
 
+function applyLinkUpdate(link: PublicWechatBindLink) {
+  replaceLink(link);
+  if (generatedLink.value?.token === link.token) {
+    generatedLink.value = link;
+  }
+  if (selectedLink.value?.token === link.token) {
+    selectedLink.value = link;
+    void updateSelectedQr();
+  }
+}
+
 function modeLabel(link: PublicWechatBindLink) {
   return link.modeLabel || (link.mode === "existing" ? "老用户" : "新用户");
 }
@@ -210,13 +250,66 @@ function showQr(link: PublicWechatBindLink | null) {
   return Boolean(link && link.status === "waiting_scan" && !link.qrExpired && (link.qrPayload || link.qrLink));
 }
 
-function qrSource(link: PublicWechatBindLink | null) {
+async function qrSource(link: PublicWechatBindLink | null) {
   if (!link || link.qrExpired) return "";
   if (link.qrMode === "image" && link.qrPayload) return link.qrPayload;
-  if (link.qrLink) {
-    return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(link.qrLink)}`;
+  return link.qrLink ? await renderQrDataUrl(link.qrLink) : "";
+}
+
+async function updateSelectedQr() {
+  selectedLinkQrSource.value = await qrSource(selectedLink.value);
+}
+
+async function loadInstancesForPlugin() {
+  await admin.loadInstances();
+  if (!pluginInstanceId.value && admin.instances.length > 0) {
+    pluginInstanceId.value = admin.instances[0].id;
   }
-  return "";
+}
+
+async function loadPluginStatus(checkLatest = false) {
+  if (!pluginInstanceId.value) return;
+  pluginLoading.value = "check";
+  try {
+    pluginStatus.value = await admin.loadWechatPluginStatus(pluginInstanceId.value, checkLatest);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "微信插件状态读取失败";
+    ElMessage.error(error.value);
+  } finally {
+    pluginLoading.value = "";
+  }
+}
+
+async function installPlugin() {
+  if (!pluginInstanceId.value) return;
+  pluginLoading.value = "install";
+  try {
+    pluginStatus.value = await admin.installWechatPlugin(pluginInstanceId.value);
+    if (pluginStatus.value.status === "installing") {
+      ElMessage.success("微信插件安装任务已开始。");
+    } else {
+      ElMessage.success("微信插件安装完成。");
+    }
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "微信插件安装失败";
+    ElMessage.error(error.value);
+  } finally {
+    pluginLoading.value = "";
+  }
+}
+
+function pluginAlertType(status: PublicWechatPluginStatus | null) {
+  if (!status) return "info";
+  if (status.status === "failed") return "error";
+  if (status.status === "installing") return "info";
+  return status.installed ? "success" : "warning";
+}
+
+function pluginStatusTitle(status: PublicWechatPluginStatus | null) {
+  if (!status) return "";
+  if (status.status === "installing") return "微信插件安装中";
+  if (status.status === "failed") return status.message || "微信插件安装失败";
+  return status.installed ? `已安装 ${status.currentVersion || ""}` : status.message;
 }
 </script>
 
@@ -237,13 +330,41 @@ function qrSource(link: PublicWechatBindLink | null) {
           <span>出码入口</span>
         </div>
       </template>
-      <div class="bind-link-box">
+        <div class="bind-link-box">
+        <section class="bind-action-panel plugin-action-panel">
+          <strong>微信插件</strong>
+          <div class="existing-bind-row">
+            <el-select v-model="pluginInstanceId" filterable placeholder="选择 OpenClaw 实例">
+              <el-option
+                v-for="instance in instanceOptions"
+                :key="instance.id"
+                :label="instance.name"
+                :value="instance.id"
+              />
+            </el-select>
+            <el-button :loading="pluginLoading === 'check'" @click="loadPluginStatus(true)">检测</el-button>
+            <el-button type="primary" :loading="pluginLoading === 'install'" @click="installPlugin">安装微信插件</el-button>
+          </div>
+          <el-alert
+            v-if="pluginStatus"
+            :type="pluginAlertType(pluginStatus)"
+            show-icon
+            :closable="false"
+            :title="pluginStatusTitle(pluginStatus)"
+          >
+            <pre v-if="pluginStatus.outputSnippet" class="plugin-output">{{ pluginStatus.outputSnippet }}</pre>
+          </el-alert>
+        </section>
+
         <div class="bind-actions">
           <section class="bind-action-panel">
             <strong>新用户出码</strong>
-            <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
-              为新用户出码
-            </el-button>
+            <div class="existing-bind-row">
+              <el-input v-model="newPhone" inputmode="tel" placeholder="输入新用户手机号" clearable />
+              <el-button type="primary" :loading="actionLoading === 'bind:new'" @click="createNewBindLink">
+                为新用户出码
+              </el-button>
+            </div>
           </section>
           <section class="bind-action-panel">
             <strong>老用户出码</strong>
@@ -413,7 +534,6 @@ function qrSource(link: PublicWechatBindLink | null) {
             </div>
             <div class="qr-box">
               <img v-if="selectedLinkQrSource" :src="selectedLinkQrSource" alt="微信二维码" />
-              <pre v-else>{{ selectedLink.qrPayload }}</pre>
             </div>
             <el-input v-if="selectedLink.qrLink" :model-value="selectedLink.qrLink" readonly />
           </section>

@@ -55,4 +55,11 @@ public interface InstanceMutationMapper {
       @Param("status") String status,
       @Param("updatedAt") String updatedAt
   );
+
+  int updateInstancePlugins(
+      @Param("id") String id,
+      @Param("pluginsAllow") String pluginsAllow,
+      @Param("pluginsEntries") String pluginsEntries,
+      @Param("updatedAt") String updatedAt
+  );
 }
