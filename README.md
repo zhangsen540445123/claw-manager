@@ -64,7 +64,7 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 - 实例容器支持通过环境变量限制 CPU 和内存，便于单机部署多个实例
 - API / Web / Runner 镜像通过 GitHub Actions 发布到 GHCR
 - 发布镜像支持 `linux/amd64` 与 `linux/arm64`
-- Runner 镜像默认钉死已验证组合：`openclaw@2026.6.1` + `@tencent-weixin/openclaw-weixin@2.4.4`
+- Runner 镜像默认钉死已验证组合：`openclaw@2026.6.8` + `@tencent-weixin/openclaw-weixin@2.4.4`
 
 ### English
 
@@ -79,7 +79,7 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 - Per-instance container CPU and memory limits can be configured with environment variables
 - API, web, and runner images are published to GHCR via GitHub Actions
 - Published images support both `linux/amd64` and `linux/arm64`
-- The runner image is pinned to a verified pairing: `openclaw@2026.6.1` + `@tencent-weixin/openclaw-weixin@2.4.4`
+- The runner image is pinned to a verified pairing: `openclaw@2026.6.8` + `@tencent-weixin/openclaw-weixin@2.4.4`
 
 ## 2. 如何快速 Docker 部署
 
@@ -204,7 +204,7 @@ docker logs -f <api-container-name>
 - MySQL 客户端可连接宿主机 `13306` 端口，账号为 `MYSQL_USER` / `MYSQL_PASSWORD`
 - `./data` 保存实例挂载目录、OpenClaw 配置、workspace 和 server 日志
 - API 容器必须挂载 `/var/run/docker.sock` 才能创建和管理 OpenClaw 实例容器
-- Runner 镜像默认组合：`openclaw@2026.6.1` + `@tencent-weixin/openclaw-weixin@2.4.4`
+- Runner 镜像默认组合：`openclaw@2026.6.8` + `@tencent-weixin/openclaw-weixin@2.4.4`
 
 ### English
 

@@ -15,7 +15,7 @@ permissions:
   packages: write
 
 env:
-  RUNNER_OPENCLAW_VERSION: 2026.6.1
+  RUNNER_OPENCLAW_VERSION: 2026.6.8
   RUNNER_WECHAT_PLUGIN_SPEC: "@tencent-weixin/openclaw-weixin@2.4.4"
 
 jobs:
