@@ -3,6 +3,7 @@ import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { LogIn } from "lucide-vue-next";
 import { ApiError } from "../api/http";
+import clawManagerLogo from "../claw-manager.png";
 import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
@@ -32,10 +33,9 @@ async function submit() {
   <section class="auth-page">
     <el-form class="auth-panel" label-position="top" @submit.prevent="submit">
       <div class="auth-brand">
-        <div class="brand-mark">C</div>
+        <img class="brand-mark" :src="clawManagerLogo" alt="Claw Manager" />
         <div>
           <strong>Claw Manager</strong>
-          <span>OpenClaw Console</span>
         </div>
       </div>
       <h1>管理员登录</h1>

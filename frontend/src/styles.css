@@ -103,14 +103,11 @@ button {
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 36px;
   height: 36px;
-  place-items: center;
   border-radius: 8px;
-  background: #1f5eff;
-  color: #ffffff;
-  font-weight: 800;
+  object-fit: cover;
 }
 
 .sidebar-brand strong,

@@ -13,6 +13,7 @@ import {
   X
 } from "lucide-vue-next";
 import { computed, ref } from "vue";
+import clawManagerLogo from "../claw-manager.png";
 
 type ShellNavKey = "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "ops" | "account";
 
@@ -74,10 +75,9 @@ function toggleSidebar() {
     <template v-if="authenticated">
       <aside class="app-sidebar" :class="{ 'is-open': mobileNavOpen, 'is-collapsed': sidebarCollapsed }">
         <div class="sidebar-brand">
-          <div class="brand-mark">C</div>
+          <img class="brand-mark" :src="clawManagerLogo" alt="Claw Manager" />
           <div class="brand-copy">
             <strong>Claw Manager</strong>
-            <span>OpenClaw Console</span>
           </div>
           <button class="sidebar-collapse-button" type="button" @click="toggleSidebar">
             <ChevronsRight v-if="sidebarCollapsed" :size="16" />
