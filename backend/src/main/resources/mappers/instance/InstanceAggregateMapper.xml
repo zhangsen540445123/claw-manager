@@ -90,6 +90,12 @@
     ORDER BY created_at DESC
   </select>
 
+  <select id="listByIds" resultMap="InstanceMap">
+    SELECT *
+    FROM instances
+    WHERE id IN <include refid="InstanceIdFilter"/>
+  </select>
+
   <select id="listRuntimeActive" resultMap="InstanceMap">
     SELECT *
     FROM instances

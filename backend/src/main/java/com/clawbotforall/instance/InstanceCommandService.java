@@ -96,6 +96,14 @@ public class InstanceCommandService {
     return instance;
   }
 
+  @Transactional(readOnly = true)
+  public List<InstanceEntity> listInstancesByIds(List<String> instanceIds) {
+    if (instanceIds == null || instanceIds.isEmpty()) {
+      return List.of();
+    }
+    return instanceAggregateMapper.listByIds(instanceIds);
+  }
+
   /**
    * 返回实例已持久化的模型记录。
    */

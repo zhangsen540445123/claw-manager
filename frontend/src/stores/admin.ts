@@ -13,6 +13,7 @@ import type {
   PublicWechatBindLink,
   PublicWechatBinding,
   PublicWechatPluginStatus,
+  PublicWechatPluginVersions,
   WechatBindLinkPage,
   WechatBindingLookup
 } from "../api/types";
@@ -64,6 +65,7 @@ export const useAdminStore = defineStore("admin", {
     serverLogs: "",
     statsByInstanceId: {} as Record<string, InstanceStats | null>,
     wechatPluginStatusByInstanceId: {} as Record<string, PublicWechatPluginStatus>,
+    wechatPluginVersions: { latest: "", versions: [] } as PublicWechatPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
@@ -195,20 +197,29 @@ export const useAdminStore = defineStore("admin", {
       );
       this.wechatPluginStatusByInstanceId = {
         ...this.wechatPluginStatusByInstanceId,
-        [instanceId]: response.plugin
+        [instanceId]: withWechatPluginVersion(response.plugin, this.wechatPluginVersions)
       };
-      return response.plugin;
+      return this.wechatPluginStatusByInstanceId[instanceId];
     },
-    async installWechatPlugin(instanceId: string) {
+    async loadWechatPluginVersions() {
+      const response = await api<{ versions: PublicWechatPluginVersions }>("/api/admin/wechat-plugins/versions");
+      this.wechatPluginVersions = response.versions;
+      this.applyWechatPluginVersions(response.versions);
+      return response.versions;
+    },
+    async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
         `/api/admin/instances/${instanceId}/wechat-plugin/install`,
-        { method: "POST" }
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
       );
       this.wechatPluginStatusByInstanceId = {
         ...this.wechatPluginStatusByInstanceId,
-        [instanceId]: response.plugin
+        [instanceId]: withWechatPluginVersion(response.plugin, this.wechatPluginVersions)
       };
-      return response.plugin;
+      return this.wechatPluginStatusByInstanceId[instanceId];
     },
     async uninstallWechatPlugin(instanceId: string) {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
@@ -217,44 +228,71 @@ export const useAdminStore = defineStore("admin", {
       );
       this.wechatPluginStatusByInstanceId = {
         ...this.wechatPluginStatusByInstanceId,
-        [instanceId]: response.plugin
+        [instanceId]: withWechatPluginVersion(response.plugin, this.wechatPluginVersions)
       };
-      return response.plugin;
+      return this.wechatPluginStatusByInstanceId[instanceId];
     },
-    async upgradeWechatPlugin(instanceId: string) {
+    async upgradeWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
         `/api/admin/instances/${instanceId}/wechat-plugin/upgrade`,
-        { method: "POST" }
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
       );
       this.wechatPluginStatusByInstanceId = {
         ...this.wechatPluginStatusByInstanceId,
-        [instanceId]: response.plugin
+        [instanceId]: withWechatPluginVersion(response.plugin, this.wechatPluginVersions)
       };
-      return response.plugin;
+      return this.wechatPluginStatusByInstanceId[instanceId];
+    },
+    async reinstallWechatPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicWechatPluginStatus }>(
+        `/api/admin/instances/${instanceId}/wechat-plugin/reinstall`,
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
+      );
+      this.wechatPluginStatusByInstanceId = {
+        ...this.wechatPluginStatusByInstanceId,
+        [instanceId]: withWechatPluginVersion(response.plugin, this.wechatPluginVersions)
+      };
+      return this.wechatPluginStatusByInstanceId[instanceId];
     },
     async batchCheckWechatPlugins(instanceIds: string[]) {
       return this.batchWechatPlugins("check", instanceIds);
     },
-    async batchInstallWechatPlugins(instanceIds: string[]) {
-      return this.batchWechatPlugins("install", instanceIds);
+    async batchInstallWechatPlugins(instanceIds: string[], version = "") {
+      return this.batchWechatPlugins("install", instanceIds, version);
     },
     async batchUninstallWechatPlugins(instanceIds: string[]) {
       return this.batchWechatPlugins("uninstall", instanceIds);
     },
-    async batchUpgradeWechatPlugins(instanceIds: string[]) {
-      return this.batchWechatPlugins("upgrade", instanceIds);
+    async batchUpgradeWechatPlugins(instanceIds: string[], version = "") {
+      return this.batchWechatPlugins("upgrade", instanceIds, version);
     },
-    async batchWechatPlugins(action: "check" | "install" | "uninstall" | "upgrade", instanceIds: string[]) {
+    async batchReinstallWechatPlugins(instanceIds: string[], version = "") {
+      return this.batchWechatPlugins("reinstall", instanceIds, version);
+    },
+    async batchWechatPlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
       const response = await api<{ plugins: WechatPluginBatchItem[] }>(`/api/admin/wechat-plugins/${action}`, {
         method: "POST",
-        ...jsonBody({ instanceIds })
+        ...jsonBody({ instanceIds, version })
       });
       const next = { ...this.wechatPluginStatusByInstanceId };
       for (const item of response.plugins) {
-        next[item.instanceId] = item.plugin;
+        next[item.instanceId] = withWechatPluginVersion(item.plugin, this.wechatPluginVersions);
       }
       this.wechatPluginStatusByInstanceId = next;
       return response.plugins;
+    },
+    applyWechatPluginVersions(versions: PublicWechatPluginVersions) {
+      const next = { ...this.wechatPluginStatusByInstanceId };
+      for (const [instanceId, plugin] of Object.entries(next)) {
+        next[instanceId] = withWechatPluginVersion(plugin, versions);
+      }
+      this.wechatPluginStatusByInstanceId = next;
     },
     async loadWechatLinks(params: { mode?: string; status?: string; phone?: string; page?: number; pageSize?: number } = {}) {
       const search = new URLSearchParams();
@@ -340,7 +378,7 @@ export const useAdminStore = defineStore("admin", {
         const payload = event.payload as { instanceId: string; plugin: PublicWechatPluginStatus };
         this.wechatPluginStatusByInstanceId = {
           ...this.wechatPluginStatusByInstanceId,
-          [payload.instanceId]: payload.plugin
+          [payload.instanceId]: withWechatPluginVersion(payload.plugin, this.wechatPluginVersions)
         };
       }
       if (event.type === "wechat.bindLink.updated") {
@@ -374,3 +412,45 @@ export const useAdminStore = defineStore("admin", {
     }
   }
 });
+
+function withWechatPluginVersion(
+  plugin: PublicWechatPluginStatus,
+  versions: PublicWechatPluginVersions
+): PublicWechatPluginStatus {
+  if (!plugin.installed || !plugin.currentVersion || !versions.latest) {
+    return plugin;
+  }
+  return {
+    ...plugin,
+    latestVersion: versions.latest,
+    upgradable: compareVersion(versions.latest, plugin.currentVersion) > 0
+  };
+}
+
+function compareVersion(left: string, right: string) {
+  const leftParts = versionCore(left).split(".");
+  const rightParts = versionCore(right).split(".");
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = numericPart(leftParts[index]) - numericPart(rightParts[index]);
+    if (diff !== 0) return diff;
+  }
+  return versionQualifierRank(left) - versionQualifierRank(right);
+}
+
+function versionCore(version: string) {
+  const normalized = version || "";
+  const dash = normalized.indexOf("-");
+  const plus = normalized.indexOf("+");
+  const separators = [dash, plus].filter((index) => index >= 0);
+  return separators.length === 0 ? normalized : normalized.slice(0, Math.min(...separators));
+}
+
+function numericPart(value: string | undefined) {
+  const parsed = Number.parseInt(value || "0", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function versionQualifierRank(version: string) {
+  return version.includes("-") ? 0 : 1;
+}

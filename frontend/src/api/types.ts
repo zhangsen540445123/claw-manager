@@ -172,6 +172,11 @@ export interface PublicWechatPluginStatus {
   updatedAt: string;
 }
 
+export interface PublicWechatPluginVersions {
+  latest: string;
+  versions: string[];
+}
+
 export interface WechatBindLinkPage {
   links: PublicWechatBindLink[];
   total: number;

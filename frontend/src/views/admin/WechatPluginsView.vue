@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Download, RefreshCw, Search, Trash2, Upload } from "lucide-vue-next";
+import { Download, RefreshCw, RotateCcw, Search, Trash2, Upload } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
@@ -9,14 +9,30 @@ import { formatDateTime } from "../../utils/adminUi";
 
 const admin = useAdminStore();
 const loading = ref(false);
+const versionsLoading = ref(false);
 const actionLoading = ref("");
 const selectedInstances = ref<PublicInstance[]>([]);
 const error = ref("");
+const selectedVersion = ref("");
 
-const runningStatuses = new Set(["installing", "uninstalling", "upgrading"]);
+const runningStatuses = new Set(["installing", "uninstalling", "upgrading", "reinstalling"]);
 
 const tableRows = computed(() => admin.instances);
 const selectedIds = computed(() => selectedInstances.value.map((instance) => instance.id));
+const versionOptions = computed(() => {
+  const latest = admin.wechatPluginVersions.latest;
+  const options = [
+    { value: "", label: "默认版本" },
+    { value: "latest", label: latest ? `最新版本 ${latest}` : "最新版本" }
+  ];
+  const seen = new Set(options.map((item) => item.value));
+  for (const version of admin.wechatPluginVersions.versions || []) {
+    if (!version || seen.has(version) || version === latest) continue;
+    options.push({ value: version, label: version });
+    seen.add(version);
+  }
+  return options;
+});
 
 onMounted(async () => {
   await loadPage();
@@ -30,11 +46,29 @@ async function loadPage() {
     if (admin.instances.length > 0) {
       await admin.batchCheckWechatPlugins(admin.instances.map((instance) => instance.id));
     }
+    void refreshVersions(false);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "微信插件状态读取失败";
     ElMessage.error(error.value);
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshVersions(showMessage = true) {
+  versionsLoading.value = true;
+  try {
+    const versions = await admin.loadWechatPluginVersions();
+    if (showMessage) {
+      ElMessage.success(versions.latest ? "微信插件官方版本已刷新。" : "官方版本暂不可用，请稍后重试。");
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "微信插件官方版本读取失败";
+    if (showMessage) {
+      ElMessage.error(message);
+    }
+  } finally {
+    versionsLoading.value = false;
   }
 }
 
@@ -63,6 +97,7 @@ function statusText(status: PublicWechatPluginStatus | null) {
   if (status.status === "installing") return "安装中";
   if (status.status === "uninstalling") return "卸载中";
   if (status.status === "upgrading") return "升级中";
+  if (status.status === "reinstalling") return "重装中";
   if (status.status === "failed") return "失败";
   if (status.status === "missing") return "未安装";
   if (status.installed) return "已安装";
@@ -70,7 +105,8 @@ function statusText(status: PublicWechatPluginStatus | null) {
 }
 
 function canInstall(instance: PublicInstance) {
-  return isRunning(instance) && !isTaskRunning(pluginStatus(instance.id));
+  const status = pluginStatus(instance.id);
+  return isRunning(instance) && !status?.installed && !isTaskRunning(status);
 }
 
 function canUninstall(instance: PublicInstance) {
@@ -80,17 +116,27 @@ function canUninstall(instance: PublicInstance) {
 
 function canUpgrade(instance: PublicInstance) {
   const status = pluginStatus(instance.id);
+  return isRunning(instance) && Boolean(status?.installed && status.upgradable) && !isTaskRunning(status);
+}
+
+function canReinstall(instance: PublicInstance) {
+  const status = pluginStatus(instance.id);
   return isRunning(instance) && Boolean(status?.installed) && !isTaskRunning(status);
 }
 
-function canRunBatch(action: "check" | "install" | "uninstall" | "upgrade") {
+function canRunBatch(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall") {
   if (selectedInstances.value.length === 0 || actionLoading.value.startsWith("batch:")) {
     return false;
   }
   if (action === "check") return true;
   if (action === "install") return selectedInstances.value.some(canInstall);
   if (action === "uninstall") return selectedInstances.value.some(canUninstall);
-  return selectedInstances.value.some(canUpgrade);
+  if (action === "upgrade") return selectedInstances.value.some(canUpgrade);
+  return selectedInstances.value.some(canReinstall);
+}
+
+function actionVersion() {
+  return selectedVersion.value;
 }
 
 async function runSingle(
@@ -113,11 +159,11 @@ async function runSingle(
 }
 
 async function checkOne(instance: PublicInstance) {
-  await runSingle("check", instance, () => admin.loadWechatPluginStatus(instance.id, true), "微信插件状态已刷新。");
+  await runSingle("check", instance, () => admin.loadWechatPluginStatus(instance.id, false), "微信插件状态已刷新。");
 }
 
 async function installOne(instance: PublicInstance) {
-  await runSingle("install", instance, () => admin.installWechatPlugin(instance.id), "微信插件安装任务已开始。");
+  await runSingle("install", instance, () => admin.installWechatPlugin(instance.id, actionVersion()), "微信插件安装任务已开始。");
 }
 
 async function uninstallOne(instance: PublicInstance) {
@@ -134,10 +180,23 @@ async function uninstallOne(instance: PublicInstance) {
 }
 
 async function upgradeOne(instance: PublicInstance) {
-  await runSingle("upgrade", instance, () => admin.upgradeWechatPlugin(instance.id), "微信插件升级任务已开始。");
+  await runSingle("upgrade", instance, () => admin.upgradeWechatPlugin(instance.id, actionVersion()), "微信插件升级任务已开始。");
 }
 
-async function runBatch(action: "check" | "install" | "uninstall" | "upgrade") {
+async function reinstallOne(instance: PublicInstance) {
+  try {
+    await ElMessageBox.confirm("重新安装只覆盖微信插件包和启用配置，保留微信账号状态与绑定历史。", "重新安装微信插件", {
+      type: "info",
+      confirmButtonText: "确认重装",
+      cancelButtonText: "取消"
+    });
+  } catch {
+    return;
+  }
+  await runSingle("reinstall", instance, () => admin.reinstallWechatPlugin(instance.id, actionVersion()), "微信插件重新安装任务已开始。");
+}
+
+async function runBatch(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall") {
   if (selectedIds.value.length === 0) {
     ElMessage.warning("请先选择实例。");
     return;
@@ -153,13 +212,25 @@ async function runBatch(action: "check" | "install" | "uninstall" | "upgrade") {
       return;
     }
   }
+  if (action === "reinstall") {
+    try {
+      await ElMessageBox.confirm("批量重新安装只覆盖微信插件包和启用配置，保留微信账号状态与绑定历史。", "批量重新安装微信插件", {
+        type: "info",
+        confirmButtonText: "确认重装",
+        cancelButtonText: "取消"
+      });
+    } catch {
+      return;
+    }
+  }
   actionLoading.value = `batch:${action}`;
   error.value = "";
   try {
     if (action === "check") await admin.batchCheckWechatPlugins(selectedIds.value);
-    if (action === "install") await admin.batchInstallWechatPlugins(selectedIds.value);
+    if (action === "install") await admin.batchInstallWechatPlugins(selectedIds.value, actionVersion());
     if (action === "uninstall") await admin.batchUninstallWechatPlugins(selectedIds.value);
-    if (action === "upgrade") await admin.batchUpgradeWechatPlugins(selectedIds.value);
+    if (action === "upgrade") await admin.batchUpgradeWechatPlugins(selectedIds.value, actionVersion());
+    if (action === "reinstall") await admin.batchReinstallWechatPlugins(selectedIds.value, actionVersion());
     ElMessage.success("批量任务已提交。");
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "批量操作失败";
@@ -189,6 +260,17 @@ function handleSelectionChange(selection: PublicInstance[]) {
         <div class="card-title with-action">
           <span>插件实例</span>
           <div class="button-row">
+            <el-select v-model="selectedVersion" class="plugin-version-select" placeholder="版本">
+              <el-option
+                v-for="option in versionOptions"
+                :key="option.value || 'default'"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-button :icon="RefreshCw" :loading="versionsLoading" @click="refreshVersions(true)">
+              刷新版本
+            </el-button>
             <el-button
               :icon="Search"
               :disabled="!canRunBatch('check')"
@@ -213,6 +295,14 @@ function handleSelectionChange(selection: PublicInstance[]) {
               @click="runBatch('upgrade')"
             >
               升级
+            </el-button>
+            <el-button
+              :icon="RotateCcw"
+              :disabled="!canRunBatch('reinstall')"
+              :loading="actionLoading === 'batch:reinstall'"
+              @click="runBatch('reinstall')"
+            >
+              重新安装
             </el-button>
             <el-button
               type="danger"
@@ -270,7 +360,7 @@ function handleSelectionChange(selection: PublicInstance[]) {
         <el-table-column label="更新时间" min-width="170">
           <template #default="{ row }">{{ formatDateTime(pluginStatus(row.id)?.updatedAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="250" align="right" fixed="right">
+        <el-table-column label="操作" width="320" align="right" fixed="right">
           <template #default="{ row }">
             <el-button link :loading="actionLoading === `check:${row.id}`" @click="checkOne(row)">检测</el-button>
             <el-button link type="primary" :disabled="!canInstall(row)" :loading="actionLoading === `install:${row.id}`" @click="installOne(row)">
@@ -278,6 +368,9 @@ function handleSelectionChange(selection: PublicInstance[]) {
             </el-button>
             <el-button link :disabled="!canUpgrade(row)" :loading="actionLoading === `upgrade:${row.id}`" @click="upgradeOne(row)">
               升级
+            </el-button>
+            <el-button link :disabled="!canReinstall(row)" :loading="actionLoading === `reinstall:${row.id}`" @click="reinstallOne(row)">
+              重新安装
             </el-button>
             <el-button link type="danger" :disabled="!canUninstall(row)" :loading="actionLoading === `uninstall:${row.id}`" @click="uninstallOne(row)">
               卸载
@@ -290,6 +383,10 @@ function handleSelectionChange(selection: PublicInstance[]) {
 </template>
 
 <style scoped>
+.plugin-version-select {
+  width: 220px;
+}
+
 .plugin-output-cell {
   max-height: 90px;
   margin: 0;

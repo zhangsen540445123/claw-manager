@@ -12,6 +12,8 @@ public interface InstanceAggregateMapper {
 
   List<InstanceEntity> listAll();
 
+  List<InstanceEntity> listByIds(@Param("instanceIds") List<String> instanceIds);
+
   List<InstanceEntity> listRuntimeActive();
 
   InstanceEntity findById(@Param("id") String id);

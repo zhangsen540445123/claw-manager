@@ -35,6 +35,11 @@ management:
 logging:
   file:
     name: ${DATA_DIR:data}/logs/server.log
+  logback:
+    rollingpolicy:
+      max-file-size: ${SERVER_LOG_MAX_FILE_SIZE:10MB}
+      total-size-cap: ${SERVER_LOG_TOTAL_SIZE_CAP:100MB}
+      max-history: ${SERVER_LOG_MAX_HISTORY:14}
 
 springdoc:
   api-docs:

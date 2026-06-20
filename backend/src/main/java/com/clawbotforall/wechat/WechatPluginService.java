@@ -16,13 +16,20 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -32,9 +39,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -43,12 +54,17 @@ import org.springframework.stereotype.Service;
 @Service
 public class WechatPluginService {
 
+  private static final Logger log = LoggerFactory.getLogger(WechatPluginService.class);
+
   private static final String WECHAT_PLUGIN_TYPE = "weixin";
   private static final String WECHAT_PLUGIN_ID = "openclaw-weixin";
   private static final String WECHAT_PLUGIN_SPEC = "@tencent-weixin/openclaw-weixin";
   private static final String WECHAT_PLUGIN_NPM_SPEC = "npm:" + WECHAT_PLUGIN_SPEC;
+  private static final String WECHAT_PLUGIN_NPM_PROJECT_PREFIX = "tencent-weixin-openclaw-weixin";
+  private static final String WECHAT_PLUGIN_REGISTRY_URL = "https://registry.npmjs.org/%40tencent-weixin%2Fopenclaw-weixin";
+  private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?");
   private static final long TASK_TIMEOUT_MS = 10 * 60 * 1000L;
-  private static final long CHECK_TIMEOUT_MS = 20_000L;
+  private static final long VERSION_CACHE_TTL_MS = 60 * 60 * 1000L;
 
   private final OpenClawRuntime openClawRuntime;
   private final InstanceCommandService commandService;
@@ -57,8 +73,11 @@ public class WechatPluginService {
   private final InstanceEventPublisher eventPublisher;
   private final ObjectMapper objectMapper;
   private final Executor executor;
+  private final Supplier<List<String>> officialVersionSupplier;
   private final ConcurrentMap<String, PublicWechatPluginStatus> taskStatuses = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> taskJobs = new ConcurrentHashMap<>();
+  private final AtomicReference<CachedVersions> cachedVersions = new AtomicReference<>();
+  private final AtomicReference<CompletableFuture<List<String>>> versionRefresh = new AtomicReference<>();
 
   @Autowired
   public WechatPluginService(
@@ -76,7 +95,8 @@ public class WechatPluginService {
         mutationMapper,
         eventPublisher,
         objectMapper,
-        defaultExecutor()
+        defaultExecutor(),
+        () -> fetchOfficialVersionsFromNpm(objectMapper)
     );
   }
 
@@ -87,7 +107,8 @@ public class WechatPluginService {
       InstanceMutationMapper mutationMapper,
       InstanceEventPublisher eventPublisher,
       ObjectMapper objectMapper,
-      Executor executor
+      Executor executor,
+      Supplier<List<String>> officialVersionSupplier
   ) {
     this.openClawRuntime = openClawRuntime;
     this.commandService = commandService;
@@ -96,6 +117,7 @@ public class WechatPluginService {
     this.eventPublisher = eventPublisher;
     this.objectMapper = objectMapper;
     this.executor = executor;
+    this.officialVersionSupplier = officialVersionSupplier;
   }
 
   /**
@@ -109,23 +131,36 @@ public class WechatPluginService {
     return detectedStatus(instance, checkLatest);
   }
 
+  public WechatPluginVersions versions() {
+    CachedVersions cached = cachedVersions.get();
+    if (isFresh(cached)) {
+      return publicVersions(cached.versions());
+    }
+    if (cached != null) {
+      refreshOfficialVersionsAsync();
+      return publicVersions(cached.versions());
+    }
+    try {
+      return publicVersions(refreshOfficialVersionsBlocking());
+    } catch (RuntimeException error) {
+      log.warn("微信插件官方版本读取失败，返回空版本列表：{}", message(error));
+      return publicVersions(List.of());
+    }
+  }
+
   private PublicWechatPluginStatus detectedStatus(InstanceEntity instance, boolean checkLatest) {
     String currentVersion = currentVersion(instance);
     boolean installed = !currentVersion.isBlank();
     String latestVersion = "";
     if (installed && checkLatest) {
-      try {
-        ExecResult latest = run(instance, List.of("npm", "view", WECHAT_PLUGIN_SPEC, "version", "--json"), CHECK_TIMEOUT_MS);
-        latestVersion = latest.output().trim().replace("\"", "");
-      } catch (RuntimeException ignored) {
-        latestVersion = "";
-      }
+      latestVersion = cachedLatestVersion();
     }
+    boolean upgradable = installed && !latestVersion.isBlank() && compareVersion(latestVersion, currentVersion) > 0;
     return new PublicWechatPluginStatus(
         installed,
         currentVersion,
         latestVersion,
-        !currentVersion.isBlank() && !latestVersion.isBlank() && !currentVersion.equals(latestVersion),
+        upgradable,
         installed ? "installed" : "missing",
         installed ? "微信插件已安装。" : "微信插件尚未安装。",
         "",
@@ -141,13 +176,25 @@ public class WechatPluginService {
    * 异步安装或覆盖安装微信插件。
    */
   public PublicWechatPluginStatus startInstall(InstanceEntity instance) {
+    return startInstall(instance, "");
+  }
+
+  public PublicWechatPluginStatus startInstall(InstanceEntity instance, String version) {
+    PublicWechatPluginStatus running = runningTask(instance, "installing", "微信插件正在安装。");
+    if (running != null) {
+      return running;
+    }
+    if (isWechatPluginInstalled(instance)) {
+      throw new ApiException(HttpStatus.CONFLICT, "微信插件已安装，请使用重新安装或升级。");
+    }
+    String targetVersion = resolveInstallVersion(version);
     return startTask(
         instance,
         "installing",
         "微信插件安装已开始。",
         "微信插件正在安装。",
         "微信插件安装失败：",
-        List.of("openclaw", "plugins", "install", WECHAT_PLUGIN_NPM_SPEC, "--force"),
+        installCommand(targetVersion),
         output -> {
           enableWechatPlugin(instance);
           PublicWechatPluginStatus status = detectedStatus(instance, false);
@@ -157,7 +204,7 @@ public class WechatPluginService {
               status.latestVersion(),
               status.upgradable(),
               status.installed() ? "installed" : "unknown",
-              status.installed() ? "微信插件安装完成。" : "微信插件命令已完成，但未检测到插件目录。",
+              status.installed() ? "微信插件安装完成。如 Gateway 未加载该插件，请重启 Gateway。" : "微信插件命令已完成，但未检测到插件目录。",
               output,
               Instant.now().toString()
           );
@@ -200,23 +247,29 @@ public class WechatPluginService {
   }
 
   public PublicWechatPluginStatus startUpgrade(InstanceEntity instance) {
+    return startUpgrade(instance, "");
+  }
+
+  public PublicWechatPluginStatus startUpgrade(InstanceEntity instance, String version) {
     PublicWechatPluginStatus running = runningTask(instance, "upgrading", "微信插件正在升级。");
     if (running != null) {
       return running;
     }
-    if (!isWechatPluginInstalled(instance)) {
+    String currentVersion = currentVersion(instance);
+    if (currentVersion.isBlank()) {
       PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无法升级。");
       taskStatuses.put(instance.getId(), missing);
       publish(instance, missing);
       return missing;
     }
+    String targetVersion = resolveUpgradeVersion(version, currentVersion);
     return startTask(
         instance,
         "upgrading",
         "微信插件升级已开始。",
         "微信插件正在升级。",
         "微信插件升级失败：",
-        List.of("openclaw", "plugins", "update", WECHAT_PLUGIN_ID),
+        installCommand(targetVersion),
         output -> {
           enableWechatPlugin(instance);
           PublicWechatPluginStatus status = detectedStatus(instance, false);
@@ -226,12 +279,219 @@ public class WechatPluginService {
               status.latestVersion(),
               status.upgradable(),
               status.installed() ? "installed" : "missing",
-              status.installed() ? "微信插件升级完成。" : "微信插件升级命令已完成，但未检测到插件目录。",
+              status.installed() ? "微信插件升级完成。如 Gateway 未加载该插件，请重启 Gateway。" : "微信插件升级命令已完成，但未检测到插件目录。",
               output,
               Instant.now().toString()
           );
         }
     );
+  }
+
+  public PublicWechatPluginStatus startReinstall(InstanceEntity instance, String version) {
+    PublicWechatPluginStatus running = runningTask(instance, "reinstalling", "微信插件正在重新安装。");
+    if (running != null) {
+      return running;
+    }
+    String currentVersion = currentVersion(instance);
+    if (currentVersion.isBlank()) {
+      PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无法重新安装。");
+      taskStatuses.put(instance.getId(), missing);
+      publish(instance, missing);
+      return missing;
+    }
+    String targetVersion = resolveReinstallVersion(version, currentVersion);
+    return startTask(
+        instance,
+        "reinstalling",
+        "微信插件重新安装已开始。",
+        "微信插件正在重新安装。",
+        "微信插件重新安装失败：",
+        installCommand(targetVersion),
+        output -> {
+          enableWechatPlugin(instance);
+          PublicWechatPluginStatus status = detectedStatus(instance, false);
+          return new PublicWechatPluginStatus(
+              status.installed(),
+              status.currentVersion(),
+              status.latestVersion(),
+              status.upgradable(),
+              status.installed() ? "installed" : "missing",
+              status.installed() ? "微信插件重新安装完成。如 Gateway 未加载该插件，请重启 Gateway。" : "微信插件重新安装命令已完成，但未检测到插件目录。",
+              output,
+              Instant.now().toString()
+          );
+        }
+    );
+  }
+
+  private List<String> installCommand(String version) {
+    String spec = version == null || version.isBlank()
+        ? WECHAT_PLUGIN_NPM_SPEC
+        : WECHAT_PLUGIN_NPM_SPEC + "@" + version;
+    return List.of("openclaw", "plugins", "install", spec, "--force");
+  }
+
+  private String resolveInstallVersion(String version) {
+    String normalized = normalizeRequestedVersion(version);
+    if (normalized.isBlank()) {
+      return "";
+    }
+    requireOfficialVersion(normalized);
+    return normalized;
+  }
+
+  private String resolveReinstallVersion(String version, String currentVersion) {
+    String normalized = normalizeRequestedVersion(version);
+    if (normalized.isBlank()) {
+      return currentVersion;
+    }
+    requireOfficialVersion(normalized);
+    return normalized;
+  }
+
+  private String resolveUpgradeVersion(String version, String currentVersion) {
+    String normalized = normalizeRequestedVersion(version);
+    String targetVersion = normalized.isBlank() ? latestOfficialVersionForOperation() : normalized;
+    requireOfficialVersion(targetVersion);
+    if (compareVersion(targetVersion, currentVersion) <= 0) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "目标版本必须高于当前版本。");
+    }
+    return targetVersion;
+  }
+
+  private void requireOfficialVersion(String version) {
+    if (!VERSION_PATTERN.matcher(version).matches() || !officialVersions().contains(version)) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "只能选择官方微信插件版本。");
+    }
+  }
+
+  private String latestOfficialVersionForOperation() {
+    List<String> versions = officialVersions();
+    if (versions.isEmpty()) {
+      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取微信插件官方版本。");
+    }
+    return versions.getFirst();
+  }
+
+  private static String normalizeRequestedVersion(String version) {
+    String normalized = version == null ? "" : version.trim();
+    return "latest".equalsIgnoreCase(normalized) ? "" : normalized;
+  }
+
+  private List<String> officialVersions() {
+    CachedVersions cached = cachedVersions.get();
+    if (cached != null) {
+      if (!isFresh(cached)) {
+        refreshOfficialVersionsAsync();
+      }
+      return cached.versions();
+    }
+    return refreshOfficialVersionsBlocking();
+  }
+
+  private List<String> refreshOfficialVersionsBlocking() {
+    CompletableFuture<List<String>> existing = versionRefresh.get();
+    if (existing != null) {
+      return joinRefresh(existing);
+    }
+    CompletableFuture<List<String>> created = new CompletableFuture<>();
+    if (!versionRefresh.compareAndSet(null, created)) {
+      CompletableFuture<List<String>> winner = versionRefresh.get();
+      return winner == null ? refreshOfficialVersionsBlocking() : joinRefresh(winner);
+    }
+    try {
+      List<String> versions = loadOfficialVersions();
+      created.complete(versions);
+      return versions;
+    } catch (RuntimeException error) {
+      created.completeExceptionally(error);
+      throw error;
+    } finally {
+      versionRefresh.compareAndSet(created, null);
+    }
+  }
+
+  private void refreshOfficialVersionsAsync() {
+    CompletableFuture<List<String>> created = new CompletableFuture<>();
+    if (!versionRefresh.compareAndSet(null, created)) {
+      return;
+    }
+    try {
+      executor.execute(() -> {
+        try {
+          created.complete(loadOfficialVersions());
+        } catch (RuntimeException error) {
+          log.warn("微信插件官方版本后台刷新失败：{}", message(error));
+          created.completeExceptionally(error);
+        } finally {
+          versionRefresh.compareAndSet(created, null);
+        }
+      });
+    } catch (RuntimeException error) {
+      versionRefresh.compareAndSet(created, null);
+      created.completeExceptionally(error);
+      throw error;
+    }
+  }
+
+  private List<String> loadOfficialVersions() {
+    long startedAt = System.nanoTime();
+    List<String> versions = normalizeOfficialVersions(officialVersionSupplier.get());
+    if (versions.isEmpty()) {
+      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取微信插件官方版本。");
+    }
+    cachedVersions.set(new CachedVersions(versions, System.currentTimeMillis() + VERSION_CACHE_TTL_MS));
+    log.info(
+        "微信插件官方版本缓存已刷新：latest={}, count={}, elapsedMs={}",
+        versions.getFirst(),
+        versions.size(),
+        elapsedMs(startedAt)
+    );
+    return versions;
+  }
+
+  private List<String> normalizeOfficialVersions(List<String> rawVersions) {
+    return (rawVersions == null ? List.<String>of() : rawVersions).stream()
+        .map(WechatPluginService::defaultString)
+        .map(String::trim)
+        .filter(version -> !version.isBlank())
+        .filter(version -> VERSION_PATTERN.matcher(version).matches())
+        .distinct()
+        .sorted((left, right) -> compareVersion(right, left))
+        .toList();
+  }
+
+  private List<String> joinRefresh(CompletableFuture<List<String>> future) {
+    try {
+      return future.join();
+    } catch (CompletionException error) {
+      if (error.getCause() instanceof RuntimeException runtimeException) {
+        throw runtimeException;
+      }
+      throw error;
+    }
+  }
+
+  private WechatPluginVersions publicVersions(List<String> versions) {
+    if (versions == null || versions.isEmpty()) {
+      return new WechatPluginVersions("", List.of());
+    }
+    return new WechatPluginVersions(
+        versions.getFirst(),
+        versions.stream().limit(5).toList()
+    );
+  }
+
+  private String cachedLatestVersion() {
+    CachedVersions cached = cachedVersions.get();
+    if (cached == null || cached.versions().isEmpty()) {
+      return "";
+    }
+    return cached.versions().getFirst();
+  }
+
+  private boolean isFresh(CachedVersions cached) {
+    return cached != null && cached.expiresAtMs() > System.currentTimeMillis();
   }
 
   private PublicWechatPluginStatus runningTask(InstanceEntity instance, String fallbackStatus, String fallbackMessage) {
@@ -364,9 +624,29 @@ public class WechatPluginService {
     if (!Files.isDirectory(projectsDir)) {
       return "";
     }
+    try (Stream<Path> projects = Files.list(projectsDir)) {
+      String version = projects
+          .filter(Files::isDirectory)
+          .filter(path -> path.getFileName().toString().startsWith(WECHAT_PLUGIN_NPM_PROJECT_PREFIX))
+          .map(path -> path.resolve("package.json"))
+          .filter(Files::isRegularFile)
+          .map(this::readWechatNpmProjectVersion)
+          .filter(candidate -> !candidate.isBlank())
+          .findFirst()
+          .orElse("");
+      if (!version.isBlank()) {
+        return version;
+      }
+    } catch (IOException error) {
+      return "";
+    }
+    return fallbackNpmProjectPluginVersion(projectsDir);
+  }
+
+  private String fallbackNpmProjectPluginVersion(Path projectsDir) {
     try (Stream<Path> packages = Files.find(
         projectsDir,
-        3,
+        2,
         (path, attrs) -> attrs.isRegularFile() && "package.json".equals(path.getFileName().toString())
     )) {
       return packages
@@ -409,6 +689,34 @@ public class WechatPluginService {
         .resolve("extensions")
         .resolve(WECHAT_PLUGIN_ID)
         .resolve("package.json");
+  }
+
+  private static List<String> fetchOfficialVersionsFromNpm(ObjectMapper objectMapper) {
+    try {
+      HttpClient client = HttpClient.newBuilder()
+          .connectTimeout(Duration.ofSeconds(3))
+          .build();
+      HttpRequest request = HttpRequest.newBuilder(URI.create(WECHAT_PLUGIN_REGISTRY_URL))
+          .timeout(Duration.ofSeconds(5))
+          .GET()
+          .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        throw new IllegalStateException("npm registry 返回 HTTP " + response.statusCode());
+      }
+      JsonNode versions = objectMapper.readTree(response.body()).path("versions");
+      if (!versions.isObject()) {
+        return List.of();
+      }
+      List<String> result = new ArrayList<>();
+      versions.fieldNames().forEachRemaining(result::add);
+      return result;
+    } catch (IOException error) {
+      throw new IllegalStateException("读取微信插件官方版本失败：" + error.getMessage(), error);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("读取微信插件官方版本被中断。", error);
+    }
   }
 
   private void requireRunning(InstanceEntity instance) {
@@ -535,7 +843,10 @@ public class WechatPluginService {
   }
 
   private boolean isRunningTask(String status) {
-    return "installing".equals(status) || "uninstalling".equals(status) || "upgrading".equals(status);
+    return "installing".equals(status)
+        || "uninstalling".equals(status)
+        || "upgrading".equals(status)
+        || "reinstalling".equals(status);
   }
 
   private PublicWechatPluginStatus runningStatus(String status, String outputSnippet, String message) {
@@ -585,6 +896,49 @@ public class WechatPluginService {
     return value == null ? "" : value;
   }
 
+  private static long elapsedMs(long startedAtNanos) {
+    return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+  }
+
+  private static int compareVersion(String left, String right) {
+    String[] leftParts = versionCore(left).split("\\.");
+    String[] rightParts = versionCore(right).split("\\.");
+    int length = Math.max(leftParts.length, rightParts.length);
+    for (int index = 0; index < length; index++) {
+      int leftValue = numericPart(leftParts, index);
+      int rightValue = numericPart(rightParts, index);
+      if (leftValue != rightValue) {
+        return Integer.compare(leftValue, rightValue);
+      }
+    }
+    return versionQualifierRank(left) - versionQualifierRank(right);
+  }
+
+  private static String versionCore(String version) {
+    String normalized = defaultString(version);
+    int separator = normalized.indexOf('-');
+    if (separator < 0) {
+      separator = normalized.indexOf('+');
+    }
+    return separator < 0 ? normalized : normalized.substring(0, separator);
+  }
+
+  private static int numericPart(String[] parts, int index) {
+    if (index >= parts.length) {
+      return 0;
+    }
+    try {
+      return Integer.parseInt(parts[index]);
+    } catch (NumberFormatException ignored) {
+      return 0;
+    }
+  }
+
+  private static int versionQualifierRank(String version) {
+    String normalized = defaultString(version);
+    return normalized.contains("-") ? 0 : 1;
+  }
+
   private static Executor defaultExecutor() {
     return Executors.newCachedThreadPool(task -> {
       Thread thread = new Thread(task, "wechat-plugin-" + System.nanoTime());
@@ -599,4 +953,9 @@ public class WechatPluginService {
   private interface PluginTaskSuccess {
     PublicWechatPluginStatus complete(String outputSnippet);
   }
+
+  private record CachedVersions(
+      List<String> versions,
+      long expiresAtMs
+  ) {}
 }

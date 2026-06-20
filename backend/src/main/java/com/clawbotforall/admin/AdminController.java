@@ -8,6 +8,7 @@ import com.clawbotforall.web.ApiException;
 import com.clawbotforall.ws.AppEvent;
 import com.clawbotforall.ws.AppEventPublisher;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminController {
 
   private static final String ADMIN_RUNNER_IMAGE_TOPIC = "/topic/admin/runner-image";
+  private static final int MAX_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
   private final OpenClawRuntime openClawRuntime;
   private final ClawbotProperties properties;
@@ -92,8 +94,16 @@ public class AdminController {
     if (!Files.exists(path)) {
       return List.of();
     }
-    try {
-      List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+    try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
+      long length = file.length();
+      if (length == 0) {
+        return List.of();
+      }
+      long start = tailStart(file, length, tail);
+      file.seek(start);
+      byte[] bytes = new byte[(int) Math.min(Integer.MAX_VALUE, length - start)];
+      file.readFully(bytes);
+      List<String> lines = new java.util.ArrayList<>(new String(bytes, StandardCharsets.UTF_8).lines().toList());
       if (lines.size() <= tail) {
         return lines;
       }
@@ -101,6 +111,26 @@ public class AdminController {
     } catch (IOException error) {
       return List.of("读取服务日志失败：" + error.getMessage());
     }
+  }
+
+  private static long tailStart(RandomAccessFile file, long length, int tail) throws IOException {
+    long minPosition = Math.max(0, length - MAX_LOG_TAIL_BYTES);
+    int lineBreaks = 0;
+    for (long position = length - 1; position >= minPosition; position--) {
+      file.seek(position);
+      int value = file.read();
+      if (value != '\n') {
+        continue;
+      }
+      if (position == length - 1) {
+        continue;
+      }
+      lineBreaks++;
+      if (lineBreaks == tail) {
+        return position + 1;
+      }
+    }
+    return minPosition;
   }
 
   private static String traceId() {

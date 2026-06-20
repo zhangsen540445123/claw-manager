@@ -6,9 +6,14 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.web.ApiException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +28,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 public class WechatPluginController {
+
+  private static final Logger log = LoggerFactory.getLogger(WechatPluginController.class);
 
   private final InstanceCommandService commandService;
   private final WechatPluginService pluginService;
@@ -46,14 +53,21 @@ public class WechatPluginController {
     return Map.of("plugin", pluginService.status(instance, checkLatest));
   }
 
+  @GetMapping("/api/admin/wechat-plugins/versions")
+  public Map<String, Object> versions(Authentication authentication) {
+    requireAdmin(authentication);
+    return Map.of("versions", pluginService.versions());
+  }
+
   @PostMapping("/api/admin/instances/{instanceId}/wechat-plugin/install")
   public Map<String, Object> install(
       @PathVariable String instanceId,
+      @RequestBody(required = false) WechatPluginVersionRequest request,
       Authentication authentication
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = commandService.requireInstance(instanceId);
-    return Map.of("plugin", pluginService.startInstall(instance));
+    return Map.of("plugin", pluginService.startInstall(instance, request == null ? "" : request.version()));
   }
 
   @PostMapping("/api/admin/instances/{instanceId}/wechat-plugin/uninstall")
@@ -69,11 +83,23 @@ public class WechatPluginController {
   @PostMapping("/api/admin/instances/{instanceId}/wechat-plugin/upgrade")
   public Map<String, Object> upgrade(
       @PathVariable String instanceId,
+      @RequestBody(required = false) WechatPluginVersionRequest request,
       Authentication authentication
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = commandService.requireInstance(instanceId);
-    return Map.of("plugin", pluginService.startUpgrade(instance));
+    return Map.of("plugin", pluginService.startUpgrade(instance, request == null ? "" : request.version()));
+  }
+
+  @PostMapping("/api/admin/instances/{instanceId}/wechat-plugin/reinstall")
+  public Map<String, Object> reinstall(
+      @PathVariable String instanceId,
+      @RequestBody(required = false) WechatPluginVersionRequest request,
+      Authentication authentication
+  ) {
+    requireAdmin(authentication);
+    InstanceEntity instance = commandService.requireInstance(instanceId);
+    return Map.of("plugin", pluginService.startReinstall(instance, request == null ? "" : request.version()));
   }
 
   @PostMapping("/api/admin/wechat-plugins/check")
@@ -82,7 +108,7 @@ public class WechatPluginController {
       Authentication authentication
   ) {
     requireAdmin(authentication);
-    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.status(instance, true)));
+    return Map.of("plugins", checkBatch(request));
   }
 
   @PostMapping("/api/admin/wechat-plugins/install")
@@ -91,7 +117,8 @@ public class WechatPluginController {
       Authentication authentication
   ) {
     requireAdmin(authentication);
-    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.startInstall(instance)));
+    String version = request == null ? "" : request.version();
+    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.startInstall(instance, version)));
   }
 
   @PostMapping("/api/admin/wechat-plugins/uninstall")
@@ -109,7 +136,18 @@ public class WechatPluginController {
       Authentication authentication
   ) {
     requireAdmin(authentication);
-    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.startUpgrade(instance)));
+    String version = request == null ? "" : request.version();
+    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.startUpgrade(instance, version)));
+  }
+
+  @PostMapping("/api/admin/wechat-plugins/reinstall")
+  public Map<String, Object> reinstallMany(
+      @RequestBody(required = false) WechatPluginBatchRequest request,
+      Authentication authentication
+  ) {
+    requireAdmin(authentication);
+    String version = request == null ? "" : request.version();
+    return Map.of("plugins", batch(request, (instanceId, instance) -> pluginService.startReinstall(instance, version)));
   }
 
   private List<WechatPluginBatchItem> batch(
@@ -129,6 +167,43 @@ public class WechatPluginController {
       }
     }
     return plugins;
+  }
+
+  private List<WechatPluginBatchItem> checkBatch(WechatPluginBatchRequest request) {
+    long startedAt = System.nanoTime();
+    List<String> instanceIds = requestedInstanceIds(request);
+    Map<String, InstanceEntity> instancesById = commandService.listInstancesByIds(instanceIds).stream()
+        .collect(Collectors.toMap(InstanceEntity::getId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+    List<WechatPluginBatchItem> plugins = new ArrayList<>();
+    for (String instanceId : instanceIds) {
+      try {
+        InstanceEntity instance = instancesById.get(instanceId);
+        if (instance == null) {
+          throw new ApiException(HttpStatus.NOT_FOUND, "实例不存在。");
+        }
+        plugins.add(new WechatPluginBatchItem(instanceId, pluginService.status(instance, false)));
+      } catch (RuntimeException error) {
+        plugins.add(new WechatPluginBatchItem(instanceId, failedStatus(error)));
+      }
+    }
+    log.info(
+        "微信插件批量本地检测完成：requested={}, returned={}, elapsedMs={}",
+        instanceIds.size(),
+        plugins.size(),
+        (System.nanoTime() - startedAt) / 1_000_000L
+    );
+    return plugins;
+  }
+
+  private static List<String> requestedInstanceIds(WechatPluginBatchRequest request) {
+    List<String> instanceIds = new ArrayList<>();
+    for (String instanceId : request == null || request.instanceIds() == null ? List.<String>of() : request.instanceIds()) {
+      String normalized = instanceId == null ? "" : instanceId.trim();
+      if (!normalized.isBlank() && !instanceIds.contains(normalized)) {
+        instanceIds.add(normalized);
+      }
+    }
+    return instanceIds;
   }
 
   private static PublicWechatPluginStatus failedStatus(RuntimeException error) {
@@ -153,7 +228,9 @@ public class WechatPluginController {
     }
   }
 
-  public record WechatPluginBatchRequest(List<String> instanceIds) {}
+  public record WechatPluginVersionRequest(String version) {}
+
+  public record WechatPluginBatchRequest(List<String> instanceIds, String version) {}
 
   public record WechatPluginBatchItem(String instanceId, PublicWechatPluginStatus plugin) {}
 }
