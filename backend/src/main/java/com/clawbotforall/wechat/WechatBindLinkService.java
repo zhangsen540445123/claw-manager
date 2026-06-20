@@ -439,6 +439,7 @@ public class WechatBindLinkService {
 
     WechatPairedAccountEntity existingByAccount = aggregateMapper.findWechatAccountByAccountId(accountId);
     if (existingByAccount != null) {
+      refreshOriginalAccountCredential(instance, accountId, existingByAccount);
       cleanupRejectedNewLogin(instance, link, accountId, protectedAccountId(instance, existingByAccount));
       restartExistingWechatChannel(existingByAccount);
       markRejected(link, "该微信已绑定到其他手机号或实例，请联系管理员处理。");
@@ -447,6 +448,7 @@ public class WechatBindLinkService {
 
     WechatPairedAccountEntity existingByWechatUser = aggregateMapper.findWechatAccountByWechatUserId(wechatUserId);
     if (existingByWechatUser != null) {
+      refreshOriginalAccountCredential(instance, accountId, existingByWechatUser);
       cleanupRejectedNewLogin(instance, link, accountId, protectedAccountId(instance, existingByWechatUser));
       restartExistingWechatChannel(existingByWechatUser);
       markRejected(link, "该微信已绑定到其他手机号或实例，请联系管理员处理。");
@@ -557,6 +559,25 @@ public class WechatBindLinkService {
           "重复微信拒绝后热启动原账号失败：instanceId={}, accountId={}, reason={}",
           defaultString(account.getInstanceId()),
           defaultString(account.getAccountId()),
+          error.getMessage()
+      );
+    }
+  }
+
+  private void refreshOriginalAccountCredential(
+      InstanceEntity sourceInstance,
+      String sourceAccountId,
+      WechatPairedAccountEntity existingAccount
+  ) {
+    try {
+      accountSyncService.refreshAccountCredentialsFromRejectedLogin(sourceInstance, sourceAccountId, existingAccount);
+    } catch (RuntimeException error) {
+      log.warn(
+          "重复微信拒绝前刷新原账号凭证失败：sourceInstanceId={}, sourceAccountId={}, targetInstanceId={}, targetAccountId={}, reason={}",
+          sourceInstance == null ? "" : sourceInstance.getId(),
+          defaultString(sourceAccountId),
+          existingAccount == null ? "" : defaultString(existingAccount.getInstanceId()),
+          existingAccount == null ? "" : defaultString(existingAccount.getAccountId()),
           error.getMessage()
       );
     }

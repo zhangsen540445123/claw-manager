@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -171,7 +172,7 @@ public class WechatAccountSyncService {
    * 删除实例状态目录里的单个微信账号文件，并从 accounts.json 中移除索引。
    */
   public void removeAccountStateFiles(InstancePaths paths, String accountId) {
-    Path stateDir = paths.homeDir().resolve(".openclaw").resolve("openclaw-weixin");
+    Path stateDir = weixinStateDir(paths);
     Path accountsDir = stateDir.resolve("accounts");
     for (String suffix : List.of(".json", ".sync.json", ".context-tokens.json")) {
       try {
@@ -181,6 +182,46 @@ public class WechatAccountSyncService {
       }
     }
     rewriteAccountIndex(stateDir.resolve("accounts.json"), accountId);
+  }
+
+  public boolean refreshAccountCredentialsFromRejectedLogin(
+      InstanceEntity sourceInstance,
+      String sourceAccountId,
+      WechatPairedAccountEntity targetAccount
+  ) {
+    String normalizedSourceAccountId = defaultString(sourceAccountId).trim();
+    String targetAccountId = targetAccount == null ? "" : defaultString(targetAccount.getAccountId()).trim();
+    String targetInstanceId = targetAccount == null ? "" : defaultString(targetAccount.getInstanceId()).trim();
+    if (sourceInstance == null || normalizedSourceAccountId.isBlank() || targetAccountId.isBlank() || targetInstanceId.isBlank()) {
+      return false;
+    }
+    InstancePaths sourcePaths = fileService.paths(sourceInstance.getId());
+    InstancePaths targetPaths = fileService.paths(targetInstanceId);
+    Path sourceCredential = accountStateFile(sourcePaths, normalizedSourceAccountId, ".json");
+    if (!Files.exists(sourceCredential)) {
+      return false;
+    }
+    Path targetCredential = accountStateFile(targetPaths, targetAccountId, ".json");
+    try {
+      Files.createDirectories(targetCredential.getParent());
+      if (!sourceCredential.toAbsolutePath().normalize().equals(targetCredential.toAbsolutePath().normalize())) {
+        Files.copy(sourceCredential, targetCredential, StandardCopyOption.REPLACE_EXISTING);
+      }
+      Files.deleteIfExists(accountStateFile(targetPaths, targetAccountId, ".sync.json"));
+      Files.deleteIfExists(accountStateFile(targetPaths, targetAccountId, ".context-tokens.json"));
+      ensureAccountIndexed(weixinStateDir(targetPaths).resolve("accounts.json"), targetAccountId);
+      return true;
+    } catch (IOException error) {
+      log.warn(
+          "刷新重复微信原账号凭证失败：sourceInstanceId={}, sourceAccountId={}, targetInstanceId={}, targetAccountId={}, reason={}",
+          sourceInstance.getId(),
+          normalizedSourceAccountId,
+          targetInstanceId,
+          targetAccountId,
+          error.getMessage()
+      );
+      return false;
+    }
   }
 
   private void ensureAccountChannels(List<WechatPairedAccountEntity> accounts, String now) {
@@ -203,7 +244,7 @@ public class WechatAccountSyncService {
   }
 
   private void removeStateDir(InstancePaths paths) {
-    Path stateDir = paths.homeDir().resolve(".openclaw").resolve("openclaw-weixin");
+    Path stateDir = weixinStateDir(paths);
     if (!Files.exists(stateDir)) {
       return;
     }
@@ -219,6 +260,34 @@ public class WechatAccountSyncService {
     } catch (IOException ignored) {
       // 尽力处理。
     }
+  }
+
+  private Path accountStateFile(InstancePaths paths, String accountId, String suffix) {
+    return weixinStateDir(paths).resolve("accounts").resolve(accountId + suffix);
+  }
+
+  private Path weixinStateDir(InstancePaths paths) {
+    return paths.homeDir().resolve(".openclaw").resolve("openclaw-weixin");
+  }
+
+  private void ensureAccountIndexed(Path indexPath, String accountId) throws IOException {
+    LinkedHashSet<String> accountIds = new LinkedHashSet<>();
+    if (Files.exists(indexPath)) {
+      try {
+        List<Object> raw = objectMapper.readValue(indexPath.toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+        for (Object item : raw) {
+          String value = defaultString(item == null ? null : String.valueOf(item)).trim();
+          if (!value.isBlank()) {
+            accountIds.add(value);
+          }
+        }
+      } catch (IOException ignored) {
+        // Rewrite malformed index files with the known target account below.
+      }
+    }
+    accountIds.add(accountId);
+    Files.createDirectories(indexPath.getParent());
+    objectMapper.writerWithDefaultPrettyPrinter().writeValue(indexPath.toFile(), new ArrayList<>(accountIds));
   }
 
   private void rewriteAccountIndex(Path indexPath, String removedAccountId) {

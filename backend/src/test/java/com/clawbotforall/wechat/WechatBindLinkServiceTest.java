@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -408,6 +410,48 @@ class WechatBindLinkServiceTest {
     verify(mutationMapper, never()).insertWechatAccount(any());
     verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("cmwx_duplicate_wechat"));
     verify(gatewayRpcService).restartWechatChannel(instance, List.of("wx_existing"));
+  }
+
+  @Test
+  void duplicateWechatScanRefreshesOriginalAccountCredentialBeforeCleaningRejectedLogin() {
+    InstanceEntity currentInstance = instance("inst_current", "当前实例", "running");
+    InstanceEntity originalInstance = instance("inst_original", "原实例", "running");
+    WechatPairedAccountEntity existing = pairedAccount("wx_existing", "13572873189", "inst_original");
+    existing.setWechatUserId("wechat-user");
+    WechatBindLinkEntity stored = newLink("token_duplicate_refresh");
+    stored.setStatus("waiting_scan");
+    stored.setPhone("13900000001");
+    stored.setInstanceId("inst_current");
+    stored.setTargetAccountId("cmwx_duplicate_refresh");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_duplicate_refresh")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_current")).thenReturn(currentInstance);
+    when(aggregateMapper.findById("inst_original")).thenReturn(originalInstance);
+    when(aggregateMapper.findWechatAccountByAccountId("a138ffbbc45f-im-bot")).thenReturn(null);
+    when(aggregateMapper.findWechatAccountByWechatUserId("wechat-user")).thenReturn(existing);
+    when(fileService.paths("inst_current")).thenReturn(testPaths());
+
+    service.completeBindAfterLogin(
+        "token_duplicate_refresh",
+        completion("cmwx_duplicate_refresh", "a138ffbbc45f-im-bot", "wechat-user"),
+        "https://admin.example.test"
+    );
+
+    assertThat(saved.get().getStatus()).isEqualTo("rejected");
+    InOrder order = inOrder(accountSyncService, gatewayRpcService);
+    order.verify(accountSyncService).refreshAccountCredentialsFromRejectedLogin(
+        currentInstance,
+        "a138ffbbc45f-im-bot",
+        existing
+    );
+    order.verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("cmwx_duplicate_refresh"));
+    order.verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("a138ffbbc45f-im-bot"));
+    order.verify(gatewayRpcService).restartWechatChannel(originalInstance, List.of("wx_existing"));
+    verify(mutationMapper, never()).insertWechatAccount(any());
   }
 
   @Test

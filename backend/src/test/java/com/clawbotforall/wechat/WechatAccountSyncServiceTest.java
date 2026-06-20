@@ -141,6 +141,53 @@ class WechatAccountSyncServiceTest {
     verify(bindLinkMapper).deleteByInstanceId("inst_1");
   }
 
+  @Test
+  void refreshesOriginalCredentialFromRejectedLoginAndClearsStaleSessionFiles() throws Exception {
+    Path sourceHome = tempDir.resolve("source-home");
+    Path sourceState = sourceHome.resolve(".openclaw").resolve("openclaw-weixin");
+    Path sourceAccounts = sourceState.resolve("accounts");
+    Files.createDirectories(sourceAccounts);
+    Files.writeString(sourceState.resolve("accounts.json"), "[\"new-account\"]");
+    Files.writeString(sourceAccounts.resolve("new-account.json"), "{\"token\":\"new-token\",\"userId\":\"wechat-user\"}");
+    Files.writeString(sourceAccounts.resolve("new-account.sync.json"), "{\"get_updates_buf\":\"source\"}");
+
+    Path targetHome = tempDir.resolve("target-home");
+    Path targetState = targetHome.resolve(".openclaw").resolve("openclaw-weixin");
+    Path targetAccounts = targetState.resolve("accounts");
+    Files.createDirectories(targetAccounts);
+    Files.writeString(targetState.resolve("accounts.json"), "[\"old-account\"]");
+    Files.writeString(targetAccounts.resolve("old-account.json"), "{\"token\":\"old-token\",\"userId\":\"wechat-user\"}");
+    Files.writeString(targetAccounts.resolve("old-account.sync.json"), "{\"get_updates_buf\":\"old\"}");
+    Files.writeString(targetAccounts.resolve("old-account.context-tokens.json"), "{\"wechat-user\":\"old-context\"}");
+
+    InstanceEntity sourceInstance = new InstanceEntity();
+    sourceInstance.setId("source_inst");
+    WechatPairedAccountEntity targetAccount = new WechatPairedAccountEntity();
+    targetAccount.setAccountId("old-account");
+    targetAccount.setInstanceId("target_inst");
+    targetAccount.setWechatUserId("wechat-user");
+    when(fileService.paths("source_inst")).thenReturn(new InstancePaths(
+        tempDir.resolve("source"),
+        sourceHome,
+        tempDir.resolve("source-workspace"),
+        tempDir.resolve("source-logs")
+    ));
+    when(fileService.paths("target_inst")).thenReturn(new InstancePaths(
+        tempDir.resolve("target"),
+        targetHome,
+        tempDir.resolve("target-workspace"),
+        tempDir.resolve("target-logs")
+    ));
+
+    assertThat(service.refreshAccountCredentialsFromRejectedLogin(sourceInstance, "new-account", targetAccount)).isTrue();
+
+    assertThat(Files.readString(targetAccounts.resolve("old-account.json"))).contains("new-token");
+    assertThat(Files.exists(targetAccounts.resolve("old-account.sync.json"))).isFalse();
+    assertThat(Files.exists(targetAccounts.resolve("old-account.context-tokens.json"))).isFalse();
+    assertThat(Files.readString(targetState.resolve("accounts.json"))).contains("old-account");
+    assertThat(Files.exists(sourceAccounts.resolve("new-account.json"))).isTrue();
+  }
+
   private InstanceEntity instanceWithStateAccount() throws Exception {
     Path homeDir = tempDir.resolve("home");
     Path stateDir = homeDir.resolve(".openclaw").resolve("openclaw-weixin");
