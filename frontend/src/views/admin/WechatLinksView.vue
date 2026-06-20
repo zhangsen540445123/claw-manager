@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
 import { Ban, Clipboard, Eye, Link as LinkIcon, QrCode, RefreshCw, Search } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
-import type { PublicWechatBindLink, PublicWechatPluginStatus, WechatBindingLookup } from "../../api/types";
+import type { PublicWechatBindLink, WechatBindingLookup } from "../../api/types";
 import {
   bindStatusLabel,
   bindStatusTagType,
@@ -30,9 +30,6 @@ const newPhone = ref("");
 const existingPhone = ref("");
 const existingBindingOptions = ref<WechatBindingLookup[]>([]);
 const existingBindingLoading = ref(false);
-const pluginInstanceId = ref("");
-const pluginStatus = ref<PublicWechatPluginStatus | null>(null);
-const pluginLoading = ref("");
 const filters = reactive({
   mode: "",
   status: "",
@@ -60,22 +57,9 @@ const statusOptions = [
   { label: "已失效", value: "revoked" }
 ];
 
-const instanceOptions = computed(() => admin.instances);
-
 onMounted(() => {
   void loadLinks();
-  void loadInstancesForPlugin();
 });
-
-watch(
-  () => pluginInstanceId.value ? admin.wechatPluginStatusByInstanceId[pluginInstanceId.value] : null,
-  (status) => {
-    if (status) {
-      pluginStatus.value = status;
-    }
-  },
-  { immediate: true }
-);
 
 watch(
   () => admin.wechatBindLinkByToken,
@@ -260,57 +244,6 @@ async function updateSelectedQr() {
   selectedLinkQrSource.value = await qrSource(selectedLink.value);
 }
 
-async function loadInstancesForPlugin() {
-  await admin.loadInstances();
-  if (!pluginInstanceId.value && admin.instances.length > 0) {
-    pluginInstanceId.value = admin.instances[0].id;
-  }
-}
-
-async function loadPluginStatus(checkLatest = false) {
-  if (!pluginInstanceId.value) return;
-  pluginLoading.value = "check";
-  try {
-    pluginStatus.value = await admin.loadWechatPluginStatus(pluginInstanceId.value, checkLatest);
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "微信插件状态读取失败";
-    ElMessage.error(error.value);
-  } finally {
-    pluginLoading.value = "";
-  }
-}
-
-async function installPlugin() {
-  if (!pluginInstanceId.value) return;
-  pluginLoading.value = "install";
-  try {
-    pluginStatus.value = await admin.installWechatPlugin(pluginInstanceId.value);
-    if (pluginStatus.value.status === "installing") {
-      ElMessage.success("微信插件安装任务已开始。");
-    } else {
-      ElMessage.success("微信插件安装完成。");
-    }
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "微信插件安装失败";
-    ElMessage.error(error.value);
-  } finally {
-    pluginLoading.value = "";
-  }
-}
-
-function pluginAlertType(status: PublicWechatPluginStatus | null) {
-  if (!status) return "info";
-  if (status.status === "failed") return "error";
-  if (status.status === "installing") return "info";
-  return status.installed ? "success" : "warning";
-}
-
-function pluginStatusTitle(status: PublicWechatPluginStatus | null) {
-  if (!status) return "";
-  if (status.status === "installing") return "微信插件安装中";
-  if (status.status === "failed") return status.message || "微信插件安装失败";
-  return status.installed ? `已安装 ${status.currentVersion || ""}` : status.message;
-}
 </script>
 
 <template>
@@ -331,31 +264,6 @@ function pluginStatusTitle(status: PublicWechatPluginStatus | null) {
         </div>
       </template>
         <div class="bind-link-box">
-        <section class="bind-action-panel plugin-action-panel">
-          <strong>微信插件</strong>
-          <div class="existing-bind-row">
-            <el-select v-model="pluginInstanceId" filterable placeholder="选择 OpenClaw 实例">
-              <el-option
-                v-for="instance in instanceOptions"
-                :key="instance.id"
-                :label="instance.name"
-                :value="instance.id"
-              />
-            </el-select>
-            <el-button :loading="pluginLoading === 'check'" @click="loadPluginStatus(true)">检测</el-button>
-            <el-button type="primary" :loading="pluginLoading === 'install'" @click="installPlugin">安装微信插件</el-button>
-          </div>
-          <el-alert
-            v-if="pluginStatus"
-            :type="pluginAlertType(pluginStatus)"
-            show-icon
-            :closable="false"
-            :title="pluginStatusTitle(pluginStatus)"
-          >
-            <pre v-if="pluginStatus.outputSnippet" class="plugin-output">{{ pluginStatus.outputSnippet }}</pre>
-          </el-alert>
-        </section>
-
         <div class="bind-actions">
           <section class="bind-action-panel">
             <strong>新用户出码</strong>

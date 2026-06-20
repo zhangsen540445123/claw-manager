@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Activity, Boxes, PlusSquare, QrCode, Server, SlidersHorizontal, Menu, X } from "lucide-vue-next";
+import { Activity, Boxes, PackageCheck, PlusSquare, QrCode, Server, SlidersHorizontal, Menu, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 
-type ShellNavKey = "overview" | "presets" | "create" | "wechat" | "instances" | "ops" | "account";
+type ShellNavKey = "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "ops" | "account";
 
 const props = defineProps<{
   authenticated: boolean;
@@ -22,8 +22,9 @@ const navItems = computed(() => {
     { key: "overview" as const, label: "运行总览", icon: Activity },
     { key: "presets" as const, label: "模型预设", icon: SlidersHorizontal },
     { key: "create" as const, label: "创建实例", icon: PlusSquare },
-    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "instances" as const, label: "实例管理", icon: Boxes },
+    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
+    { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
     { key: "ops" as const, label: "系统运维", icon: Server }
   ];
 });
@@ -32,8 +33,9 @@ const routeTitles: Record<string, string> = {
   overview: "运行总览",
   presets: "模型预设",
   create: "创建实例",
-  wechat: "扫码链接",
   instances: "实例管理",
+  wechat: "扫码链接",
+  wechatPlugins: "插件管理",
   ops: "系统运维",
   account: "账号设置"
 };

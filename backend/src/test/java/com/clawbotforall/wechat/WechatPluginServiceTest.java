@@ -154,6 +154,109 @@ class WechatPluginServiceTest {
     assertThat(executor.size()).isEqualTo(1);
   }
 
+  @Test
+  void startUninstallRunsUninstallInBackgroundAndDisablesPlugin() throws Exception {
+    InstanceEntity instance = instance();
+    instance.setPluginsAllow("[\"openclaw-weixin\",\"other-plugin\"]");
+    instance.setPluginsEntries("{\"openclaw-weixin\":{\"enabled\":true},\"other-plugin\":{\"enabled\":true}}");
+    InstancePaths paths = installedPluginPaths("2.5.0");
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
+    when(fileService.paths("inst_1")).thenReturn(paths);
+    when(commandService.listModels("inst_1")).thenReturn(List.of());
+    when(openClawRuntime.startExec(eq(instance), any(List.class), anyLong(), anyMap(), any(RuntimeExecListener.class)))
+        .thenAnswer(invocation -> {
+          @SuppressWarnings("unchecked")
+          List<String> command = invocation.getArgument(1);
+          commands.add(command);
+          RuntimeExecListener listener = invocation.getArgument(4);
+          listener.onComplete(0);
+          return execHandle;
+        });
+
+    PublicWechatPluginStatus started = service.startUninstall(instance);
+
+    assertThat(started.status()).isEqualTo("uninstalling");
+    executor.runNext();
+
+    assertThat(commands).containsExactly(List.of("openclaw", "plugins", "uninstall", "openclaw-weixin", "--force"));
+    verify(mutationMapper).updateInstancePlugins(
+        eq("inst_1"),
+        eq("[\"other-plugin\"]"),
+        eq("{\"other-plugin\":{\"enabled\":true}}"),
+        any()
+    );
+    verify(fileService).writeInstanceFiles(instance, List.of());
+    verify(eventPublisher, atLeastOnce()).publishWechatPluginUpdated(eq("inst_1"), any(PublicWechatPluginStatus.class));
+  }
+
+  @Test
+  void startUpgradeRunsOpenClawPluginUpdateInBackground() throws Exception {
+    InstanceEntity instance = instance();
+    InstancePaths paths = installedPluginPaths("2.5.0");
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
+    when(fileService.paths("inst_1")).thenReturn(paths);
+    when(commandService.listModels("inst_1")).thenReturn(List.of());
+    when(openClawRuntime.startExec(eq(instance), any(List.class), anyLong(), anyMap(), any(RuntimeExecListener.class)))
+        .thenAnswer(invocation -> {
+          @SuppressWarnings("unchecked")
+          List<String> command = invocation.getArgument(1);
+          commands.add(command);
+          RuntimeExecListener listener = invocation.getArgument(4);
+          listener.onComplete(0);
+          return execHandle;
+        });
+
+    PublicWechatPluginStatus started = service.startUpgrade(instance);
+
+    assertThat(started.status()).isEqualTo("upgrading");
+    executor.runNext();
+
+    assertThat(commands).containsExactly(List.of("openclaw", "plugins", "update", "openclaw-weixin"));
+    verify(mutationMapper).updateInstancePlugins(
+        eq("inst_1"),
+        eq("[\"openclaw-weixin\"]"),
+        eq("{\"openclaw-weixin\":{\"enabled\":true}}"),
+        any()
+    );
+    verify(eventPublisher, atLeastOnce()).publishWechatPluginUpdated(eq("inst_1"), any(PublicWechatPluginStatus.class));
+  }
+
+  @Test
+  void pluginTasksDeduplicateAcrossOperationsForSameInstance() throws Exception {
+    InstanceEntity instance = instance();
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
+
+    PublicWechatPluginStatus first = service.startInstall(instance);
+    PublicWechatPluginStatus second = service.startUpgrade(instance);
+
+    assertThat(first.status()).isEqualTo("installing");
+    assertThat(second.status()).isEqualTo("installing");
+    assertThat(executor.size()).isEqualTo(1);
+  }
+
+  private InstancePaths installedPluginPaths(String version) throws Exception {
+    InstancePaths paths = new InstancePaths(
+        tempDir.resolve("inst_1"),
+        tempDir.resolve("inst_1").resolve("home"),
+        tempDir.resolve("inst_1").resolve("workspace"),
+        tempDir.resolve("inst_1").resolve("logs")
+    );
+    Files.createDirectories(
+        paths.homeDir().resolve(".openclaw").resolve("npm").resolve("projects").resolve("tencent-weixin-openclaw-weixin")
+    );
+    Files.writeString(
+        paths.homeDir()
+            .resolve(".openclaw")
+            .resolve("npm")
+            .resolve("projects")
+            .resolve("tencent-weixin-openclaw-weixin")
+            .resolve("package.json"),
+        "{\"private\":true,\"dependencies\":{\"@tencent-weixin/openclaw-weixin\":\"" + version + "\"}}"
+    );
+    when(fileService.paths("inst_1")).thenReturn(paths);
+    return paths;
+  }
+
   private static InstanceEntity instance() {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");

@@ -47,7 +47,7 @@ public class WechatPluginService {
   private static final String WECHAT_PLUGIN_ID = "openclaw-weixin";
   private static final String WECHAT_PLUGIN_SPEC = "@tencent-weixin/openclaw-weixin";
   private static final String WECHAT_PLUGIN_NPM_SPEC = "npm:" + WECHAT_PLUGIN_SPEC;
-  private static final long INSTALL_TIMEOUT_MS = 10 * 60 * 1000L;
+  private static final long TASK_TIMEOUT_MS = 10 * 60 * 1000L;
   private static final long CHECK_TIMEOUT_MS = 20_000L;
 
   private final OpenClawRuntime openClawRuntime;
@@ -57,8 +57,8 @@ public class WechatPluginService {
   private final InstanceEventPublisher eventPublisher;
   private final ObjectMapper objectMapper;
   private final Executor executor;
-  private final ConcurrentMap<String, PublicWechatPluginStatus> installStatuses = new ConcurrentHashMap<>();
-  private final ConcurrentMap<String, Boolean> installJobs = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, PublicWechatPluginStatus> taskStatuses = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Boolean> taskJobs = new ConcurrentHashMap<>();
 
   @Autowired
   public WechatPluginService(
@@ -102,6 +102,14 @@ public class WechatPluginService {
    * 检查实例是否已经安装微信插件。
    */
   public PublicWechatPluginStatus status(InstanceEntity instance, boolean checkLatest) {
+    PublicWechatPluginStatus running = taskStatuses.get(instance.getId());
+    if (running != null && isRunningTask(running.status())) {
+      return running;
+    }
+    return detectedStatus(instance, checkLatest);
+  }
+
+  private PublicWechatPluginStatus detectedStatus(InstanceEntity instance, boolean checkLatest) {
     String currentVersion = currentVersion(instance);
     boolean installed = !currentVersion.isBlank();
     String latestVersion = "";
@@ -133,62 +141,164 @@ public class WechatPluginService {
    * 异步安装或覆盖安装微信插件。
    */
   public PublicWechatPluginStatus startInstall(InstanceEntity instance) {
+    return startTask(
+        instance,
+        "installing",
+        "微信插件安装已开始。",
+        "微信插件正在安装。",
+        "微信插件安装失败：",
+        List.of("openclaw", "plugins", "install", WECHAT_PLUGIN_NPM_SPEC, "--force"),
+        output -> {
+          enableWechatPlugin(instance);
+          PublicWechatPluginStatus status = detectedStatus(instance, false);
+          return new PublicWechatPluginStatus(
+              status.installed(),
+              status.currentVersion(),
+              status.latestVersion(),
+              status.upgradable(),
+              status.installed() ? "installed" : "unknown",
+              status.installed() ? "微信插件安装完成。" : "微信插件命令已完成，但未检测到插件目录。",
+              output,
+              Instant.now().toString()
+          );
+        }
+    );
+  }
+
+  public PublicWechatPluginStatus startUninstall(InstanceEntity instance) {
+    PublicWechatPluginStatus running = runningTask(instance, "uninstalling", "微信插件正在卸载。");
+    if (running != null) {
+      return running;
+    }
+    if (!isWechatPluginInstalled(instance)) {
+      PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无需卸载。");
+      taskStatuses.put(instance.getId(), missing);
+      publish(instance, missing);
+      return missing;
+    }
+    return startTask(
+        instance,
+        "uninstalling",
+        "微信插件卸载已开始。",
+        "微信插件正在卸载。",
+        "微信插件卸载失败：",
+        List.of("openclaw", "plugins", "uninstall", WECHAT_PLUGIN_ID, "--force"),
+        output -> {
+          disableWechatPlugin(instance);
+          return new PublicWechatPluginStatus(
+              false,
+              "",
+              "",
+              false,
+              "missing",
+              "微信插件已卸载。",
+              output,
+              Instant.now().toString()
+          );
+        }
+    );
+  }
+
+  public PublicWechatPluginStatus startUpgrade(InstanceEntity instance) {
+    PublicWechatPluginStatus running = runningTask(instance, "upgrading", "微信插件正在升级。");
+    if (running != null) {
+      return running;
+    }
+    if (!isWechatPluginInstalled(instance)) {
+      PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无法升级。");
+      taskStatuses.put(instance.getId(), missing);
+      publish(instance, missing);
+      return missing;
+    }
+    return startTask(
+        instance,
+        "upgrading",
+        "微信插件升级已开始。",
+        "微信插件正在升级。",
+        "微信插件升级失败：",
+        List.of("openclaw", "plugins", "update", WECHAT_PLUGIN_ID),
+        output -> {
+          enableWechatPlugin(instance);
+          PublicWechatPluginStatus status = detectedStatus(instance, false);
+          return new PublicWechatPluginStatus(
+              status.installed(),
+              status.currentVersion(),
+              status.latestVersion(),
+              status.upgradable(),
+              status.installed() ? "installed" : "missing",
+              status.installed() ? "微信插件升级完成。" : "微信插件升级命令已完成，但未检测到插件目录。",
+              output,
+              Instant.now().toString()
+          );
+        }
+    );
+  }
+
+  private PublicWechatPluginStatus runningTask(InstanceEntity instance, String fallbackStatus, String fallbackMessage) {
+    requireRunning(instance);
+    if (!taskJobs.containsKey(instance.getId())) {
+      return null;
+    }
+    PublicWechatPluginStatus existing = taskStatuses.get(instance.getId());
+    return existing == null ? runningStatus(fallbackStatus, "", fallbackMessage) : existing;
+  }
+
+  private PublicWechatPluginStatus startTask(
+      InstanceEntity instance,
+      String runningStatus,
+      String startedMessage,
+      String progressMessage,
+      String failurePrefix,
+      List<String> command,
+      PluginTaskSuccess success
+  ) {
     requireRunning(instance);
     String instanceId = instance.getId();
-    PublicWechatPluginStatus existing = installStatuses.get(instanceId);
-    if (installJobs.putIfAbsent(instanceId, true) != null) {
-      return existing == null ? installingStatus("", "微信插件正在安装。") : existing;
+    PublicWechatPluginStatus existing = taskStatuses.get(instanceId);
+    if (taskJobs.putIfAbsent(instanceId, true) != null) {
+      return existing == null ? runningStatus(runningStatus, "", progressMessage) : existing;
     }
-    PublicWechatPluginStatus started = installingStatus("", "微信插件安装已开始。");
-    installStatuses.put(instanceId, started);
+    PublicWechatPluginStatus started = runningStatus(runningStatus, "", startedMessage);
+    taskStatuses.put(instanceId, started);
     publish(instance, started);
     try {
-      executor.execute(() -> installInBackground(instance));
+      executor.execute(() -> runTask(instance, runningStatus, progressMessage, failurePrefix, command, success));
     } catch (RuntimeException error) {
-      installJobs.remove(instanceId);
-      PublicWechatPluginStatus failed = failedStatus(message(error), "");
-      installStatuses.put(instanceId, failed);
+      taskJobs.remove(instanceId);
+      PublicWechatPluginStatus failed = failedStatus(failurePrefix, message(error), "");
+      taskStatuses.put(instanceId, failed);
       publish(instance, failed);
       throw error;
     }
     return started;
   }
 
-  private void installInBackground(InstanceEntity instance) {
+  private void runTask(
+      InstanceEntity instance,
+      String runningStatus,
+      String progressMessage,
+      String failurePrefix,
+      List<String> command,
+      PluginTaskSuccess success
+  ) {
     String instanceId = instance.getId();
     StringBuilder output = new StringBuilder();
     try {
-      append(output, run(instance, List.of(
-          "openclaw",
-          "plugins",
-          "install",
-          WECHAT_PLUGIN_NPM_SPEC,
-          "--force"
-      ), INSTALL_TIMEOUT_MS, chunk -> {
-        PublicWechatPluginStatus installing = installingStatus(tail(output.toString(), 4000), "微信插件正在安装。");
-        installStatuses.put(instanceId, installing);
-        publish(instance, installing);
-      }).output());
-      enableWechatPlugin(instance);
-      PublicWechatPluginStatus status = status(instance, false);
-      PublicWechatPluginStatus installed = new PublicWechatPluginStatus(
-          status.installed(),
-          status.currentVersion(),
-          status.latestVersion(),
-          status.upgradable(),
-          status.installed() ? "installed" : "unknown",
-          status.installed() ? "微信插件安装完成。" : "微信插件命令已完成，但未检测到插件目录。",
-          tail(output.toString(), 4000),
-          Instant.now().toString()
-      );
-      installStatuses.put(instanceId, installed);
-      publish(instance, installed);
+      run(instance, command, TASK_TIMEOUT_MS, chunk -> {
+        append(output, chunk);
+        PublicWechatPluginStatus running = runningStatus(runningStatus, tail(output.toString(), 4000), progressMessage);
+        taskStatuses.put(instanceId, running);
+        publish(instance, running);
+      });
+      PublicWechatPluginStatus completed = success.complete(tail(output.toString(), 4000));
+      taskStatuses.put(instanceId, completed);
+      publish(instance, completed);
     } catch (RuntimeException error) {
-      PublicWechatPluginStatus failed = failedStatus(message(error), tail(output.toString(), 4000));
-      installStatuses.put(instanceId, failed);
+      PublicWechatPluginStatus failed = failedStatus(failurePrefix, message(error), tail(output.toString(), 4000));
+      taskStatuses.put(instanceId, failed);
       publish(instance, failed);
     } finally {
-      installJobs.remove(instanceId);
+      taskJobs.remove(instanceId);
     }
   }
 
@@ -200,6 +310,21 @@ public class WechatPluginService {
     }
     Map<String, Object> entries = readJsonMap(instance.getPluginsEntries());
     entries.put(WECHAT_PLUGIN_ID, Map.of("enabled", true));
+    String now = Instant.now().toString();
+    String allowJson = writeJson(allow);
+    String entriesJson = writeJson(entries);
+    mutationMapper.updateInstancePlugins(instance.getId(), allowJson, entriesJson, now);
+    instance.setPluginsAllow(allowJson);
+    instance.setPluginsEntries(entriesJson);
+    instance.setUpdatedAt(now);
+    fileService.writeInstanceFiles(instance, commandService.listModels(instance.getId()));
+  }
+
+  private void disableWechatPlugin(InstanceEntity instance) {
+    List<Object> allow = new ArrayList<>(readJsonList(instance.getPluginsAllow()));
+    allow.removeIf(item -> WECHAT_PLUGIN_ID.equals(String.valueOf(item)));
+    Map<String, Object> entries = new LinkedHashMap<>(readJsonMap(instance.getPluginsEntries()));
+    entries.remove(WECHAT_PLUGIN_ID);
     String now = Instant.now().toString();
     String allowJson = writeJson(allow);
     String entriesJson = writeJson(entries);
@@ -409,27 +534,44 @@ public class WechatPluginService {
     return error.getMessage();
   }
 
-  private PublicWechatPluginStatus installingStatus(String outputSnippet, String message) {
+  private boolean isRunningTask(String status) {
+    return "installing".equals(status) || "uninstalling".equals(status) || "upgrading".equals(status);
+  }
+
+  private PublicWechatPluginStatus runningStatus(String status, String outputSnippet, String message) {
     return new PublicWechatPluginStatus(
         false,
         "",
         "",
         false,
-        "installing",
+        status,
         message,
         defaultString(outputSnippet),
         Instant.now().toString()
     );
   }
 
-  private PublicWechatPluginStatus failedStatus(String message, String outputSnippet) {
+  private PublicWechatPluginStatus missingStatus(String message) {
+    return new PublicWechatPluginStatus(
+        false,
+        "",
+        "",
+        false,
+        "missing",
+        defaultString(message),
+        "",
+        Instant.now().toString()
+    );
+  }
+
+  private PublicWechatPluginStatus failedStatus(String prefix, String message, String outputSnippet) {
     return new PublicWechatPluginStatus(
         false,
         "",
         "",
         false,
         "failed",
-        "微信插件安装失败：" + defaultString(message),
+        prefix + defaultString(message),
         defaultString(outputSnippet),
         Instant.now().toString()
     );
@@ -452,4 +594,9 @@ public class WechatPluginService {
   }
 
   private record ExecResult(int exitCode, String output) {}
+
+  @FunctionalInterface
+  private interface PluginTaskSuccess {
+    PublicWechatPluginStatus complete(String outputSnippet);
+  }
 }

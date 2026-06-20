@@ -36,6 +36,11 @@ interface ModelPresetResponse {
   sync?: ModelPresetSyncResult;
 }
 
+interface WechatPluginBatchItem {
+  instanceId: string;
+  plugin: PublicWechatPluginStatus;
+}
+
 export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
@@ -162,6 +167,52 @@ export const useAdminStore = defineStore("admin", {
         [instanceId]: response.plugin
       };
       return response.plugin;
+    },
+    async uninstallWechatPlugin(instanceId: string) {
+      const response = await api<{ plugin: PublicWechatPluginStatus }>(
+        `/api/admin/instances/${instanceId}/wechat-plugin/uninstall`,
+        { method: "POST" }
+      );
+      this.wechatPluginStatusByInstanceId = {
+        ...this.wechatPluginStatusByInstanceId,
+        [instanceId]: response.plugin
+      };
+      return response.plugin;
+    },
+    async upgradeWechatPlugin(instanceId: string) {
+      const response = await api<{ plugin: PublicWechatPluginStatus }>(
+        `/api/admin/instances/${instanceId}/wechat-plugin/upgrade`,
+        { method: "POST" }
+      );
+      this.wechatPluginStatusByInstanceId = {
+        ...this.wechatPluginStatusByInstanceId,
+        [instanceId]: response.plugin
+      };
+      return response.plugin;
+    },
+    async batchCheckWechatPlugins(instanceIds: string[]) {
+      return this.batchWechatPlugins("check", instanceIds);
+    },
+    async batchInstallWechatPlugins(instanceIds: string[]) {
+      return this.batchWechatPlugins("install", instanceIds);
+    },
+    async batchUninstallWechatPlugins(instanceIds: string[]) {
+      return this.batchWechatPlugins("uninstall", instanceIds);
+    },
+    async batchUpgradeWechatPlugins(instanceIds: string[]) {
+      return this.batchWechatPlugins("upgrade", instanceIds);
+    },
+    async batchWechatPlugins(action: "check" | "install" | "uninstall" | "upgrade", instanceIds: string[]) {
+      const response = await api<{ plugins: WechatPluginBatchItem[] }>(`/api/admin/wechat-plugins/${action}`, {
+        method: "POST",
+        ...jsonBody({ instanceIds })
+      });
+      const next = { ...this.wechatPluginStatusByInstanceId };
+      for (const item of response.plugins) {
+        next[item.instanceId] = item.plugin;
+      }
+      this.wechatPluginStatusByInstanceId = next;
+      return response.plugins;
     },
     async loadWechatLinks(params: { mode?: string; status?: string; phone?: string; page?: number; pageSize?: number } = {}) {
       const search = new URLSearchParams();
