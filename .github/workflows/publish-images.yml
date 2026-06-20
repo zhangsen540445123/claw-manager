@@ -39,7 +39,6 @@ jobs:
             app:
               - "claw-manager.version"
             runner:
-              - "claw-manager.version"
               - "containers/openclaw-runner/Dockerfile"
               - "containers/openclaw-runner/entrypoint.sh"
 
