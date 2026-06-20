@@ -100,22 +100,6 @@ CREATE TABLE IF NOT EXISTS instance_model_auth (
   CONSTRAINT fk_instance_model_auth_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS instance_wechat_binding (
-  instance_id VARCHAR(64) PRIMARY KEY,
-  status VARCHAR(40) NOT NULL,
-  qr_mode VARCHAR(40) NULL,
-  qr_payload MEDIUMTEXT NULL,
-  qr_link TEXT NULL,
-  output_snippet MEDIUMTEXT NULL,
-  runtime_ready TINYINT(1) NOT NULL DEFAULT 0,
-  runtime_status VARCHAR(40) NOT NULL DEFAULT 'idle',
-  runtime_message TEXT NULL,
-  runtime_updated_at VARCHAR(40) NULL,
-  updated_at VARCHAR(40) NULL,
-  qr_expires_at VARCHAR(40) NULL,
-  CONSTRAINT fk_instance_wechat_binding_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS wechat_paired_accounts (
   account_id VARCHAR(255) PRIMARY KEY,
   phone VARCHAR(32) NOT NULL UNIQUE,
@@ -130,14 +114,29 @@ CREATE TABLE IF NOT EXISTS wechat_paired_accounts (
   CONSTRAINT fk_wechat_paired_accounts_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS wechat_account_channels (
+  account_id VARCHAR(255) PRIMARY KEY,
+  instance_id VARCHAR(64) NOT NULL,
+  wechat_user_id VARCHAR(255) NOT NULL UNIQUE,
+  status VARCHAR(40) NOT NULL DEFAULT 'unknown',
+  message TEXT NULL,
+  output_snippet MEDIUMTEXT NULL,
+  last_started_at VARCHAR(40) NULL,
+  last_error_at VARCHAR(40) NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  INDEX idx_wechat_account_channels_instance_id (instance_id),
+  INDEX idx_wechat_account_channels_status (status),
+  CONSTRAINT fk_wechat_account_channels_account FOREIGN KEY (account_id) REFERENCES wechat_paired_accounts(account_id) ON DELETE CASCADE,
+  CONSTRAINT fk_wechat_account_channels_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS wechat_bind_links (
   token VARCHAR(96) PRIMARY KEY,
   mode VARCHAR(20) NOT NULL,
   phone VARCHAR(32) NULL,
   instance_id VARCHAR(64) NULL,
-  expected_account_id VARCHAR(255) NULL,
-  pending_account_id VARCHAR(255) NULL,
-  snapshot_account_ids JSON NULL,
+  target_account_id VARCHAR(255) NULL,
+  scanned_wechat_user_id VARCHAR(255) NULL,
   status VARCHAR(40) NOT NULL,
   qr_mode VARCHAR(40) NULL,
   qr_payload MEDIUMTEXT NULL,
@@ -146,11 +145,14 @@ CREATE TABLE IF NOT EXISTS wechat_bind_links (
   error_message TEXT NULL,
   created_by_admin_id VARCHAR(64) NOT NULL,
   created_at VARCHAR(40) NOT NULL,
+  started_at VARCHAR(40) NULL,
   expires_at VARCHAR(40) NULL,
   completed_at VARCHAR(40) NULL,
   updated_at VARCHAR(40) NOT NULL,
   INDEX idx_wechat_bind_links_phone (phone),
   INDEX idx_wechat_bind_links_instance_id (instance_id),
+  INDEX idx_wechat_bind_links_target_account_id (target_account_id),
+  INDEX idx_wechat_bind_links_scanned_wechat_user_id (scanned_wechat_user_id),
   INDEX idx_wechat_bind_links_status (status),
   CONSTRAINT fk_wechat_bind_links_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE SET NULL,
   CONSTRAINT fk_wechat_bind_links_admin FOREIGN KEY (created_by_admin_id) REFERENCES admins(id) ON DELETE CASCADE

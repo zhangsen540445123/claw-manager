@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import { RefreshCw, Smartphone } from "lucide-vue-next";
 import { ApiError, api } from "../api/http";
 import type { PublicWechatBindLink } from "../api/types";
-import { bindStatusLabel, bindStatusTagType, isLinkExpired } from "../utils/adminUi";
+import { bindStatusLabel, bindStatusTagType, formatDateTime, isLinkExpired } from "../utils/adminUi";
 import { renderQrDataUrl } from "../utils/qr";
 
 const route = useRoute();
@@ -13,7 +13,9 @@ const loading = ref(false);
 const actionLoading = ref("");
 const error = ref("");
 const qrImage = ref("");
+const now = ref(Date.now());
 let timer: number | undefined;
+let countdownTimer: number | undefined;
 
 const token = computed(() => String(route.params.token || ""));
 const showQr = computed(() => {
@@ -22,17 +24,40 @@ const showQr = computed(() => {
 });
 const canRefreshQr = computed(() => {
   const current = link.value;
-  return Boolean(current && (current.status === "expired" || current.status === "failed") && !isLinkExpired(current.expiresAt));
+  return Boolean(
+    current
+      && ["waiting_scan", "expired", "failed"].includes(current.status)
+      && !isLinkExpired(current.expiresAt)
+  );
+});
+const qrExpiresAtText = computed(() => formatDateTime(link.value?.qrExpiresAt));
+const qrRemainingSeconds = computed(() => {
+  const expiresAt = link.value?.qrExpiresAt;
+  if (!expiresAt) return null;
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresAtMs)) return null;
+  return Math.max(0, Math.ceil((expiresAtMs - now.value) / 1000));
+});
+const qrCountdownText = computed(() => {
+  if (qrRemainingSeconds.value === null) return "";
+  if (qrRemainingSeconds.value <= 0 || link.value?.qrExpired) return "二维码已过期";
+  return `剩余 ${qrRemainingSeconds.value} 秒`;
 });
 
 onMounted(async () => {
   await loadStatus();
   timer = window.setInterval(loadStatus, 3000);
+  countdownTimer = window.setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
 });
 
 onBeforeUnmount(() => {
   if (timer) {
     window.clearInterval(timer);
+  }
+  if (countdownTimer) {
+    window.clearInterval(countdownTimer);
   }
 });
 
@@ -102,6 +127,11 @@ async function updateQrImage() {
 
         <div v-if="showQr" class="qr-box">
           <img :src="qrImage" alt="微信二维码" />
+        </div>
+
+        <div v-if="link.qrExpiresAt" class="qr-expiry">
+          <span>二维码有效期至 {{ qrExpiresAtText }}</span>
+          <strong>{{ qrCountdownText }}</strong>
         </div>
 
         <div class="button-row">

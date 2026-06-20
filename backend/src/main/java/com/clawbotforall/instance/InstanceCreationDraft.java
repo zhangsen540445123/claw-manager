@@ -7,6 +7,5 @@ public record InstanceCreationDraft(
     InstanceEntity instance,
     InstanceModelEntity model,
     InstanceProvisioningEntity provisioning,
-    InstanceModelAuthEntity modelAuth,
-    InstanceWechatBindingEntity wechatBinding
+    InstanceModelAuthEntity modelAuth
 ) {}

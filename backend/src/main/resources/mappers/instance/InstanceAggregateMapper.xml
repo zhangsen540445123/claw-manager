@@ -54,21 +54,6 @@
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
-  <resultMap id="WechatBindingMap" type="com.clawbotforall.instance.InstanceWechatBindingEntity">
-    <id property="instanceId" column="instance_id"/>
-    <result property="status" column="status"/>
-    <result property="qrMode" column="qr_mode"/>
-    <result property="qrPayload" column="qr_payload"/>
-    <result property="qrLink" column="qr_link"/>
-    <result property="outputSnippet" column="output_snippet"/>
-    <result property="runtimeReady" column="runtime_ready"/>
-    <result property="runtimeStatus" column="runtime_status"/>
-    <result property="runtimeMessage" column="runtime_message"/>
-    <result property="runtimeUpdatedAt" column="runtime_updated_at"/>
-    <result property="updatedAt" column="updated_at"/>
-    <result property="qrExpiresAt" column="qr_expires_at"/>
-  </resultMap>
-
   <resultMap id="WechatAccountMap" type="com.clawbotforall.instance.WechatPairedAccountEntity">
     <id property="accountId" column="account_id"/>
     <result property="phone" column="phone"/>
@@ -78,6 +63,18 @@
     <result property="baseUrl" column="base_url"/>
     <result property="savedAt" column="saved_at"/>
     <result property="boundAt" column="bound_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="WechatAccountChannelMap" type="com.clawbotforall.instance.WechatAccountChannelEntity">
+    <id property="accountId" column="account_id"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="wechatUserId" column="wechat_user_id"/>
+    <result property="status" column="status"/>
+    <result property="message" column="message"/>
+    <result property="outputSnippet" column="output_snippet"/>
+    <result property="lastStartedAt" column="last_started_at"/>
+    <result property="lastErrorAt" column="last_error_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
@@ -126,17 +123,18 @@
     WHERE instance_id IN <include refid="InstanceIdFilter"/>
   </select>
 
-  <select id="listWechatBindingByInstanceIds" resultMap="WechatBindingMap">
-    SELECT *
-    FROM instance_wechat_binding
-    WHERE instance_id IN <include refid="InstanceIdFilter"/>
-  </select>
-
   <select id="listWechatAccountsByInstanceIds" resultMap="WechatAccountMap">
     SELECT *
     FROM wechat_paired_accounts
     WHERE instance_id IN <include refid="InstanceIdFilter"/>
     ORDER BY instance_id ASC, bound_at DESC, account_id ASC
+  </select>
+
+  <select id="listWechatAccountChannelsByInstanceIds" resultMap="WechatAccountChannelMap">
+    SELECT *
+    FROM wechat_account_channels
+    WHERE instance_id IN <include refid="InstanceIdFilter"/>
+    ORDER BY instance_id ASC, updated_at DESC, account_id ASC
   </select>
 
   <select id="listAllWechatAccounts" resultMap="WechatAccountMap">

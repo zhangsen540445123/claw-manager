@@ -76,14 +76,14 @@ public class InstanceQueryService {
         .listModelAuthByInstanceIds(instanceIds)
         .stream()
         .collect(Collectors.toMap(InstanceModelAuthEntity::getInstanceId, item -> item));
-    Map<String, InstanceWechatBindingEntity> wechatBindingByInstance = instanceAggregateMapper
-        .listWechatBindingByInstanceIds(instanceIds)
-        .stream()
-        .collect(Collectors.toMap(InstanceWechatBindingEntity::getInstanceId, item -> item));
     Map<String, List<WechatPairedAccountEntity>> pairedAccountsByInstance = instanceAggregateMapper
         .listWechatAccountsByInstanceIds(instanceIds)
         .stream()
         .collect(Collectors.groupingBy(WechatPairedAccountEntity::getInstanceId));
+    Map<String, List<WechatAccountChannelEntity>> accountChannelsByInstance = instanceAggregateMapper
+        .listWechatAccountChannelsByInstanceIds(instanceIds)
+        .stream()
+        .collect(Collectors.groupingBy(WechatAccountChannelEntity::getInstanceId));
 
     return instances.stream()
         .map(instance -> publicInstanceFactory.from(
@@ -91,8 +91,8 @@ public class InstanceQueryService {
             modelsByInstance.getOrDefault(instance.getId(), List.of()),
             provisioningByInstance.get(instance.getId()),
             modelAuthByInstance.get(instance.getId()),
-            wechatBindingByInstance.get(instance.getId()),
             pairedAccountsByInstance.getOrDefault(instance.getId(), List.of()),
+            accountChannelsByInstance.getOrDefault(instance.getId(), List.of()),
             request
         ))
         .toList();

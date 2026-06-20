@@ -4,7 +4,7 @@ import com.clawbotforall.instance.InstanceAggregateMapper;
 import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceMutationMapper;
-import com.clawbotforall.instance.InstanceWechatBindingEntity;
+import com.clawbotforall.instance.WechatAccountChannelEntity;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.web.ApiException;
@@ -74,7 +74,11 @@ public class WechatAccountSyncService {
       if (existingAccount == null) {
         continue;
       }
-      existingAccount.setWechatUserId(raw.getWechatUserId());
+      String rawWechatUserId = defaultString(raw.getWechatUserId()).trim();
+      String persistedWechatUserId = defaultString(existingAccount.getWechatUserId()).trim();
+      if (persistedWechatUserId.isBlank() && !rawWechatUserId.isBlank()) {
+        existingAccount.setWechatUserId(rawWechatUserId);
+      }
       existingAccount.setBaseUrl(raw.getBaseUrl());
       existingAccount.setSavedAt(raw.getSavedAt());
       existingAccount.setUpdatedAt(now);
@@ -82,7 +86,7 @@ public class WechatAccountSyncService {
     }
 
     List<WechatPairedAccountEntity> latest = aggregateMapper.listWechatAccountsByInstanceIds(List.of(instance.getId()));
-    patchBindingFromAccounts(instance, latest);
+    ensureAccountChannels(latest, now);
     return latest;
   }
 
@@ -146,9 +150,6 @@ public class WechatAccountSyncService {
     mutationMapper.deleteWechatAccount(instance.getId(), accountId);
     bindLinkMapper.deleteByPhoneOrAccountId(account.getPhone(), accountId);
     List<WechatPairedAccountEntity> latest = syncInstanceAccounts(instance);
-    if (latest.isEmpty()) {
-      mutationMapper.updateWechatBinding(idleBinding(instance.getId(), "当前微信绑定已解除，可重新生成二维码。"));
-    }
     log.info("已删除微信绑定账号：instanceId={}, remainingCount={}", instance.getId(), latest.size());
     return latest;
   }
@@ -162,8 +163,6 @@ public class WechatAccountSyncService {
     removeStateDir(fileService.paths(instance.getId()));
     mutationMapper.deleteWechatAccountsForInstance(instance.getId());
     bindLinkMapper.deleteByInstanceId(instance.getId());
-    InstanceWechatBindingEntity binding = idleBinding(instance.getId(), "当前微信绑定已解除，可重新生成二维码。");
-    mutationMapper.updateWechatBinding(binding);
     log.info("已删除实例全部微信绑定账号：instanceId={}, hadAccounts={}", instance.getId(), hadAccounts);
     return hadAccounts;
   }
@@ -184,43 +183,23 @@ public class WechatAccountSyncService {
     rewriteAccountIndex(stateDir.resolve("accounts.json"), accountId);
   }
 
-  private void patchBindingFromAccounts(
-      InstanceEntity instance,
-      List<WechatPairedAccountEntity> accounts
-  ) {
-    List<InstanceWechatBindingEntity> bindings = aggregateMapper.listWechatBindingByInstanceIds(List.of(instance.getId()));
-    InstanceWechatBindingEntity current = bindings.isEmpty() ? null : bindings.getFirst();
-    InstanceWechatBindingEntity next = new InstanceWechatBindingEntity();
-    next.setInstanceId(instance.getId());
-    next.setStatus(accounts.isEmpty() ? defaultString(current == null ? "idle" : current.getStatus()) : "connected");
-    next.setQrMode(accounts.isEmpty() && current != null ? current.getQrMode() : null);
-    next.setQrPayload(accounts.isEmpty() && current != null ? defaultString(current.getQrPayload()) : "");
-    next.setQrLink(accounts.isEmpty() && current != null ? defaultString(current.getQrLink()) : "");
-    next.setQrExpiresAt(accounts.isEmpty() && current != null ? current.getQrExpiresAt() : null);
-    next.setOutputSnippet(accounts.isEmpty() && current != null ? defaultString(current.getOutputSnippet()) : "");
-    next.setRuntimeReady(!accounts.isEmpty());
-    next.setRuntimeStatus(accounts.isEmpty() ? runtimeStatus(current) : "ready");
-    next.setRuntimeMessage("");
-    next.setRuntimeUpdatedAt(accounts.isEmpty() ? (current == null ? null : current.getRuntimeUpdatedAt()) : Instant.now().toString());
-    next.setUpdatedAt(accounts.isEmpty() ? (current == null ? null : current.getUpdatedAt()) : Instant.now().toString());
-    mutationMapper.updateWechatBinding(next);
-  }
-
-  private InstanceWechatBindingEntity idleBinding(String instanceId, String message) {
-    InstanceWechatBindingEntity binding = new InstanceWechatBindingEntity();
-    binding.setInstanceId(instanceId);
-    binding.setStatus("idle");
-    binding.setQrMode(null);
-    binding.setQrPayload("");
-    binding.setQrLink("");
-    binding.setQrExpiresAt(null);
-    binding.setOutputSnippet(message);
-    binding.setRuntimeReady(false);
-    binding.setRuntimeStatus("idle");
-    binding.setRuntimeMessage("");
-    binding.setRuntimeUpdatedAt(null);
-    binding.setUpdatedAt(Instant.now().toString());
-    return binding;
+  private void ensureAccountChannels(List<WechatPairedAccountEntity> accounts, String now) {
+    for (WechatPairedAccountEntity account : accounts) {
+      if (defaultString(account.getWechatUserId()).trim().isBlank()) {
+        continue;
+      }
+      WechatAccountChannelEntity channel = new WechatAccountChannelEntity();
+      channel.setAccountId(account.getAccountId());
+      channel.setInstanceId(account.getInstanceId());
+      channel.setWechatUserId(account.getWechatUserId());
+      channel.setStatus("unknown");
+      channel.setMessage("");
+      channel.setOutputSnippet("");
+      channel.setLastStartedAt(null);
+      channel.setLastErrorAt(null);
+      channel.setUpdatedAt(now);
+      mutationMapper.ensureWechatAccountChannel(channel);
+    }
   }
 
   private void removeStateDir(InstancePaths paths) {
@@ -259,13 +238,6 @@ public class WechatAccountSyncService {
     } catch (IOException ignored) {
       // 尽力处理。
     }
-  }
-
-  private String runtimeStatus(InstanceWechatBindingEntity current) {
-    if (current == null || defaultString(current.getRuntimeStatus()).isBlank()) {
-      return "idle";
-    }
-    return current.getRuntimeStatus();
   }
 
   private static String defaultString(String value) {

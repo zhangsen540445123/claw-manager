@@ -1,5 +1,17 @@
 <script setup lang="ts">
-import { Activity, Boxes, PackageCheck, PlusSquare, QrCode, Server, SlidersHorizontal, Menu, X } from "lucide-vue-next";
+import {
+  Activity,
+  Boxes,
+  ChevronsLeft,
+  ChevronsRight,
+  PackageCheck,
+  PlusSquare,
+  QrCode,
+  Server,
+  SlidersHorizontal,
+  Menu,
+  X
+} from "lucide-vue-next";
 import { computed, ref } from "vue";
 
 type ShellNavKey = "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "ops" | "account";
@@ -17,14 +29,15 @@ const emit = defineEmits<{
 }>();
 
 const mobileNavOpen = ref(false);
+const sidebarCollapsed = ref(localStorage.getItem("claw-manager-sidebar-collapsed") === "1");
 const navItems = computed(() => {
   return [
     { key: "overview" as const, label: "运行总览", icon: Activity },
     { key: "presets" as const, label: "模型预设", icon: SlidersHorizontal },
     { key: "create" as const, label: "创建实例", icon: PlusSquare },
     { key: "instances" as const, label: "实例管理", icon: Boxes },
-    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
+    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "ops" as const, label: "系统运维", icon: Server }
   ];
 });
@@ -49,32 +62,47 @@ function logout() {
   mobileNavOpen.value = false;
   emit("logout");
 }
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+  localStorage.setItem("claw-manager-sidebar-collapsed", sidebarCollapsed.value ? "1" : "0");
+}
 </script>
 
 <template>
   <el-container class="app-shell">
     <template v-if="authenticated">
-      <aside class="app-sidebar" :class="{ 'is-open': mobileNavOpen }">
+      <aside class="app-sidebar" :class="{ 'is-open': mobileNavOpen, 'is-collapsed': sidebarCollapsed }">
         <div class="sidebar-brand">
           <div class="brand-mark">C</div>
-          <div>
+          <div class="brand-copy">
             <strong>Claw Manager</strong>
             <span>OpenClaw Console</span>
           </div>
+          <button class="sidebar-collapse-button" type="button" @click="toggleSidebar">
+            <ChevronsRight v-if="sidebarCollapsed" :size="16" />
+            <ChevronsLeft v-else :size="16" />
+          </button>
         </div>
 
         <nav class="sidebar-nav">
-          <button
+          <el-tooltip
             v-for="item in navItems"
             :key="item.key"
-            class="nav-item"
-            :class="{ 'is-active': activeRoute === item.key }"
-            type="button"
-            @click="navigate(item.key)"
+            :content="item.label"
+            placement="right"
+            :disabled="!sidebarCollapsed"
           >
-            <component :is="item.icon" :size="18" />
-            <span>{{ item.label }}</span>
-          </button>
+            <button
+              class="nav-item"
+              :class="{ 'is-active': activeRoute === item.key }"
+              type="button"
+              @click="navigate(item.key)"
+            >
+              <component :is="item.icon" :size="18" />
+              <span class="nav-label">{{ item.label }}</span>
+            </button>
+          </el-tooltip>
         </nav>
       </aside>
 

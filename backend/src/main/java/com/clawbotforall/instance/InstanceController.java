@@ -7,7 +7,9 @@ import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
 import com.clawbotforall.wechat.WechatAccountSyncService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -117,6 +119,44 @@ public class InstanceController {
     InstanceEntity instance = instanceCommandService.requireInstance(instanceId);
     provisioningService.startProvisioning(instance.getId());
     return Map.of("instance", publicInstance(instance.getId(), request));
+  }
+
+  /**
+   * 批量重新启动 Gateway 就绪检查流程。
+   */
+  @PostMapping("/batch/restart-gateway")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public Map<String, Object> restartGateways(
+      @RequestBody(required = false) BatchInstancesRequest payload,
+      Authentication authentication,
+      HttpServletRequest request
+  ) {
+    requireAdmin(authentication);
+    List<BatchInstanceOperationResult> results = new ArrayList<>();
+    for (String instanceId : payload == null || payload.instanceIds() == null ? List.<String>of() : payload.instanceIds()) {
+      String normalizedInstanceId = instanceId == null ? "" : instanceId.trim();
+      if (normalizedInstanceId.isBlank()) {
+        continue;
+      }
+      try {
+        InstanceEntity instance = instanceCommandService.requireInstance(normalizedInstanceId);
+        provisioningService.startProvisioning(instance.getId());
+        results.add(new BatchInstanceOperationResult(
+            instance.getId(),
+            "accepted",
+            "Gateway 重启任务已提交。",
+            publicInstance(instance.getId(), request)
+        ));
+      } catch (RuntimeException error) {
+        results.add(new BatchInstanceOperationResult(
+            normalizedInstanceId,
+            "failed",
+            message(error),
+            null
+        ));
+      }
+    }
+    return Map.of("instances", results);
   }
 
   /**
@@ -387,6 +427,11 @@ public class InstanceController {
     return normalized.substring(0, Math.min(60, normalized.length()));
   }
 
+  private static String message(Throwable error) {
+    String message = error.getMessage();
+    return message == null || message.isBlank() ? "实例操作失败。" : message;
+  }
+
   private static int parseModelIndex(String value) {
     try {
       return Integer.parseInt(value);
@@ -394,4 +439,13 @@ public class InstanceController {
       throw new ApiException(HttpStatus.BAD_REQUEST, "模型索引无效。");
     }
   }
+
+  public record BatchInstancesRequest(List<String> instanceIds) {}
+
+  public record BatchInstanceOperationResult(
+      String instanceId,
+      String status,
+      String message,
+      PublicInstance instance
+  ) {}
 }

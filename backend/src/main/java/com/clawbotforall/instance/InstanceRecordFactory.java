@@ -88,21 +88,7 @@ public class InstanceRecordFactory {
     modelAuth.setNeedsInput(false);
     modelAuth.setUpdatedAt(null);
 
-    InstanceWechatBindingEntity wechatBinding = new InstanceWechatBindingEntity();
-    wechatBinding.setInstanceId(id);
-    wechatBinding.setStatus("idle");
-    wechatBinding.setQrMode(null);
-    wechatBinding.setQrPayload("");
-    wechatBinding.setQrLink("");
-    wechatBinding.setOutputSnippet("");
-    wechatBinding.setRuntimeReady(false);
-    wechatBinding.setRuntimeStatus("idle");
-    wechatBinding.setRuntimeMessage("");
-    wechatBinding.setRuntimeUpdatedAt(null);
-    wechatBinding.setUpdatedAt(null);
-    wechatBinding.setQrExpiresAt(null);
-
-    return new InstanceCreationDraft(instance, instanceModel, provisioning, modelAuth, wechatBinding);
+    return new InstanceCreationDraft(instance, instanceModel, provisioning, modelAuth);
   }
 
   /**

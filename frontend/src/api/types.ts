@@ -97,6 +97,11 @@ export interface PublicWechatPairedAccount {
   savedAt?: string | null;
   boundAt?: string | null;
   updatedAt?: string | null;
+  channelStatus: string;
+  channelMessage: string;
+  channelUpdatedAt?: string | null;
+  lastStartedAt?: string | null;
+  lastErrorAt?: string | null;
 }
 
 export interface PublicWechatBinding {

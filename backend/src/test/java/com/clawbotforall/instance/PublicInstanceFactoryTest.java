@@ -64,12 +64,6 @@ class PublicInstanceFactoryTest {
     model.setApiKey("sk-1234567890");
     model.setExtra("{\"note\":\"demo\"}");
 
-    InstanceWechatBindingEntity binding = new InstanceWechatBindingEntity();
-    binding.setInstanceId("inst_1");
-    binding.setStatus("connected");
-    binding.setRuntimeReady(true);
-    binding.setRuntimeStatus("ready");
-
     WechatPairedAccountEntity account = new WechatPairedAccountEntity();
     account.setInstanceId("inst_1");
     account.setAccountId("wx_1");
@@ -77,13 +71,21 @@ class PublicInstanceFactoryTest {
     account.setWechatUserId("wx_user");
     account.setRemark("战神");
 
+    WechatAccountChannelEntity channel = new WechatAccountChannelEntity();
+    channel.setInstanceId("inst_1");
+    channel.setAccountId("wx_1");
+    channel.setWechatUserId("wx_user");
+    channel.setStatus("ready");
+    channel.setMessage("微信通道已激活。");
+    channel.setUpdatedAt("2026-06-14T00:02:00Z");
+
     PublicInstance publicInstance = factory.from(
         instance,
         List.of(model),
         null,
         null,
-        binding,
         List.of(account),
+        List.of(channel),
         new MockHttpServletRequest()
     );
 
@@ -98,6 +100,8 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.plugins().get("allow")).asList().isEmpty();
     assertThat(publicInstance.wechatBinding().pairedAccounts()).hasSize(1);
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().remark()).isEqualTo("战神");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().channelStatus()).isEqualTo("ready");
+    assertThat(publicInstance.wechatBinding().status()).isEqualTo("ready");
   }
 
   @Test
@@ -111,7 +115,7 @@ class PublicInstanceFactoryTest {
         List.of(),
         null,
         null,
-        null,
+        List.of(),
         List.of(),
         request
     );
@@ -127,7 +131,7 @@ class PublicInstanceFactoryTest {
         List.of(),
         null,
         null,
-        null,
+        List.of(),
         List.of(),
         null
     );
@@ -136,7 +140,7 @@ class PublicInstanceFactoryTest {
   }
 
   @Test
-  void marksWaitingWechatQrAsExpiredAfterTtl() {
+  void derivesWechatSummaryFromAccountChannelStatus() {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
     instance.setName("测试实例");
@@ -151,33 +155,38 @@ class PublicInstanceFactoryTest {
     instance.setCreatedAt("2026-06-14T00:00:00Z");
     instance.setUpdatedAt("2026-06-14T00:01:00Z");
 
-    InstanceWechatBindingEntity binding = new InstanceWechatBindingEntity();
-    binding.setInstanceId("inst_1");
-    binding.setStatus("waiting_scan");
-    binding.setUpdatedAt(Instant.now().toString());
-    binding.setQrExpiresAt(Instant.now().minusSeconds(1).toString());
-    binding.setQrMode("image");
-    binding.setQrPayload("data:image/png;base64,abc");
-    binding.setQrLink("https://example.com/qr");
+    WechatPairedAccountEntity account = new WechatPairedAccountEntity();
+    account.setInstanceId("inst_1");
+    account.setAccountId("wx_1");
+    account.setPhone("13572873189");
+    account.setWechatUserId("wx_user");
+
+    WechatAccountChannelEntity channel = new WechatAccountChannelEntity();
+    channel.setInstanceId("inst_1");
+    channel.setAccountId("wx_1");
+    channel.setWechatUserId("wx_user");
+    channel.setStatus("starting");
+    channel.setMessage("正在启动微信通道。");
+    channel.setUpdatedAt(Instant.now().toString());
 
     PublicInstance publicInstance = factory.from(
         instance,
         List.of(),
         null,
         null,
-        binding,
-        List.of(),
+        List.of(account),
+        List.of(channel),
         new MockHttpServletRequest()
     );
 
-    assertThat(publicInstance.wechatBinding().status()).isEqualTo("expired");
-    assertThat(publicInstance.wechatBinding().qrExpired()).isTrue();
+    assertThat(publicInstance.wechatBinding().status()).isEqualTo("starting");
+    assertThat(publicInstance.wechatBinding().runtimeStatus()).isEqualTo("pending");
     assertThat(publicInstance.wechatBinding().qrPayload()).isEmpty();
     assertThat(publicInstance.wechatBinding().qrLink()).isEmpty();
   }
 
   @Test
-  void keepsWaitingWechatQrWhenPersistedExpiryIsStillFuture() {
+  void returnsIdleWechatSummaryWhenNoAccountIsBound() {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
     instance.setName("测试实例");
@@ -192,29 +201,20 @@ class PublicInstanceFactoryTest {
     instance.setCreatedAt("2026-06-14T00:00:00Z");
     instance.setUpdatedAt("2026-06-14T00:01:00Z");
 
-    InstanceWechatBindingEntity binding = new InstanceWechatBindingEntity();
-    binding.setInstanceId("inst_1");
-    binding.setStatus("waiting_scan");
-    binding.setUpdatedAt(Instant.now().minusSeconds(600).toString());
-    binding.setQrExpiresAt(Instant.now().plusSeconds(60).toString());
-    binding.setQrMode("image");
-    binding.setQrPayload("data:image/png;base64,abc");
-    binding.setQrLink("https://example.com/qr");
-
     PublicInstance publicInstance = factory.from(
         instance,
         List.of(),
         null,
         null,
-        binding,
+        List.of(),
         List.of(),
         new MockHttpServletRequest()
     );
 
-    assertThat(publicInstance.wechatBinding().status()).isEqualTo("waiting_scan");
+    assertThat(publicInstance.wechatBinding().status()).isEqualTo("idle");
     assertThat(publicInstance.wechatBinding().qrExpired()).isFalse();
-    assertThat(publicInstance.wechatBinding().qrPayload()).isEqualTo("data:image/png;base64,abc");
-    assertThat(publicInstance.wechatBinding().qrLink()).isEqualTo("https://example.com/qr");
+    assertThat(publicInstance.wechatBinding().qrPayload()).isEmpty();
+    assertThat(publicInstance.wechatBinding().qrLink()).isEmpty();
   }
 
   private static InstanceEntity baseInstance() {

@@ -53,6 +53,12 @@ button {
   border-right: 1px solid var(--border);
   background: #ffffff;
   color: var(--text);
+  transition: width 0.18s ease, padding 0.18s ease;
+}
+
+.app-sidebar.is-collapsed {
+  width: 84px;
+  padding: 18px 12px;
 }
 
 .sidebar-brand {
@@ -61,6 +67,39 @@ button {
   gap: 12px;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.sidebar-collapse-button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-collapse-button:hover {
+  color: var(--primary);
+}
+
+.app-sidebar.is-collapsed .sidebar-brand {
+  justify-content: center;
+}
+
+.app-sidebar.is-collapsed .brand-copy,
+.app-sidebar.is-collapsed .nav-label {
+  display: none;
+}
+
+.app-sidebar.is-collapsed .sidebar-collapse-button {
+  position: absolute;
+  right: 10px;
+  top: 52px;
 }
 
 .brand-mark {
@@ -105,6 +144,11 @@ button {
   color: #566174;
   cursor: pointer;
   text-align: left;
+}
+
+.app-sidebar.is-collapsed .nav-item {
+  justify-content: center;
+  padding: 12px;
 }
 
 .nav-item span {
@@ -504,6 +548,20 @@ button {
   height: 220px;
 }
 
+.qr-expiry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.qr-expiry strong {
+  color: var(--warning);
+}
+
 .table-footer {
   display: flex;
   justify-content: flex-end;
@@ -535,6 +593,18 @@ button {
 
 .remark-row {
   gap: 8px;
+}
+
+.channel-status-cell {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+}
+
+.muted-text {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .control-ui-cell,
@@ -652,8 +722,24 @@ button {
   .app-sidebar {
     position: fixed;
     left: 0;
+    width: 248px;
+    padding: 18px;
     transform: translateX(-105%);
     transition: transform 0.2s ease;
+  }
+
+  .app-sidebar.is-collapsed .brand-copy,
+  .app-sidebar.is-collapsed .nav-label {
+    display: block;
+  }
+
+  .app-sidebar.is-collapsed .nav-item {
+    justify-content: flex-start;
+    padding: 12px 14px;
+  }
+
+  .app-sidebar.is-collapsed .sidebar-collapse-button {
+    display: none;
   }
 
   .app-sidebar.is-open {

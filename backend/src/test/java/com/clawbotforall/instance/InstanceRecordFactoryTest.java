@@ -39,6 +39,5 @@ class InstanceRecordFactoryTest {
     assertThat(draft.provisioning().getPercent()).isEqualTo(5);
     assertThat(draft.provisioning().getStage()).isEqualTo("queued");
     assertThat(draft.modelAuth().getStatus()).isEqualTo("idle");
-    assertThat(draft.wechatBinding().getRuntimeStatus()).isEqualTo("idle");
   }
 }

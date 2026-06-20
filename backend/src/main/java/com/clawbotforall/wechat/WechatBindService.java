@@ -10,12 +10,14 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.InstanceProvisioningEntity;
 import com.clawbotforall.instance.InstanceProvisioningService;
 import com.clawbotforall.instance.InstanceQueryService;
-import com.clawbotforall.instance.InstanceWechatBindingEntity;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecHandle;
 import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -36,20 +38,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /**
- * 通过 OpenClaw CLI 启动并跟踪微信二维码绑定。
+ * 通过微信插件登录结果启动并跟踪二维码绑定。
  */
 @Service
 public class WechatBindService {
 
   private static final Logger log = LoggerFactory.getLogger(WechatBindService.class);
-  private static final List<String> WECHAT_LOGIN_COMMAND = List.of(
-      "openclaw",
-      "channels",
-      "login",
-      "--channel",
-      "openclaw-weixin"
-  );
   private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s\\]）)>\"']+");
+  private static final String LOGIN_EVENT_PREFIX = "__OPENCLAW_WECHAT_BIND__";
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   private final InstanceAggregateMapper aggregateMapper;
   private final InstanceMutationMapper mutationMapper;
@@ -132,6 +129,15 @@ public class WechatBindService {
       boolean forceRegenerate,
       String accountId
   ) {
+    return startBind(instance, forceRegenerate, accountId, ignored -> {});
+  }
+
+  public BindStartResult startBind(
+      InstanceEntity instance,
+      boolean forceRegenerate,
+      String accountId,
+      BindCompletionCallback completionCallback
+  ) {
     String normalizedAccountId = requireAccountId(accountId);
     requireReadyProvisioning(instance.getId());
     RuntimeState runtimeState = openClawRuntime.inspectInstance(instance);
@@ -142,11 +148,9 @@ public class WechatBindService {
       throw new ApiException(HttpStatus.CONFLICT, "请先在该 OpenClaw 实例安装微信插件，再生成扫码二维码。");
     }
 
-    cancelExistingJob(instance.getId());
     fileService.writeInstanceFiles(instance, commandService.listModels(instance.getId()));
-    patchBinding(instance, WechatState.starting("正在准备微信扫码绑定，请稍候。"));
     log.info(
-        "开始微信 CLI 扫码绑定任务：instanceId={}, accountId={}, forceRegenerate={}",
+        "开始微信插件扫码绑定任务：instanceId={}, accountId={}, forceRegenerate={}",
         instance.getId(),
         normalizedAccountId,
         forceRegenerate
@@ -155,29 +159,30 @@ public class WechatBindService {
     CompletableFuture<BindStartResult> qrFuture = new CompletableFuture<>();
     StringBuilder output = new StringBuilder();
     AtomicReference<RuntimeExecHandle> handleRef = new AtomicReference<>();
+    AtomicReference<BindCompletion> completionRef = new AtomicReference<>();
+    String jobKey = jobKey(instance.getId(), normalizedAccountId);
+    cancelExistingJob(jobKey);
     RuntimeExecHandle handle = openClawRuntime.startExec(
         instance,
-        WECHAT_LOGIN_COMMAND,
+        loginCommand(normalizedAccountId, forceRegenerate, bindTimeoutMs()),
         bindTimeoutMs(),
-        Map.of(),
+        Map.of("NODE_PATH", "/usr/local/lib/node_modules"),
         new RuntimeExecListener() {
           @Override
           public void onOutput(String chunk) {
             output.append(defaultString(chunk));
-            String qrLink = extractQrLink(output.toString());
+            JsonNode connected = latestLoginEvent(output.toString(), "connected");
+            if (connected != null) {
+              completionRef.set(bindCompletion(connected, normalizedAccountId));
+            }
+            JsonNode qr = latestLoginEvent(output.toString(), "qr");
+            String qrLink = qr == null ? extractQrLink(output.toString()) : text(qr, "qrLink");
             if (qrLink.isBlank() || qrFuture.isDone()) {
               return;
             }
-            WechatState waiting = WechatState.waitingScan(
-                "link",
-                "",
-                qrLink,
-                "请使用微信扫描二维码完成绑定。"
-            );
-            patchBinding(instance, waiting);
             qrFuture.complete(new BindStartResult(
                 normalizedAccountId,
-                null,
+                qr == null ? null : text(qr, "sessionKey"),
                 "link",
                 "",
                 qrLink,
@@ -187,12 +192,26 @@ public class WechatBindService {
 
           @Override
           public void onComplete(int exitCode) {
-            jobs.remove(instance.getId());
+            jobs.remove(jobKey);
             if (exitCode == 0) {
               accountSyncService.syncInstanceAccounts(instance);
-              startWechatChannel(instance, accountSyncService.readRawAccountIds(instance));
-              patchBinding(instance, WechatState.connected("微信绑定成功，可以使用微信连接 OpenClaw。"));
-              log.info("微信 CLI 扫码登录已确认：instanceId={}", instance.getId());
+              BindCompletion completion = completionRef.get();
+              if (completion == null) {
+                JsonNode connected = latestLoginEvent(output.toString(), "connected");
+                if (connected != null) {
+                  completion = bindCompletion(connected, normalizedAccountId);
+                }
+              }
+              log.info(
+                  "微信插件扫码登录已确认：instanceId={}, requestedAccountId={}, actualAccountId={}, wechatUserId={}",
+                  instance.getId(),
+                  normalizedAccountId,
+                  completion == null ? "" : completion.accountId(),
+                  completion == null ? "" : completion.wechatUserId()
+              );
+              if (completion != null) {
+                notifyBindCompleted(completionCallback, completion);
+              }
               if (!qrFuture.isDone()) {
                 qrFuture.completeExceptionally(new IllegalStateException("微信二维码生成失败：未捕获二维码链接。"));
               }
@@ -202,7 +221,6 @@ public class WechatBindService {
             if (message.isBlank()) {
               message = "微信扫码登录命令退出：" + exitCode;
             }
-            patchBinding(instance, WechatState.error(message));
             if (!qrFuture.isDone()) {
               qrFuture.completeExceptionally(new IllegalStateException(message));
             }
@@ -210,9 +228,8 @@ public class WechatBindService {
 
           @Override
           public void onTimeout() {
-            jobs.remove(instance.getId());
+            jobs.remove(jobKey);
             String message = "微信扫码二维码生成或扫码确认超时，请重新生成。";
-            patchBinding(instance, WechatState.error(message));
             if (!qrFuture.isDone()) {
               qrFuture.completeExceptionally(new IllegalStateException(message));
             }
@@ -220,9 +237,8 @@ public class WechatBindService {
 
           @Override
           public void onError(Throwable error) {
-            jobs.remove(instance.getId());
+            jobs.remove(jobKey);
             String message = defaultString(error.getMessage()).isBlank() ? String.valueOf(error) : error.getMessage();
-            patchBinding(instance, WechatState.error(tailSnippet(message, 3000)));
             if (!qrFuture.isDone()) {
               qrFuture.completeExceptionally(new IllegalStateException(message, error));
             }
@@ -230,7 +246,7 @@ public class WechatBindService {
         }
     );
     handleRef.set(handle);
-    jobs.put(instance.getId(), handle);
+    jobs.put(jobKey, handle);
 
     try {
       return qrFuture.get(bindTimeoutMs(), TimeUnit.MILLISECONDS);
@@ -240,12 +256,10 @@ public class WechatBindService {
         current.cancel();
       }
       String message = "微信二维码生成失败：未捕获二维码链接。";
-      patchBinding(instance, WechatState.error(message));
       throw new IllegalStateException(message, error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       String message = "微信二维码生成被中断。";
-      patchBinding(instance, WechatState.error(message));
       throw new IllegalStateException(message, error);
     } catch (Exception error) {
       Throwable cause = error.getCause() == null ? error : error.getCause();
@@ -254,19 +268,22 @@ public class WechatBindService {
     }
   }
 
-  private void cancelExistingJob(String instanceId) {
-    RuntimeExecHandle existing = jobs.remove(instanceId);
+  private void cancelExistingJob(String jobKey) {
+    RuntimeExecHandle existing = jobs.remove(jobKey);
     if (existing != null && !existing.isCancelled()) {
       existing.cancel();
     }
   }
 
-  private void startWechatChannel(InstanceEntity instance, List<String> accountIds) {
+  private static String jobKey(String instanceId, String accountId) {
+    return defaultString(instanceId).trim() + ":" + defaultString(accountId).trim();
+  }
+
+  private void notifyBindCompleted(BindCompletionCallback completionCallback, BindCompletion completion) {
     try {
-      gatewayRpcService.startWechatChannel(instance, accountIds);
-      log.info("微信通道已热启动：instanceId={}, accountIds={}", instance.getId(), accountIds);
+      completionCallback.onConnected(completion);
     } catch (RuntimeException error) {
-      log.warn("微信通道热启动失败，将等待 OpenClaw 健康检查自动拉起：instanceId={}, reason={}", instance.getId(), error.getMessage());
+      log.warn("微信扫码完成回调失败：accountId={}, reason={}", completion.accountId(), error.getMessage());
     }
   }
 
@@ -280,72 +297,8 @@ public class WechatBindService {
     }
   }
 
-  private void patchBinding(InstanceEntity instance, WechatState state) {
-    InstanceWechatBindingEntity current = aggregateMapper.listWechatBindingByInstanceIds(List.of(instance.getId()))
-        .stream()
-        .findFirst()
-        .orElse(null);
-    Instant now = Instant.now();
-    InstanceWechatBindingEntity next = new InstanceWechatBindingEntity();
-    next.setInstanceId(instance.getId());
-    next.setStatus(state.status());
-    next.setUpdatedAt(now.toString());
-    if ("waiting_scan".equals(state.status()) && state.hasQrPayload()) {
-      next.setQrMode(state.qrMode());
-      next.setQrPayload(defaultString(state.qrPayload()));
-      next.setQrLink(defaultString(state.qrLink()));
-      next.setQrExpiresAt(resolveQrExpiresAt(current, state, now));
-    } else {
-      next.setQrMode(null);
-      next.setQrPayload("");
-      next.setQrLink("");
-      next.setQrExpiresAt(null);
-    }
-    next.setOutputSnippet(state.outputSnippet());
-    boolean connected = "connected".equals(state.status());
-    next.setRuntimeReady(connected);
-    next.setRuntimeStatus(runtimeStatus(state.status()));
-    next.setRuntimeMessage(connected ? "" : state.outputSnippet());
-    next.setRuntimeUpdatedAt(now.toString());
-    mutationMapper.updateWechatBinding(next);
-    publishCurrent(instance.getId());
-  }
-
-  private String resolveQrExpiresAt(InstanceWechatBindingEntity current, WechatState state, Instant now) {
-    if (current != null
-        && "waiting_scan".equals(current.getStatus())
-        && sameQr(current, state)
-        && current.getQrExpiresAt() != null
-        && !current.getQrExpiresAt().isBlank()) {
-      return current.getQrExpiresAt();
-    }
-    return now.plusMillis(Math.max(1, properties.runtime().wechatQrTtlMs())).toString();
-  }
-
-  private void publishCurrent(String instanceId) {
-    queryService.findPublicInstance(instanceId, null).ifPresent(publicInstance -> {
-      eventPublisher.publishWechatBindingUpdated(instanceId, publicInstance.wechatBinding());
-      eventPublisher.publishInstanceUpdated(publicInstance);
-    });
-  }
-
   private long bindTimeoutMs() {
     return Math.max(1_000, properties.runtime().wechatBindTimeoutMs());
-  }
-
-  private static boolean sameQr(InstanceWechatBindingEntity current, WechatState state) {
-    return defaultString(current.getQrMode()).equals(defaultString(state.qrMode()))
-        && defaultString(current.getQrPayload()).equals(defaultString(state.qrPayload()))
-        && defaultString(current.getQrLink()).equals(defaultString(state.qrLink()));
-  }
-
-  private static String runtimeStatus(String status) {
-    return switch (defaultString(status)) {
-      case "connected" -> "ready";
-      case "error" -> "error";
-      case "starting", "waiting_scan", "scanned" -> "pending";
-      default -> "idle";
-    };
   }
 
   private static String requireAccountId(String accountId) {
@@ -356,6 +309,149 @@ public class WechatBindService {
     return normalized;
   }
 
+  private static List<String> loginCommand(String accountId, boolean force, long timeoutMs) {
+    return List.of(
+        "node",
+        "--input-type=module",
+        "-e",
+        loginScript(accountId, force, timeoutMs)
+    );
+  }
+
+  private static String loginScript(String accountId, boolean force, long timeoutMs) {
+    return """
+        import fs from "node:fs";
+        import path from "node:path";
+        import { pathToFileURL } from "node:url";
+
+        const requestedAccountId = %s;
+        const force = %s;
+        const timeoutMs = %d;
+        const marker = %s;
+
+        function emit(payload) {
+          console.log(marker + JSON.stringify(payload));
+        }
+
+        function normalizeAccountId(value) {
+          const trimmed = String(value ?? "").trim();
+          if (!trimmed) return "default";
+          const lower = trimmed.toLowerCase();
+          if (/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(trimmed)) return lower;
+          const normalized = lower
+            .replace(/[^a-z0-9_-]+/g, "-")
+            .replace(/^-+/, "")
+            .replace(/-+$/, "")
+            .slice(0, 64);
+          return normalized || "default";
+        }
+
+        function findPluginFile(relativePath) {
+          const stateDir = process.env.OPENCLAW_STATE_DIR
+            || path.join(process.env.OPENCLAW_HOME || "/var/lib/openclaw", ".openclaw");
+          const projectsDir = path.join(stateDir, "npm", "projects");
+          for (const project of fs.existsSync(projectsDir) ? fs.readdirSync(projectsDir) : []) {
+            const candidate = path.join(
+              projectsDir,
+              project,
+              "node_modules",
+              "@tencent-weixin",
+              "openclaw-weixin",
+              relativePath
+            );
+            if (fs.existsSync(candidate)) return candidate;
+          }
+          throw new Error("Weixin plugin file not found: " + relativePath);
+        }
+
+        const loginQrPath = findPluginFile("dist/src/auth/login-qr.js");
+        const accountsPath = findPluginFile("dist/src/auth/accounts.js");
+        const {
+          DEFAULT_ILINK_BOT_TYPE,
+          startWeixinLoginWithQr,
+          waitForWeixinLogin
+        } = await import(pathToFileURL(loginQrPath).href);
+        const {
+          DEFAULT_BASE_URL,
+          saveWeixinAccount,
+          registerWeixinAccountId,
+          triggerWeixinChannelReload
+        } = await import(pathToFileURL(accountsPath).href);
+
+        try {
+          const startResult = await startWeixinLoginWithQr({
+            accountId: requestedAccountId,
+            apiBaseUrl: DEFAULT_BASE_URL,
+            botType: DEFAULT_ILINK_BOT_TYPE,
+            force,
+            verbose: false
+          });
+          if (!startResult.qrcodeUrl) {
+            emit({ type: "error", requestedAccountId, message: startResult.message || "QR login start failed" });
+            process.exit(2);
+          }
+
+          emit({
+            type: "qr",
+            requestedAccountId,
+            sessionKey: startResult.sessionKey,
+            qrLink: startResult.qrcodeUrl,
+            message: startResult.message || ""
+          });
+
+          const waitResult = await waitForWeixinLogin({
+            sessionKey: startResult.sessionKey,
+            apiBaseUrl: DEFAULT_BASE_URL,
+            timeoutMs,
+            botType: DEFAULT_ILINK_BOT_TYPE,
+            verbose: false
+          });
+
+          if (waitResult.connected && waitResult.botToken && waitResult.accountId) {
+            const actualAccountId = normalizeAccountId(waitResult.accountId);
+            saveWeixinAccount(actualAccountId, {
+              token: waitResult.botToken,
+              baseUrl: waitResult.baseUrl,
+              userId: waitResult.userId
+            });
+            registerWeixinAccountId(actualAccountId);
+            await triggerWeixinChannelReload();
+            emit({
+              type: "connected",
+              requestedAccountId,
+              accountId: actualAccountId,
+              rawAccountId: waitResult.accountId,
+              wechatUserId: waitResult.userId || "",
+              baseUrl: waitResult.baseUrl || DEFAULT_BASE_URL,
+              message: waitResult.message || "",
+              alreadyConnected: false
+            });
+            process.exit(0);
+          }
+
+          if (waitResult.alreadyConnected) {
+            emit({
+              type: "connected",
+              requestedAccountId,
+              accountId: requestedAccountId,
+              rawAccountId: "",
+              wechatUserId: "",
+              baseUrl: DEFAULT_BASE_URL,
+              message: waitResult.message || "",
+              alreadyConnected: true
+            });
+            process.exit(0);
+          }
+
+          emit({ type: "error", requestedAccountId, message: waitResult.message || "QR login did not complete" });
+          process.exit(2);
+        } catch (error) {
+          emit({ type: "error", requestedAccountId, message: error?.message || String(error) });
+          throw error;
+        }
+        """.formatted(json(accountId), force ? "true" : "false", timeoutMs, json(LOGIN_EVENT_PREFIX));
+  }
+
   private static String extractQrLink(String output) {
     Matcher matcher = URL_PATTERN.matcher(defaultString(output));
     String candidate = "";
@@ -363,6 +459,59 @@ public class WechatBindService {
       candidate = matcher.group();
     }
     return candidate.replaceAll("[,.;:，。；：]+$", "");
+  }
+
+  private static JsonNode latestLoginEvent(String output, String type) {
+    JsonNode latest = null;
+    for (String line : defaultString(output).split("\\R")) {
+      String trimmed = line.trim();
+      int index = trimmed.indexOf(LOGIN_EVENT_PREFIX);
+      if (index < 0) {
+        continue;
+      }
+      String json = trimmed.substring(index + LOGIN_EVENT_PREFIX.length()).trim();
+      try {
+        JsonNode event = JSON.readTree(json);
+        if (type.equals(text(event, "type"))) {
+          latest = event;
+        }
+      } catch (JsonProcessingException ignored) {
+        // A Docker frame may split a line; the next output chunk will contain the full event.
+      }
+    }
+    return latest;
+  }
+
+  private static BindCompletion bindCompletion(JsonNode event, String fallbackRequestedAccountId) {
+    return new BindCompletion(
+        firstNonBlank(text(event, "requestedAccountId"), fallbackRequestedAccountId),
+        text(event, "accountId"),
+        text(event, "rawAccountId"),
+        text(event, "wechatUserId"),
+        text(event, "baseUrl"),
+        text(event, "message"),
+        event != null && event.path("alreadyConnected").asBoolean(false)
+    );
+  }
+
+  private static String text(JsonNode node, String field) {
+    if (node == null || node.get(field) == null || node.get(field).isNull()) {
+      return "";
+    }
+    return node.get(field).asText("");
+  }
+
+  private static String firstNonBlank(String first, String second) {
+    String normalized = defaultString(first).trim();
+    return normalized.isBlank() ? defaultString(second).trim() : normalized;
+  }
+
+  private static String json(String value) {
+    try {
+      return JSON.writeValueAsString(value);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("微信扫码登录参数序列化失败。", error);
+    }
   }
 
   private static Executor defaultWaitExecutor() {
@@ -394,6 +543,21 @@ public class WechatBindService {
       String qrLink,
       String outputSnippet
   ) {}
+
+  public record BindCompletion(
+      String requestedAccountId,
+      String accountId,
+      String rawAccountId,
+      String wechatUserId,
+      String baseUrl,
+      String message,
+      boolean alreadyConnected
+  ) {}
+
+  @FunctionalInterface
+  public interface BindCompletionCallback {
+    void onConnected(BindCompletion completion);
+  }
 
   private record WechatState(
       String status,

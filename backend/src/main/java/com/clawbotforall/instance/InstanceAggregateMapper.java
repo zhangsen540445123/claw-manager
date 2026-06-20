@@ -22,9 +22,9 @@ public interface InstanceAggregateMapper {
 
   List<InstanceModelAuthEntity> listModelAuthByInstanceIds(@Param("instanceIds") List<String> instanceIds);
 
-  List<InstanceWechatBindingEntity> listWechatBindingByInstanceIds(@Param("instanceIds") List<String> instanceIds);
-
   List<WechatPairedAccountEntity> listWechatAccountsByInstanceIds(@Param("instanceIds") List<String> instanceIds);
+
+  List<WechatAccountChannelEntity> listWechatAccountChannelsByInstanceIds(@Param("instanceIds") List<String> instanceIds);
 
   List<WechatPairedAccountEntity> listAllWechatAccounts();
 

@@ -7,10 +7,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class OpenClawGatewayRpcService {
 
+  private static final Logger log = LoggerFactory.getLogger(OpenClawGatewayRpcService.class);
   private static final long START_CHANNEL_TIMEOUT_MS = 15_000;
 
   private final OpenClawRuntime openClawRuntime;
@@ -34,13 +38,7 @@ public class OpenClawGatewayRpcService {
   }
 
   public void startWechatChannel(InstanceEntity instance, List<String> accountIds) {
-    Set<String> normalizedAccountIds = new LinkedHashSet<>();
-    for (String accountId : accountIds == null ? List.<String>of() : accountIds) {
-      String normalized = defaultString(accountId).trim();
-      if (!normalized.isBlank()) {
-        normalizedAccountIds.add(normalized);
-      }
-    }
+    Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
     if (normalizedAccountIds.isEmpty()) {
       startAccount(instance, null);
       return;
@@ -50,13 +48,49 @@ public class OpenClawGatewayRpcService {
     }
   }
 
+  public void restartWechatChannel(InstanceEntity instance, List<String> accountIds) {
+    Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
+    if (normalizedAccountIds.isEmpty()) {
+      startAccount(instance, null);
+      return;
+    }
+    for (String accountId : normalizedAccountIds) {
+      try {
+        stopAccount(instance, accountId);
+      } catch (RuntimeException error) {
+        log.warn("OpenClaw channels.stop 失败，将继续 start：instanceId={}, accountId={}, reason={}", instance.getId(), accountId, error.getMessage());
+      }
+      startAccount(instance, accountId);
+    }
+  }
+
+  private Set<String> normalizeAccountIds(List<String> accountIds) {
+    Set<String> normalizedAccountIds = new LinkedHashSet<>();
+    for (String accountId : accountIds == null ? List.<String>of() : accountIds) {
+      String normalized = defaultString(accountId).trim();
+      if (!normalized.isBlank()) {
+        normalizedAccountIds.add(normalized);
+      }
+    }
+    return normalizedAccountIds;
+  }
+
   private void startAccount(InstanceEntity instance, String accountId) {
+    runChannelOperation(instance, "channels.start", accountId, true);
+  }
+
+  private void stopAccount(InstanceEntity instance, String accountId) {
+    runChannelOperation(instance, "channels.stop", accountId, false);
+  }
+
+  private void runChannelOperation(InstanceEntity instance, String method, String accountId, boolean requireStarted) {
     CompletableFuture<Integer> exit = new CompletableFuture<>();
     StringBuilder output = new StringBuilder();
     openClawRuntime.startExec(
         instance,
-        List.of("node", "--input-type=module", "-e", startScript(accountId)),
+        List.of("node", "--input-type=module", "-e", operationScript(method, accountId, requireStarted)),
         START_CHANNEL_TIMEOUT_MS,
+        Map.of(),
         new RuntimeExecListener() {
           @Override
           public void onOutput(String chunk) {
@@ -70,7 +104,7 @@ public class OpenClawGatewayRpcService {
 
           @Override
           public void onTimeout() {
-            exit.completeExceptionally(new TimeoutException("OpenClaw channels.start 执行超时。"));
+            exit.completeExceptionally(new TimeoutException("OpenClaw " + method + " 执行超时。"));
           }
 
           @Override
@@ -84,30 +118,33 @@ public class OpenClawGatewayRpcService {
       exitCode = exit.get(START_CHANNEL_TIMEOUT_MS + 1_000, TimeUnit.MILLISECONDS);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("OpenClaw channels.start 被中断。", error);
+      throw new IllegalStateException("OpenClaw " + method + " 被中断。", error);
     } catch (Exception error) {
-      throw new IllegalStateException("OpenClaw channels.start 调用失败：" + message(error), error);
+      throw new IllegalStateException("OpenClaw " + method + " 调用失败：" + message(error), error);
     }
     if (exitCode != 0) {
-      throw new IllegalStateException("OpenClaw channels.start 退出码 " + exitCode + "：" + tail(output.toString()));
+      throw new IllegalStateException("OpenClaw " + method + " 退出码 " + exitCode + "：" + tail(output.toString()));
     }
   }
 
-  private String startScript(String accountId) {
+  private String operationScript(String method, String accountId, boolean requireStarted) {
+    String methodLiteral;
     String accountLiteral;
     try {
+      methodLiteral = objectMapper.writeValueAsString(method);
       accountLiteral = accountId == null || accountId.isBlank() ? "undefined" : objectMapper.writeValueAsString(accountId);
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("微信账号 ID 序列化失败。", error);
+      throw new IllegalArgumentException("微信通道操作参数序列化失败。", error);
     }
     return """
         import { c as callGateway } from "/usr/local/lib/node_modules/openclaw/dist/call-BlqKbSL2.js";
         import { i as GATEWAY_CLIENT_NAMES, r as GATEWAY_CLIENT_MODES } from "/usr/local/lib/node_modules/openclaw/dist/client-info-CcqJJIan.js";
+        const method = %s;
         const accountId = %s;
         const params = { channel: "openclaw-weixin" };
         if (accountId) params.accountId = accountId;
         const result = await callGateway({
-          method: "channels.start",
+          method,
           params,
           mode: GATEWAY_CLIENT_MODES.BACKEND,
           clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
@@ -116,8 +153,8 @@ public class OpenClawGatewayRpcService {
           timeoutMs: 8000
         });
         console.log(JSON.stringify(result));
-        if (!result?.started) process.exitCode = 2;
-        """.formatted(accountLiteral);
+        if (%s && !result?.started) process.exitCode = 2;
+        """.formatted(methodLiteral, accountLiteral, requireStarted ? "true" : "false");
   }
 
   private static String defaultString(String value) {

@@ -31,6 +31,20 @@ interface InstanceResponse {
   gatewayRestarted?: boolean;
 }
 
+interface BatchInstanceOperationItem {
+  instanceId: string;
+  status: string;
+  message: string;
+  instance?: PublicInstance;
+}
+
+interface WechatChannelRestartItem {
+  instanceId: string;
+  accountId: string;
+  status: string;
+  message: string;
+}
+
 interface ModelPresetResponse {
   preset: PublicModelPreset;
   sync?: ModelPresetSyncResult;
@@ -121,6 +135,18 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/restart-gateway`, { method: "POST" });
       this.upsert(response.instance);
     },
+    async batchRestartGateway(instanceIds: string[]) {
+      const response = await api<{ instances: BatchInstanceOperationItem[] }>("/api/admin/instances/batch/restart-gateway", {
+        method: "POST",
+        ...jsonBody({ instanceIds })
+      });
+      for (const item of response.instances) {
+        if (item.instance) {
+          this.upsert(item.instance);
+        }
+      }
+      return response.instances;
+    },
     async unbindWechat(instanceId: string) {
       const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/wechat-unbind`, { method: "POST" });
       this.upsert(response.instance);
@@ -139,6 +165,22 @@ export const useAdminStore = defineStore("admin", {
       });
       this.upsert(response.instance);
       return response;
+    },
+    async restartWechatAccountChannel(instanceId: string, accountId: string) {
+      const response = await api<{ account: WechatChannelRestartItem }>(
+        `/api/admin/instances/${instanceId}/wechat-accounts/${encodeURIComponent(accountId)}/restart-channel`,
+        { method: "POST" }
+      );
+      await this.loadInstances();
+      return response.account;
+    },
+    async batchRestartWechatAccountChannels(accounts: Array<{ instanceId: string; accountId: string }>) {
+      const response = await api<{ accounts: WechatChannelRestartItem[] }>("/api/admin/wechat-accounts/restart-channel", {
+        method: "POST",
+        ...jsonBody({ accounts })
+      });
+      await this.loadInstances();
+      return response.accounts;
     },
     async createBindLink(mode: "new" | "existing", phone = "") {
       const response = await api<{ link: PublicWechatBindLink }>("/api/admin/wechat-bind-links", {

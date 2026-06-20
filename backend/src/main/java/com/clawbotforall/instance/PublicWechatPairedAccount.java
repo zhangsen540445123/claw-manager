@@ -11,5 +11,10 @@ public record PublicWechatPairedAccount(
     String baseUrl,
     String savedAt,
     String boundAt,
-    String updatedAt
+    String updatedAt,
+    String channelStatus,
+    String channelMessage,
+    String channelUpdatedAt,
+    String lastStartedAt,
+    String lastErrorAt
 ) {}

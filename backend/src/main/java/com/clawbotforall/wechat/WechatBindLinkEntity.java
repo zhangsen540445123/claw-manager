@@ -9,9 +9,8 @@ public class WechatBindLinkEntity {
   private String mode;
   private String phone;
   private String instanceId;
-  private String expectedAccountId;
-  private String pendingAccountId;
-  private String snapshotAccountIds;
+  private String targetAccountId;
+  private String scannedWechatUserId;
   private String status;
   private String qrMode;
   private String qrPayload;
@@ -20,6 +19,7 @@ public class WechatBindLinkEntity {
   private String errorMessage;
   private String createdByAdminId;
   private String createdAt;
+  private String startedAt;
   private String expiresAt;
   private String completedAt;
   private String updatedAt;
@@ -56,28 +56,20 @@ public class WechatBindLinkEntity {
     this.instanceId = instanceId;
   }
 
-  public String getExpectedAccountId() {
-    return expectedAccountId;
+  public String getTargetAccountId() {
+    return targetAccountId;
   }
 
-  public void setExpectedAccountId(String expectedAccountId) {
-    this.expectedAccountId = expectedAccountId;
+  public void setTargetAccountId(String targetAccountId) {
+    this.targetAccountId = targetAccountId;
   }
 
-  public String getPendingAccountId() {
-    return pendingAccountId;
+  public String getScannedWechatUserId() {
+    return scannedWechatUserId;
   }
 
-  public void setPendingAccountId(String pendingAccountId) {
-    this.pendingAccountId = pendingAccountId;
-  }
-
-  public String getSnapshotAccountIds() {
-    return snapshotAccountIds;
-  }
-
-  public void setSnapshotAccountIds(String snapshotAccountIds) {
-    this.snapshotAccountIds = snapshotAccountIds;
+  public void setScannedWechatUserId(String scannedWechatUserId) {
+    this.scannedWechatUserId = scannedWechatUserId;
   }
 
   public String getStatus() {
@@ -142,6 +134,14 @@ public class WechatBindLinkEntity {
 
   public void setCreatedAt(String createdAt) {
     this.createdAt = createdAt;
+  }
+
+  public String getStartedAt() {
+    return startedAt;
+  }
+
+  public void setStartedAt(String startedAt) {
+    this.startedAt = startedAt;
   }
 
   public String getExpiresAt() {

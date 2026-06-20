@@ -60,31 +60,6 @@
     WHERE instance_id = #{instanceId}
   </update>
 
-  <insert id="insertWechatBinding" parameterType="com.clawbotforall.instance.InstanceWechatBindingEntity">
-    INSERT INTO instance_wechat_binding
-      (instance_id, status, qr_mode, qr_payload, qr_link, output_snippet,
-       runtime_ready, runtime_status, runtime_message, runtime_updated_at, updated_at, qr_expires_at)
-    VALUES
-      (#{instanceId}, #{status}, #{qrMode}, #{qrPayload}, #{qrLink}, #{outputSnippet},
-       #{runtimeReady}, #{runtimeStatus}, #{runtimeMessage}, #{runtimeUpdatedAt}, #{updatedAt}, #{qrExpiresAt})
-  </insert>
-
-  <update id="updateWechatBinding" parameterType="com.clawbotforall.instance.InstanceWechatBindingEntity">
-    UPDATE instance_wechat_binding
-    SET status = #{status},
-        qr_mode = #{qrMode},
-        qr_payload = #{qrPayload},
-        qr_link = #{qrLink},
-        output_snippet = #{outputSnippet},
-        runtime_ready = #{runtimeReady},
-        runtime_status = #{runtimeStatus},
-        runtime_message = #{runtimeMessage},
-        runtime_updated_at = #{runtimeUpdatedAt},
-        updated_at = #{updatedAt},
-        qr_expires_at = #{qrExpiresAt}
-    WHERE instance_id = #{instanceId}
-  </update>
-
   <delete id="deleteWechatAccountsForInstance">
     DELETE FROM wechat_paired_accounts
     WHERE instance_id = #{instanceId}
@@ -95,6 +70,33 @@
       (account_id, phone, instance_id, wechat_user_id, remark, base_url, saved_at, bound_at, updated_at)
     VALUES
       (#{accountId}, #{phone}, #{instanceId}, #{wechatUserId}, #{remark}, #{baseUrl}, #{savedAt}, #{boundAt}, #{updatedAt})
+  </insert>
+
+  <insert id="ensureWechatAccountChannel" parameterType="com.clawbotforall.instance.WechatAccountChannelEntity">
+    INSERT INTO wechat_account_channels
+      (account_id, instance_id, wechat_user_id, status, message, output_snippet, last_started_at, last_error_at, updated_at)
+    VALUES
+      (#{accountId}, #{instanceId}, #{wechatUserId}, #{status}, #{message}, #{outputSnippet}, #{lastStartedAt}, #{lastErrorAt}, #{updatedAt})
+    ON DUPLICATE KEY UPDATE
+      instance_id = VALUES(instance_id),
+      wechat_user_id = VALUES(wechat_user_id),
+      updated_at = VALUES(updated_at)
+  </insert>
+
+  <insert id="upsertWechatAccountChannel" parameterType="com.clawbotforall.instance.WechatAccountChannelEntity">
+    INSERT INTO wechat_account_channels
+      (account_id, instance_id, wechat_user_id, status, message, output_snippet, last_started_at, last_error_at, updated_at)
+    VALUES
+      (#{accountId}, #{instanceId}, #{wechatUserId}, #{status}, #{message}, #{outputSnippet}, #{lastStartedAt}, #{lastErrorAt}, #{updatedAt})
+    ON DUPLICATE KEY UPDATE
+      instance_id = VALUES(instance_id),
+      wechat_user_id = VALUES(wechat_user_id),
+      status = VALUES(status),
+      message = VALUES(message),
+      output_snippet = VALUES(output_snippet),
+      last_started_at = VALUES(last_started_at),
+      last_error_at = VALUES(last_error_at),
+      updated_at = VALUES(updated_at)
   </insert>
 
   <update id="updateWechatAccountRemark">

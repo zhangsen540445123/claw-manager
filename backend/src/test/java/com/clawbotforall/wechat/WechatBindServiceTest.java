@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,7 +20,6 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.InstanceProvisioningService;
 import com.clawbotforall.instance.InstanceProvisioningEntity;
 import com.clawbotforall.instance.InstanceQueryService;
-import com.clawbotforall.instance.InstanceWechatBindingEntity;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecHandle;
@@ -29,7 +27,7 @@ import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,7 +96,7 @@ class WechatBindServiceTest {
   }
 
   @Test
-  void startsCliLoginAndDoesNotRestartAfterConnected() {
+  void startsPluginQrLoginWithTargetAccountAndReturnsActualAccountFromCompletionEvent() {
     InstanceEntity instance = instance();
     InstancePaths paths = new InstancePaths(
         Path.of("instances", "inst_1"),
@@ -107,50 +105,59 @@ class WechatBindServiceTest {
         Path.of("instances", "inst_1", "logs")
     );
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning()));
-    when(aggregateMapper.listWechatBindingByInstanceIds(List.of("inst_1"))).thenReturn(List.of());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-18T00:00:00Z"));
     when(commandService.listModels("inst_1")).thenReturn(List.of());
     when(fileService.writeInstanceFiles(eq(instance), any())).thenReturn(paths);
-    when(queryService.findPublicInstance(eq("inst_1"), any())).thenReturn(Optional.empty());
     when(pluginService.isWechatPluginInstalled(instance)).thenReturn(true);
-    when(accountSyncService.readRawAccountIds(instance)).thenReturn(List.of("eb3fd7bd7101-im-bot"));
     when(openClawRuntime.startExec(
         eq(instance),
-        eq(List.of("openclaw", "channels", "login", "--channel", "openclaw-weixin")),
+        any(List.class),
         eq(600_000L),
         anyMap(),
         any(RuntimeExecListener.class)
     )).thenAnswer(invocation -> {
       RuntimeExecListener listener = invocation.getArgument(4);
-      listener.onOutput("若二维码未能显示或无法使用，你可以访问以下链接以继续：\n");
-      listener.onOutput("https://liteapp.weixin.qq.com/q/test\n");
+      listener.onOutput("__OPENCLAW_WECHAT_BIND__{\"type\":\"qr\",\"requestedAccountId\":\"cmwx_token_1\",\"sessionKey\":\"cmwx_token_1\",\"qrLink\":\"https://liteapp.weixin.qq.com/q/test\"}\n");
+      listener.onOutput("__OPENCLAW_WECHAT_BIND__{\"type\":\"connected\",\"requestedAccountId\":\"cmwx_token_1\",\"accountId\":\"554603a4df61-im-bot\",\"rawAccountId\":\"554603a4df61@im.bot\",\"wechatUserId\":\"wechat-user\",\"baseUrl\":\"https://ilinkai.weixin.qq.com\",\"message\":\"connected\"}\n");
       listener.onComplete(0);
       return execHandle;
     });
 
-    WechatBindService.BindStartResult result = service.startBind(instance, false, "cmwx_token_1");
+    AtomicReference<WechatBindService.BindCompletion> completion = new AtomicReference<>();
+    WechatBindService.BindStartResult result = service.startBind(instance, false, "cmwx_token_1", completion::set);
 
     assertThat(result.accountId()).isEqualTo("cmwx_token_1");
-    assertThat(result.sessionKey()).isNull();
+    assertThat(result.sessionKey()).isEqualTo("cmwx_token_1");
     assertThat(result.qrMode()).isEqualTo("link");
     assertThat(result.qrLink()).isEqualTo("https://liteapp.weixin.qq.com/q/test");
+    assertThat(completion.get().requestedAccountId()).isEqualTo("cmwx_token_1");
+    assertThat(completion.get().accountId()).isEqualTo("554603a4df61-im-bot");
+    assertThat(completion.get().rawAccountId()).isEqualTo("554603a4df61@im.bot");
+    assertThat(completion.get().wechatUserId()).isEqualTo("wechat-user");
 
     verify(accountSyncService).syncInstanceAccounts(instance);
-    verify(gatewayRpcService).startWechatChannel(instance, List.of("eb3fd7bd7101-im-bot"));
+    verify(gatewayRpcService, never()).restartWechatChannel(instance, List.of("cmwx_token_1"));
     verify(provisioningService, never()).startProvisioning(anyString());
     verify(openClawRuntime, never()).startExec(eq(instance), anyString(), anyLong(), anyMap(), any(RuntimeExecListener.class));
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<String>> commandCaptor = ArgumentCaptor.forClass(List.class);
     verify(openClawRuntime).startExec(
         eq(instance),
-        eq(List.of("openclaw", "channels", "login", "--channel", "openclaw-weixin")),
+        commandCaptor.capture(),
         eq(600_000L),
         anyMap(),
         any(RuntimeExecListener.class)
     );
+    assertThat(commandCaptor.getValue()).hasSize(4);
+    assertThat(commandCaptor.getValue().get(0)).isEqualTo("node");
+    assertThat(commandCaptor.getValue().get(1)).isEqualTo("--input-type=module");
+    assertThat(commandCaptor.getValue().get(2)).isEqualTo("-e");
+    assertThat(commandCaptor.getValue().get(3))
+        .contains("startWeixinLoginWithQr")
+        .contains("waitForWeixinLogin")
+        .contains("cmwx_token_1");
 
-    ArgumentCaptor<InstanceWechatBindingEntity> bindingCaptor = ArgumentCaptor.forClass(InstanceWechatBindingEntity.class);
-    verify(mutationMapper, atLeastOnce()).updateWechatBinding(bindingCaptor.capture());
-    assertThat(bindingCaptor.getAllValues().getLast().getStatus()).isEqualTo("connected");
-    assertThat(bindingCaptor.getAllValues().getLast().getRuntimeStatus()).isEqualTo("ready");
+    verify(mutationMapper, never()).upsertWechatAccountChannel(any());
   }
 
   private static InstanceEntity instance() {

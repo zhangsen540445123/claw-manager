@@ -69,7 +69,6 @@ public class InstanceCommandService {
       instanceMutationMapper.insertModel(draft.model());
       instanceMutationMapper.insertProvisioning(draft.provisioning());
       instanceMutationMapper.insertModelAuth(draft.modelAuth());
-      instanceMutationMapper.insertWechatBinding(draft.wechatBinding());
     } catch (DuplicateKeyException error) {
       throw new ApiException(HttpStatus.CONFLICT, "实例端口或容器名称冲突，请重试。");
     }
@@ -164,25 +163,20 @@ public class InstanceCommandService {
     if (accounts.isEmpty()) {
       return;
     }
-    InstanceWechatBindingEntity binding = instanceAggregateMapper.listWechatBindingByInstanceIds(List.of(instanceId))
-        .stream()
-        .findFirst()
-        .orElse(null);
-    if (binding == null) {
-      return;
-    }
     String now = Instant.now().toString();
-    binding.setStatus("connected");
-    binding.setQrMode(null);
-    binding.setQrPayload("");
-    binding.setQrLink("");
-    binding.setQrExpiresAt(null);
-    binding.setRuntimeReady(true);
-    binding.setRuntimeStatus("ready");
-    binding.setRuntimeMessage("");
-    binding.setRuntimeUpdatedAt(now);
-    binding.setUpdatedAt(now);
-    instanceMutationMapper.updateWechatBinding(binding);
+    for (WechatPairedAccountEntity account : accounts) {
+      WechatAccountChannelEntity channel = new WechatAccountChannelEntity();
+      channel.setAccountId(account.getAccountId());
+      channel.setInstanceId(account.getInstanceId());
+      channel.setWechatUserId(account.getWechatUserId());
+      channel.setStatus("ready");
+      channel.setMessage("");
+      channel.setOutputSnippet("");
+      channel.setLastStartedAt(now);
+      channel.setLastErrorAt(null);
+      channel.setUpdatedAt(now);
+      instanceMutationMapper.upsertWechatAccountChannel(channel);
+    }
     log.info("已将配对微信账号标记为运行可用：instanceId={}, accountCount={}", instanceId, accounts.size());
   }
 

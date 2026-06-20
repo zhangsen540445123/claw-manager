@@ -7,8 +7,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,8 +33,8 @@ public class PublicInstanceFactory {
       List<InstanceModelEntity> models,
       InstanceProvisioningEntity provisioning,
       InstanceModelAuthEntity modelAuth,
-      InstanceWechatBindingEntity wechatBinding,
       List<WechatPairedAccountEntity> pairedAccounts,
+      List<WechatAccountChannelEntity> accountChannels,
       HttpServletRequest request
   ) {
     List<PublicInstanceModel> publicModels = models.stream()
@@ -58,7 +56,7 @@ public class PublicInstanceFactory {
         publicModels,
         publicModelAuth(modelAuth),
         plugins(instance),
-        publicWechatBinding(wechatBinding, pairedAccounts)
+        publicWechatBinding(pairedAccounts, accountChannels)
     );
   }
 
@@ -118,56 +116,87 @@ public class PublicInstanceFactory {
   }
 
   private PublicWechatBinding publicWechatBinding(
-      InstanceWechatBindingEntity binding,
-      List<WechatPairedAccountEntity> pairedAccounts
+      List<WechatPairedAccountEntity> pairedAccounts,
+      List<WechatAccountChannelEntity> accountChannels
   ) {
+    Map<String, WechatAccountChannelEntity> channelByAccountId = accountChannels.stream()
+        .collect(java.util.stream.Collectors.toMap(
+            WechatAccountChannelEntity::getAccountId,
+            item -> item,
+            (left, right) -> left,
+            LinkedHashMap::new
+        ));
     List<PublicWechatPairedAccount> accounts = pairedAccounts.stream()
-        .map(account -> new PublicWechatPairedAccount(
-            defaultString(account.getAccountId()),
-            defaultString(account.getPhone()),
-            defaultString(account.getWechatUserId()),
-            defaultString(account.getRemark()),
-            defaultString(account.getBaseUrl()),
-            account.getSavedAt(),
-            account.getBoundAt(),
-            account.getUpdatedAt()
-        ))
+        .map(account -> {
+          WechatAccountChannelEntity channel = channelByAccountId.get(account.getAccountId());
+          return new PublicWechatPairedAccount(
+              defaultString(account.getAccountId()),
+              defaultString(account.getPhone()),
+              defaultString(account.getWechatUserId()),
+              defaultString(account.getRemark()),
+              defaultString(account.getBaseUrl()),
+              account.getSavedAt(),
+              account.getBoundAt(),
+              account.getUpdatedAt(),
+              channel == null ? "unknown" : defaultString(channel.getStatus()),
+              channel == null ? "" : defaultString(channel.getMessage()),
+              channel == null ? null : channel.getUpdatedAt(),
+              channel == null ? null : channel.getLastStartedAt(),
+              channel == null ? null : channel.getLastErrorAt()
+          );
+        })
         .toList();
 
-    if (binding == null) {
-      return new PublicWechatBinding("idle", null, null, false, null, "", "", "", accounts, false, "idle", "", null);
-    }
-
-    String qrExpiresAt = binding.getQrExpiresAt();
-    boolean qrExpired = isQrExpired(qrExpiresAt);
-    String status = qrExpired && "waiting_scan".equals(binding.getStatus()) ? "expired" : defaultString(binding.getStatus());
+    ChannelSummary summary = summarizeChannels(accountChannels, accounts.isEmpty());
     return new PublicWechatBinding(
-        status,
-        binding.getUpdatedAt(),
-        qrExpiresAt,
-        qrExpired,
-        qrExpired ? null : binding.getQrMode(),
-        qrExpired ? "" : defaultString(binding.getQrPayload()),
-        qrExpired ? "" : defaultString(binding.getQrLink()),
-        defaultString(binding.getOutputSnippet()),
+        summary.status(),
+        summary.updatedAt(),
+        null,
+        false,
+        null,
+        "",
+        "",
+        summary.message(),
         accounts,
-        binding.isRuntimeReady(),
-        defaultString(binding.getRuntimeStatus()).isBlank() ? "idle" : binding.getRuntimeStatus(),
-        defaultString(binding.getRuntimeMessage()),
-        binding.getRuntimeUpdatedAt()
+        summary.runtimeReady(),
+        summary.runtimeStatus(),
+        summary.message(),
+        summary.updatedAt()
     );
   }
 
-  private boolean isQrExpired(String qrExpiresAt) {
-    if (qrExpiresAt == null || qrExpiresAt.isBlank()) {
-      return false;
+  private ChannelSummary summarizeChannels(List<WechatAccountChannelEntity> channels, boolean noAccounts) {
+    if (noAccounts) {
+      return new ChannelSummary("idle", false, "idle", "", null);
     }
-    try {
-      return !Instant.parse(qrExpiresAt).isAfter(Instant.now());
-    } catch (DateTimeParseException error) {
-      return false;
+    WechatAccountChannelEntity latest = channels.stream()
+        .filter(channel -> channel.getUpdatedAt() != null && !channel.getUpdatedAt().isBlank())
+        .max((left, right) -> left.getUpdatedAt().compareTo(right.getUpdatedAt()))
+        .orElse(null);
+    String updatedAt = latest == null ? null : latest.getUpdatedAt();
+    String message = latest == null ? "" : defaultString(latest.getMessage());
+    boolean hasStarting = channels.stream().anyMatch(channel -> "starting".equals(defaultString(channel.getStatus())));
+    if (hasStarting) {
+      return new ChannelSummary("starting", false, "pending", message, updatedAt);
     }
+    boolean hasReady = channels.stream().anyMatch(channel -> "ready".equals(defaultString(channel.getStatus())));
+    if (hasReady) {
+      return new ChannelSummary("ready", true, "ready", message, updatedAt);
+    }
+    boolean hasError = channels.stream().anyMatch(channel -> "error".equals(defaultString(channel.getStatus())));
+    if (hasError) {
+      return new ChannelSummary("error", false, "error", message, updatedAt);
+    }
+    return new ChannelSummary("unknown", false, "unknown", message, updatedAt);
   }
+
+  private record ChannelSummary(
+      String status,
+      boolean runtimeReady,
+      String runtimeStatus,
+      String message,
+      String updatedAt
+  ) {}
 
   private Map<String, Object> plugins(InstanceEntity instance) {
     List<Object> allow = readJsonList(instance.getPluginsAllow());

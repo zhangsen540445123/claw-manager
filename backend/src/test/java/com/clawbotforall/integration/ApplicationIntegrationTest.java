@@ -117,6 +117,38 @@ class ApplicationIntegrationTest {
         Long.class
     ))
         .isEqualTo(3);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'instance_wechat_binding'
+            """,
+        Long.class
+    ))
+        .isZero();
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_account_channels'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_account_channels'
+              AND non_unique = 0
+              AND column_name = 'wechat_user_id'
+            """,
+        Long.class
+    ))
+        .isGreaterThanOrEqualTo(1);
 
     mockMvc.perform(get("/api/health"))
         .andExpect(status().isOk())
@@ -175,8 +207,8 @@ class ApplicationIntegrationTest {
           @SuppressWarnings("unchecked")
           List<String> command = invocation.getArgument(1);
           RuntimeExecListener listener = invocation.getArgument(4);
-          if (command.contains("login")) {
-            listener.onOutput("https://liteapp.weixin.qq.com/q/integration\n");
+          if (command.stream().anyMatch(part -> part.contains("startWeixinLoginWithQr"))) {
+            listener.onOutput("__OPENCLAW_WECHAT_BIND__{\"type\":\"qr\",\"requestedAccountId\":\"cmwx_integration\",\"sessionKey\":\"cmwx_integration\",\"qrLink\":\"https://liteapp.weixin.qq.com/q/integration\"}\n");
           } else {
             listener.onOutput("{\"channel\":\"openclaw-weixin\",\"started\":true}\n");
             listener.onComplete(0);
@@ -415,6 +447,29 @@ class ApplicationIntegrationTest {
         .andExpect(jsonPath("$.bindings[0].accountId").value("wx_existing"))
         .andExpect(jsonPath("$.bindings[0].phone").value("13572873189"));
 
+    mockMvc.perform(post("/api/admin/instances/" + instanceId + "/wechat-accounts/wx_existing/restart-channel")
+            .cookie(adminCookie))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.account.instanceId").value(instanceId))
+        .andExpect(jsonPath("$.account.accountId").value("wx_existing"))
+        .andExpect(jsonPath("$.account.status").value("accepted"));
+
+    mockMvc.perform(post("/api/admin/wechat-accounts/restart-channel")
+            .cookie(adminCookie)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "accounts": [
+                    { "instanceId": "%s", "accountId": "wx_existing" },
+                    { "instanceId": "%s", "accountId": "missing" }
+                  ]
+                }
+                """.formatted(instanceId, instanceId)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accounts.length()").value(2))
+        .andExpect(jsonPath("$.accounts[0].status").value("accepted"))
+        .andExpect(jsonPath("$.accounts[1].status").value("failed"));
+
     MvcResult existingBindLinkResponse = mockMvc.perform(post("/api/admin/wechat-bind-links")
             .cookie(adminCookie)
             .header("X-Forwarded-Proto", "https")
@@ -433,6 +488,17 @@ class ApplicationIntegrationTest {
     String existingBindToken = objectMapper.readTree(existingBindLinkResponse.getResponse().getContentAsString())
         .at("/link/token").asText();
     waitForAdminLinkStatus(adminCookie, existingBindToken, "waiting_scan");
+
+    mockMvc.perform(post("/api/admin/instances/batch/restart-gateway")
+            .cookie(adminCookie)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                { "instanceIds": ["%s", "missing_instance"] }
+                """.formatted(instanceId)))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.instances.length()").value(2))
+        .andExpect(jsonPath("$.instances[0].status").value("accepted"))
+        .andExpect(jsonPath("$.instances[1].status").value("failed"));
   }
 
   private void waitForAdminLinkStatus(Cookie adminCookie, String token, String expectedStatus) throws Exception {

@@ -26,13 +26,13 @@ public interface InstanceMutationMapper {
 
   int updateModelAuth(InstanceModelAuthEntity modelAuth);
 
-  int insertWechatBinding(InstanceWechatBindingEntity wechatBinding);
-
-  int updateWechatBinding(InstanceWechatBindingEntity wechatBinding);
-
   int deleteWechatAccountsForInstance(@Param("instanceId") String instanceId);
 
   int insertWechatAccount(WechatPairedAccountEntity account);
+
+  int ensureWechatAccountChannel(WechatAccountChannelEntity channel);
+
+  int upsertWechatAccountChannel(WechatAccountChannelEntity channel);
 
   int updateWechatAccountRemark(
       @Param("instanceId") String instanceId,
