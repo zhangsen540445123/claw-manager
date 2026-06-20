@@ -32,6 +32,7 @@ const adminRoutePaths = {
   instances: "/admin/instances",
   wechat: "/admin/wechat-links",
   wechatPlugins: "/admin/wechat-plugins",
+  wechatUsers: "/admin/wechat-users",
   ops: "/admin/ops"
 } as const;
 
@@ -98,7 +99,9 @@ async function logout() {
   await router.replace("/login");
 }
 
-async function navigate(routeName: "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "ops" | "account") {
+async function navigate(
+  routeName: "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "wechatUsers" | "ops" | "account"
+) {
   if (routeName === "account") {
     void router.push("/change-password");
     return;

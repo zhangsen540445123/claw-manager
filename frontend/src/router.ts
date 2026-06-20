@@ -6,6 +6,7 @@ import ModelPresetsView from "./views/admin/ModelPresetsView.vue";
 import OpsView from "./views/admin/OpsView.vue";
 import WechatLinksView from "./views/admin/WechatLinksView.vue";
 import WechatPluginsView from "./views/admin/WechatPluginsView.vue";
+import WechatUsersView from "./views/admin/WechatUsersView.vue";
 import BindView from "./views/BindView.vue";
 import ChangePasswordView from "./views/ChangePasswordView.vue";
 import LoginView from "./views/LoginView.vue";
@@ -21,6 +22,7 @@ export const router = createRouter({
     { path: "/admin/instances", name: "admin-instances", component: InstancesView, meta: { shellKey: "instances", title: "实例管理" } },
     { path: "/admin/wechat-plugins", name: "admin-wechat-plugins", component: WechatPluginsView, meta: { shellKey: "wechatPlugins", title: "插件管理" } },
     { path: "/admin/wechat-links", name: "admin-wechat-links", component: WechatLinksView, meta: { shellKey: "wechat", title: "微信扫码" } },
+    { path: "/admin/wechat-users", name: "admin-wechat-users", component: WechatUsersView, meta: { shellKey: "wechatUsers", title: "用户中心" } },
     { path: "/admin/ops", name: "admin-ops", component: OpsView, meta: { shellKey: "ops", title: "系统运维" } },
     { path: "/login", name: "login", component: LoginView },
     { path: "/change-password", name: "change-password", component: ChangePasswordView },

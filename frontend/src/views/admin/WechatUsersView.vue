@@ -1,0 +1,380 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from "vue";
+import { RefreshCw, Search, Trash2 } from "lucide-vue-next";
+import { ElMessage, ElMessageBox } from "element-plus";
+import PageHeader from "../../components/PageHeader.vue";
+import { useAdminStore } from "../../stores/admin";
+import type { PublicInstance, PublicWechatPairedAccount } from "../../api/types";
+import { formatDateTime } from "../../utils/adminUi";
+
+interface WechatUserRow {
+  key: string;
+  instanceId: string;
+  instanceName: string;
+  instanceStatus: string;
+  accountId: string;
+  phone: string;
+  wechatUserId: string;
+  remark: string;
+  baseUrl: string;
+  boundAt?: string | null;
+  updatedAt?: string | null;
+  channelStatus: string;
+  channelMessage: string;
+  channelUpdatedAt?: string | null;
+  lastStartedAt?: string | null;
+  lastErrorAt?: string | null;
+}
+
+const admin = useAdminStore();
+const tableLoading = ref(false);
+const actionLoading = ref("");
+const error = ref("");
+const selectedUsers = ref<WechatUserRow[]>([]);
+const remarkDrafts = ref<Record<string, string>>({});
+const filters = reactive({
+  keyword: "",
+  instanceId: "",
+  channelStatus: ""
+});
+
+const channelStatusOptions = [
+  { label: "全部状态", value: "" },
+  { label: "已就绪", value: "ready" },
+  { label: "启动中", value: "starting" },
+  { label: "异常", value: "error" },
+  { label: "未知", value: "unknown" }
+];
+
+const instanceOptions = computed(() => {
+  return admin.instances.map((instance) => ({
+    label: instance.name,
+    value: instance.id
+  }));
+});
+
+const users = computed(() => {
+  return admin.instances.flatMap((instance) => {
+    return (instance.wechatBinding?.pairedAccounts || []).map((account) => toUserRow(instance, account));
+  });
+});
+
+const filteredUsers = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase();
+  return users.value.filter((user) => {
+    if (filters.instanceId && user.instanceId !== filters.instanceId) {
+      return false;
+    }
+    if (filters.channelStatus && user.channelStatus !== filters.channelStatus) {
+      return false;
+    }
+    if (!keyword) {
+      return true;
+    }
+    return [
+      user.phone,
+      user.accountId,
+      user.wechatUserId,
+      user.remark,
+      user.instanceName
+    ].some((value) => value.toLowerCase().includes(keyword));
+  });
+});
+
+const selectedRestartableUsers = computed(() => {
+  return selectedUsers.value.filter(canRestartWechatChannel);
+});
+
+onMounted(() => {
+  void loadUsers();
+});
+
+async function loadUsers() {
+  tableLoading.value = true;
+  error.value = "";
+  try {
+    await admin.loadInstances();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "微信用户读取失败";
+    ElMessage.error(error.value);
+  } finally {
+    tableLoading.value = false;
+  }
+}
+
+function toUserRow(instance: PublicInstance, account: PublicWechatPairedAccount): WechatUserRow {
+  return {
+    key: `${instance.id}:${account.accountId}`,
+    instanceId: instance.id,
+    instanceName: instance.name,
+    instanceStatus: instance.status,
+    accountId: account.accountId,
+    phone: account.phone,
+    wechatUserId: account.wechatUserId,
+    remark: account.remark,
+    baseUrl: account.baseUrl,
+    boundAt: account.boundAt,
+    updatedAt: account.updatedAt,
+    channelStatus: account.channelStatus || "unknown",
+    channelMessage: account.channelMessage,
+    channelUpdatedAt: account.channelUpdatedAt,
+    lastStartedAt: account.lastStartedAt,
+    lastErrorAt: account.lastErrorAt
+  };
+}
+
+function resetFilters() {
+  filters.keyword = "";
+  filters.instanceId = "";
+  filters.channelStatus = "";
+}
+
+function handleSelectionChange(selection: WechatUserRow[]) {
+  selectedUsers.value = selection;
+}
+
+function canRestartWechatChannel(user: WechatUserRow) {
+  return user.instanceStatus === "running";
+}
+
+function channelStatusLabel(status: string) {
+  switch (status) {
+    case "ready":
+      return "已就绪";
+    case "starting":
+      return "启动中";
+    case "error":
+      return "异常";
+    case "unknown":
+      return "未知";
+    default:
+      return status || "未知";
+  }
+}
+
+function channelStatusType(status: string): "success" | "warning" | "danger" | "info" {
+  switch (status) {
+    case "ready":
+      return "success";
+    case "starting":
+      return "warning";
+    case "error":
+      return "danger";
+    default:
+      return "info";
+  }
+}
+
+function draftRemark(user: WechatUserRow) {
+  return remarkDrafts.value[user.key] ?? user.remark;
+}
+
+function setDraftRemark(user: WechatUserRow, value: string) {
+  remarkDrafts.value = {
+    ...remarkDrafts.value,
+    [user.key]: value
+  };
+}
+
+async function runAction(name: string, action: () => Promise<unknown>) {
+  actionLoading.value = name;
+  error.value = "";
+  try {
+    await action();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "操作失败";
+    ElMessage.error(error.value);
+  } finally {
+    actionLoading.value = "";
+  }
+}
+
+async function restartWechatChannel(user: WechatUserRow) {
+  await runAction(`wechat-channel:${user.key}`, async () => {
+    const result = await admin.restartWechatAccountChannel(user.instanceId, user.accountId);
+    ElMessage.success(result.message || "微信通道已重启。");
+  });
+}
+
+async function batchRestartWechatChannels() {
+  if (selectedRestartableUsers.value.length === 0) {
+    ElMessage.warning("请先选择运行中实例下的微信用户。");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将重启 ${selectedRestartableUsers.value.length} 个微信用户的通道，不会重启 Gateway 或容器。确认继续？`,
+      "批量重启微信通道",
+      { type: "warning", confirmButtonText: "确认", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  await runAction("batch:wechat-channel", async () => {
+    const results = await admin.batchRestartWechatAccountChannels(
+      selectedRestartableUsers.value.map((user) => ({ instanceId: user.instanceId, accountId: user.accountId }))
+    );
+    const failed = results.filter((item) => item.status === "failed");
+    if (failed.length > 0) {
+      ElMessage.warning(`已提交 ${results.length - failed.length} 个，${failed.length} 个失败。`);
+    } else {
+      ElMessage.success("微信通道批量重启已完成。");
+    }
+  });
+}
+
+async function saveRemark(user: WechatUserRow) {
+  await runAction(`remark:${user.key}`, async () => {
+    await admin.saveWechatRemark(user.instanceId, user.accountId, draftRemark(user));
+    const next = { ...remarkDrafts.value };
+    delete next[user.key];
+    remarkDrafts.value = next;
+    ElMessage.success("备注已保存");
+  });
+}
+
+async function deleteWechatAccount(user: WechatUserRow) {
+  try {
+    await ElMessageBox.confirm(
+      `将解绑手机号 ${user.phone || "-"} 对应的微信用户，并删除当前 OpenClaw 账号状态文件。运行中的 Gateway 会自动重启以使变更生效。`,
+      "解绑微信用户",
+      { type: "warning", confirmButtonText: "解绑", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  await runAction(`delete-account:${user.key}`, async () => {
+    const response = await admin.deleteWechatAccount(user.instanceId, user.accountId);
+    ElMessage.success(response.gatewayRestarted ? "已解绑，Gateway 正在重启以使变更生效。" : "已解绑微信用户。");
+  });
+}
+</script>
+
+<template>
+  <section class="workspace">
+    <PageHeader title="用户中心" description="查看全系统微信用户，维护备注并重启指定用户的微信通道。">
+      <template #actions>
+        <el-button :icon="RefreshCw" :loading="tableLoading" @click="loadUsers">刷新</el-button>
+      </template>
+    </PageHeader>
+
+    <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <el-card shadow="never">
+      <template #header>
+        <div class="card-title with-action">
+          <span>微信用户</span>
+          <el-button
+            :icon="RefreshCw"
+            :disabled="selectedRestartableUsers.length === 0"
+            :loading="actionLoading === 'batch:wechat-channel'"
+            @click="batchRestartWechatChannels"
+          >
+            批量重启微信通道
+          </el-button>
+        </div>
+      </template>
+
+      <el-form class="management-form history-filter-form" label-position="top" @submit.prevent>
+        <el-form-item label="关键词">
+          <el-input v-model="filters.keyword" placeholder="手机号 / OpenClaw账号 / 微信 userId / 备注" clearable />
+        </el-form-item>
+        <el-form-item label="实例">
+          <el-select v-model="filters.instanceId" clearable placeholder="全部实例">
+            <el-option v-for="item in instanceOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="通道状态">
+          <el-select v-model="filters.channelStatus">
+            <el-option v-for="item in channelStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label=" ">
+          <div class="button-row">
+            <el-button :icon="Search" type="primary">筛选</el-button>
+            <el-button @click="resetFilters">重置</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <el-table
+        :data="filteredUsers"
+        v-loading="tableLoading"
+        row-key="key"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="48" :selectable="canRestartWechatChannel" />
+        <el-table-column prop="phone" label="手机号" min-width="130" />
+        <el-table-column label="实例" min-width="170">
+          <template #default="{ row }">
+            <div class="model-stack">
+              <strong>{{ row.instanceName }}</strong>
+              <span>{{ row.instanceStatus }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="accountId" label="OpenClaw账号" min-width="230" />
+        <el-table-column prop="wechatUserId" label="微信 userId" min-width="180" />
+        <el-table-column label="通道状态" min-width="190">
+          <template #default="{ row }">
+            <div class="channel-status-cell">
+              <el-tag size="small" :type="channelStatusType(row.channelStatus)">
+                {{ channelStatusLabel(row.channelStatus) }}
+              </el-tag>
+              <span v-if="row.channelMessage" class="muted-text">{{ row.channelMessage }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="240">
+          <template #default="{ row }">
+            <div class="remark-row">
+              <el-input :model-value="draftRemark(row)" @update:model-value="(value: string) => setDraftRemark(row, value)" />
+              <el-button
+                :loading="actionLoading === `remark:${row.key}`"
+                @click="saveRemark(row)"
+              >
+                保存
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="绑定时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.boundAt) }}</template>
+        </el-table-column>
+        <el-table-column label="最近启动" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.lastStartedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="最近错误" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.lastErrorAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" align="right" fixed="right">
+          <template #default="{ row }">
+            <div class="instance-actions">
+              <el-tooltip content="重启微信通道">
+                <span>
+                  <el-button
+                    circle
+                    :icon="RefreshCw"
+                    :disabled="!canRestartWechatChannel(row)"
+                    :loading="actionLoading === `wechat-channel:${row.key}`"
+                    @click="restartWechatChannel(row)"
+                  />
+                </span>
+              </el-tooltip>
+              <el-tooltip content="解绑微信用户">
+                <span>
+                  <el-button
+                    circle
+                    :icon="Trash2"
+                    :loading="actionLoading === `delete-account:${row.key}`"
+                    @click="deleteWechatAccount(row)"
+                  />
+                </span>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </section>
+</template>

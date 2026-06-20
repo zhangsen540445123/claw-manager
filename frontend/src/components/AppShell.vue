@@ -9,13 +9,23 @@ import {
   QrCode,
   Server,
   SlidersHorizontal,
+  UsersRound,
   Menu,
   X
 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import clawManagerLogo from "../claw-manager.png";
 
-type ShellNavKey = "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "ops" | "account";
+type ShellNavKey =
+  | "overview"
+  | "presets"
+  | "create"
+  | "instances"
+  | "wechat"
+  | "wechatPlugins"
+  | "wechatUsers"
+  | "ops"
+  | "account";
 
 const props = defineProps<{
   authenticated: boolean;
@@ -39,6 +49,7 @@ const navItems = computed(() => {
     { key: "instances" as const, label: "实例管理", icon: Boxes },
     { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
     { key: "wechat" as const, label: "扫码链接", icon: QrCode },
+    { key: "wechatUsers" as const, label: "用户中心", icon: UsersRound },
     { key: "ops" as const, label: "系统运维", icon: Server }
   ];
 });
@@ -50,6 +61,7 @@ const routeTitles: Record<string, string> = {
   instances: "实例管理",
   wechat: "扫码链接",
   wechatPlugins: "插件管理",
+  wechatUsers: "用户中心",
   ops: "系统运维",
   account: "账号设置"
 };
