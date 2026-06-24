@@ -58,10 +58,10 @@ public class WechatPluginService {
 
   private static final String WECHAT_PLUGIN_TYPE = "weixin";
   private static final String WECHAT_PLUGIN_ID = "openclaw-weixin";
-  private static final String WECHAT_PLUGIN_SPEC = "@tencent-weixin/openclaw-weixin";
+  private static final String WECHAT_PLUGIN_SPEC = "@claw-manager/openclaw-weixin";
   private static final String WECHAT_PLUGIN_NPM_SPEC = "npm:" + WECHAT_PLUGIN_SPEC;
-  private static final String WECHAT_PLUGIN_NPM_PROJECT_PREFIX = "tencent-weixin-openclaw-weixin";
-  private static final String WECHAT_PLUGIN_REGISTRY_URL = "https://registry.npmjs.org/%40tencent-weixin%2Fopenclaw-weixin";
+  private static final String WECHAT_PLUGIN_NPM_PROJECT_PREFIX = "claw-manager-openclaw-weixin";
+  private static final String WECHAT_PLUGIN_REGISTRY_URL = "https://registry.npmjs.org/%40claw-manager%2Fopenclaw-weixin";
   private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?");
   private static final long TASK_TIMEOUT_MS = 10 * 60 * 1000L;
   private static final long VERSION_CACHE_TTL_MS = 60 * 60 * 1000L;
@@ -73,7 +73,7 @@ public class WechatPluginService {
   private final InstanceEventPublisher eventPublisher;
   private final ObjectMapper objectMapper;
   private final Executor executor;
-  private final Supplier<List<String>> officialVersionSupplier;
+  private final Supplier<List<String>> clawManagerVersionSupplier;
   private final ConcurrentMap<String, PublicWechatPluginStatus> taskStatuses = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> taskJobs = new ConcurrentHashMap<>();
   private final AtomicReference<CachedVersions> cachedVersions = new AtomicReference<>();
@@ -96,7 +96,7 @@ public class WechatPluginService {
         eventPublisher,
         objectMapper,
         defaultExecutor(),
-        () -> fetchOfficialVersionsFromNpm(objectMapper)
+        () -> fetchClawManagerVersionsFromNpm(objectMapper)
     );
   }
 
@@ -108,7 +108,7 @@ public class WechatPluginService {
       InstanceEventPublisher eventPublisher,
       ObjectMapper objectMapper,
       Executor executor,
-      Supplier<List<String>> officialVersionSupplier
+      Supplier<List<String>> clawManagerVersionSupplier
   ) {
     this.openClawRuntime = openClawRuntime;
     this.commandService = commandService;
@@ -117,7 +117,7 @@ public class WechatPluginService {
     this.eventPublisher = eventPublisher;
     this.objectMapper = objectMapper;
     this.executor = executor;
-    this.officialVersionSupplier = officialVersionSupplier;
+    this.clawManagerVersionSupplier = clawManagerVersionSupplier;
   }
 
   /**
@@ -137,13 +137,13 @@ public class WechatPluginService {
       return publicVersions(cached.versions());
     }
     if (cached != null) {
-      refreshOfficialVersionsAsync();
+      refreshClawManagerVersionsAsync();
       return publicVersions(cached.versions());
     }
     try {
-      return publicVersions(refreshOfficialVersionsBlocking());
+      return publicVersions(refreshClawManagerVersionsBlocking());
     } catch (RuntimeException error) {
-      log.warn("微信插件官方版本读取失败，返回空版本列表：{}", message(error));
+      log.warn("Claw Manager 微信插件版本读取失败，返回空版本列表：{}", message(error));
       return publicVersions(List.of());
     }
   }
@@ -336,7 +336,7 @@ public class WechatPluginService {
     if (normalized.isBlank()) {
       return "";
     }
-    requireOfficialVersion(normalized);
+    requireClawManagerVersion(normalized);
     return normalized;
   }
 
@@ -345,30 +345,30 @@ public class WechatPluginService {
     if (normalized.isBlank()) {
       return currentVersion;
     }
-    requireOfficialVersion(normalized);
+    requireClawManagerVersion(normalized);
     return normalized;
   }
 
   private String resolveUpgradeVersion(String version, String currentVersion) {
     String normalized = normalizeRequestedVersion(version);
-    String targetVersion = normalized.isBlank() ? latestOfficialVersionForOperation() : normalized;
-    requireOfficialVersion(targetVersion);
+    String targetVersion = normalized.isBlank() ? latestClawManagerVersionForOperation() : normalized;
+    requireClawManagerVersion(targetVersion);
     if (compareVersion(targetVersion, currentVersion) <= 0) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "目标版本必须高于当前版本。");
     }
     return targetVersion;
   }
 
-  private void requireOfficialVersion(String version) {
-    if (!VERSION_PATTERN.matcher(version).matches() || !officialVersions().contains(version)) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, "只能选择官方微信插件版本。");
+  private void requireClawManagerVersion(String version) {
+    if (!VERSION_PATTERN.matcher(version).matches() || !clawManagerVersions().contains(version)) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "只能选择 Claw Manager 微信插件版本。");
     }
   }
 
-  private String latestOfficialVersionForOperation() {
-    List<String> versions = officialVersions();
+  private String latestClawManagerVersionForOperation() {
+    List<String> versions = clawManagerVersions();
     if (versions.isEmpty()) {
-      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取微信插件官方版本。");
+      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取 Claw Manager 微信插件版本。");
     }
     return versions.getFirst();
   }
@@ -378,18 +378,18 @@ public class WechatPluginService {
     return "latest".equalsIgnoreCase(normalized) ? "" : normalized;
   }
 
-  private List<String> officialVersions() {
+  private List<String> clawManagerVersions() {
     CachedVersions cached = cachedVersions.get();
     if (cached != null) {
       if (!isFresh(cached)) {
-        refreshOfficialVersionsAsync();
+        refreshClawManagerVersionsAsync();
       }
       return cached.versions();
     }
-    return refreshOfficialVersionsBlocking();
+    return refreshClawManagerVersionsBlocking();
   }
 
-  private List<String> refreshOfficialVersionsBlocking() {
+  private List<String> refreshClawManagerVersionsBlocking() {
     CompletableFuture<List<String>> existing = versionRefresh.get();
     if (existing != null) {
       return joinRefresh(existing);
@@ -397,10 +397,10 @@ public class WechatPluginService {
     CompletableFuture<List<String>> created = new CompletableFuture<>();
     if (!versionRefresh.compareAndSet(null, created)) {
       CompletableFuture<List<String>> winner = versionRefresh.get();
-      return winner == null ? refreshOfficialVersionsBlocking() : joinRefresh(winner);
+      return winner == null ? refreshClawManagerVersionsBlocking() : joinRefresh(winner);
     }
     try {
-      List<String> versions = loadOfficialVersions();
+      List<String> versions = loadClawManagerVersions();
       created.complete(versions);
       return versions;
     } catch (RuntimeException error) {
@@ -411,7 +411,7 @@ public class WechatPluginService {
     }
   }
 
-  private void refreshOfficialVersionsAsync() {
+  private void refreshClawManagerVersionsAsync() {
     CompletableFuture<List<String>> created = new CompletableFuture<>();
     if (!versionRefresh.compareAndSet(null, created)) {
       return;
@@ -419,9 +419,9 @@ public class WechatPluginService {
     try {
       executor.execute(() -> {
         try {
-          created.complete(loadOfficialVersions());
+          created.complete(loadClawManagerVersions());
         } catch (RuntimeException error) {
-          log.warn("微信插件官方版本后台刷新失败：{}", message(error));
+          log.warn("Claw Manager 微信插件版本后台刷新失败：{}", message(error));
           created.completeExceptionally(error);
         } finally {
           versionRefresh.compareAndSet(created, null);
@@ -434,15 +434,15 @@ public class WechatPluginService {
     }
   }
 
-  private List<String> loadOfficialVersions() {
+  private List<String> loadClawManagerVersions() {
     long startedAt = System.nanoTime();
-    List<String> versions = normalizeOfficialVersions(officialVersionSupplier.get());
+    List<String> versions = normalizeClawManagerVersions(clawManagerVersionSupplier.get());
     if (versions.isEmpty()) {
-      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取微信插件官方版本。");
+      throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取 Claw Manager 微信插件版本。");
     }
     cachedVersions.set(new CachedVersions(versions, System.currentTimeMillis() + VERSION_CACHE_TTL_MS));
     log.info(
-        "微信插件官方版本缓存已刷新：latest={}, count={}, elapsedMs={}",
+        "Claw Manager 微信插件版本缓存已刷新：latest={}, count={}, elapsedMs={}",
         versions.getFirst(),
         versions.size(),
         elapsedMs(startedAt)
@@ -450,7 +450,7 @@ public class WechatPluginService {
     return versions;
   }
 
-  private List<String> normalizeOfficialVersions(List<String> rawVersions) {
+  private List<String> normalizeClawManagerVersions(List<String> rawVersions) {
     return (rawVersions == null ? List.<String>of() : rawVersions).stream()
         .map(WechatPluginService::defaultString)
         .map(String::trim)
@@ -607,10 +607,11 @@ public class WechatPluginService {
   private String readPluginVersion(Path packagePath) {
     try {
       JsonNode json = objectMapper.readTree(packagePath.toFile());
-      if (WECHAT_PLUGIN_SPEC.equals(json.path("name").asText("")) || WECHAT_PLUGIN_ID.equals(json.path("name").asText(""))) {
+      String packageName = json.path("name").asText("");
+      if (packageName.isBlank() || WECHAT_PLUGIN_SPEC.equals(packageName) || WECHAT_PLUGIN_ID.equals(packageName)) {
         return json.path("version").asText("");
       }
-      return json.path("version").asText("");
+      return "";
     } catch (IOException error) {
       return "";
     }
@@ -691,7 +692,7 @@ public class WechatPluginService {
         .resolve("package.json");
   }
 
-  private static List<String> fetchOfficialVersionsFromNpm(ObjectMapper objectMapper) {
+  private static List<String> fetchClawManagerVersionsFromNpm(ObjectMapper objectMapper) {
     try {
       HttpClient client = HttpClient.newBuilder()
           .connectTimeout(Duration.ofSeconds(3))
@@ -712,10 +713,10 @@ public class WechatPluginService {
       versions.fieldNames().forEachRemaining(result::add);
       return result;
     } catch (IOException error) {
-      throw new IllegalStateException("读取微信插件官方版本失败：" + error.getMessage(), error);
+      throw new IllegalStateException("读取 Claw Manager 微信插件版本失败：" + error.getMessage(), error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("读取微信插件官方版本被中断。", error);
+      throw new IllegalStateException("读取 Claw Manager 微信插件版本被中断。", error);
     }
   }
 

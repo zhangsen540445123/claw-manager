@@ -2,6 +2,8 @@ package com.clawbotforall.runtime;
 
 import com.clawbotforall.config.ClawbotProperties;
 import com.clawbotforall.instance.InstanceEntity;
+import com.clawbotforall.openviking.OpenVikingEffectiveSettings;
+import com.clawbotforall.openviking.OpenVikingSettingsService;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
@@ -58,17 +60,26 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
 
   private final DockerClient dockerClient;
   private final ClawbotProperties properties;
+  private final OpenVikingSettingsService openVikingSettingsService;
   private final ScheduledExecutorService execTimeouts = Executors.newScheduledThreadPool(2);
   private volatile InspectContainerResponse appContainer;
 
   @Autowired
-  public DockerJavaOpenClawRuntime(ClawbotProperties properties) {
-    this(createDockerClient(), properties);
+  public DockerJavaOpenClawRuntime(
+      ClawbotProperties properties,
+      OpenVikingSettingsService openVikingSettingsService
+  ) {
+    this(createDockerClient(), properties, openVikingSettingsService);
   }
 
-  DockerJavaOpenClawRuntime(DockerClient dockerClient, ClawbotProperties properties) {
+  DockerJavaOpenClawRuntime(
+      DockerClient dockerClient,
+      ClawbotProperties properties,
+      OpenVikingSettingsService openVikingSettingsService
+  ) {
     this.dockerClient = dockerClient;
     this.properties = properties;
+    this.openVikingSettingsService = openVikingSettingsService;
   }
 
   private static DockerClient createDockerClient() {
@@ -115,13 +126,7 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
     var createCommand = dockerClient.createContainerCmd(properties.runtime().runnerImage())
         .withName(instance.getContainerName())
         .withExposedPorts(gatewayPort)
-        .withEnv(
-            "HOME=/var/lib/openclaw",
-            "OPENCLAW_HOME=/var/lib/openclaw",
-            "OPENCLAW_CONFIG_PATH=/var/lib/openclaw/openclaw.json",
-            "OPENCLAW_CONFIG=/var/lib/openclaw/openclaw.json",
-            "OPENCLAW_STATE_DIR=/var/lib/openclaw/.openclaw"
-        )
+        .withEnv(runnerEnv(openVikingSettingsService.effectiveSettings(), instance.getId()))
         .withHostConfig(hostConfig);
 
     String sharedNetwork = resolveSharedDockerNetwork();
@@ -584,6 +589,33 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
       log.warn("拉取 OpenClaw runner 镜像被中断：image={}", image);
       throw new IllegalStateException("拉取 OpenClaw runner 镜像被中断：" + image, error);
     }
+  }
+
+  static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId) {
+    List<String> env = new ArrayList<>(List.of(
+        "HOME=/var/lib/openclaw",
+        "OPENCLAW_HOME=/var/lib/openclaw",
+        "OPENCLAW_CONFIG_PATH=/var/lib/openclaw/openclaw.json",
+        "OPENCLAW_CONFIG=/var/lib/openclaw/openclaw.json",
+        "OPENCLAW_STATE_DIR=/var/lib/openclaw/.openclaw",
+        "OPENVIKING_TRUSTED_MODE_ENABLED=" + settings.trustedModeEnabled(),
+        "OPENVIKING_ACCOUNT_ID=" + settings.accountId(),
+        "OPENVIKING_IDENTITY_HASH_SECRET=" + settings.identityHashSecret(),
+        "CLAW_MANAGER_INTERNAL_BASE_URL=" + settings.internalBaseUrl(),
+        "OPENVIKING_BROKER_TOKEN=" + settings.brokerToken(),
+        "OPENVIKING_OPENCLAW_INSTANCE_ID=" + instanceId
+    ));
+    if (hasText(settings.baseUrl())) {
+      env.add("OPENVIKING_BASE_URL=" + settings.baseUrl());
+    }
+    if (hasText(settings.pluginPackage())) {
+      env.add("OPENVIKING_PLUGIN_PACKAGE=" + settings.pluginPackage());
+    }
+    return env;
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   private int inspectExecExitCode(String execId) {

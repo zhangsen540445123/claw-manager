@@ -157,3 +157,23 @@ CREATE TABLE IF NOT EXISTS wechat_bind_links (
   CONSTRAINT fk_wechat_bind_links_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE SET NULL,
   CONSTRAINT fk_wechat_bind_links_admin FOREIGN KEY (created_by_admin_id) REFERENCES admins(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS openviking_settings (
+  id VARCHAR(64) PRIMARY KEY,
+  base_url TEXT NULL,
+  trusted_mode_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  account_id VARCHAR(120) NOT NULL DEFAULT 'claw-manager',
+  plugin_package VARCHAR(255) NOT NULL DEFAULT 'npm:@claw-manager/openviking-openclaw-plugin@2026.6.28',
+  root_api_key TEXT NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS openviking_user_keys (
+  account_id VARCHAR(120) NOT NULL,
+  openviking_user_id VARCHAR(128) NOT NULL,
+  user_key TEXT NOT NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  PRIMARY KEY (account_id, openviking_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -6,6 +6,9 @@ import type {
   ModelPresetSyncResult,
   ModelPresetUsage,
   ModelProviderDefinition,
+  PublicOpenVikingPluginStatus,
+  PublicOpenVikingPluginVersions,
+  PublicOpenVikingSettings,
   PublicInstance,
   PublicInstanceModelAuth,
   PublicInstanceProvisioning,
@@ -56,6 +59,11 @@ interface WechatPluginBatchItem {
   plugin: PublicWechatPluginStatus;
 }
 
+interface OpenVikingPluginBatchItem {
+  instanceId: string;
+  plugin: PublicOpenVikingPluginStatus;
+}
+
 export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
@@ -66,6 +74,9 @@ export const useAdminStore = defineStore("admin", {
     statsByInstanceId: {} as Record<string, InstanceStats | null>,
     wechatPluginStatusByInstanceId: {} as Record<string, PublicWechatPluginStatus>,
     wechatPluginVersions: { latest: "", versions: [] } as PublicWechatPluginVersions,
+    openVikingSettings: null as PublicOpenVikingSettings | null,
+    openVikingPluginStatusByInstanceId: {} as Record<string, PublicOpenVikingPluginStatus>,
+    openVikingPluginVersions: { latest: "", versions: [] } as PublicOpenVikingPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
@@ -206,6 +217,129 @@ export const useAdminStore = defineStore("admin", {
       this.wechatPluginVersions = response.versions;
       this.applyWechatPluginVersions(response.versions);
       return response.versions;
+    },
+    async loadOpenVikingSettings() {
+      const response = await api<{ settings: PublicOpenVikingSettings }>("/api/admin/openviking-settings");
+      this.openVikingSettings = response.settings;
+      return response.settings;
+    },
+    async saveOpenVikingSettings(payload: {
+      baseUrl: string;
+      trustedModeEnabled: boolean;
+      accountId: string;
+      pluginPackage: string;
+      rootApiKey?: string;
+      clearRootApiKey?: boolean;
+    }) {
+      const response = await api<{ settings: PublicOpenVikingSettings }>("/api/admin/openviking-settings", {
+        method: "PUT",
+        ...jsonBody(payload)
+      });
+      this.openVikingSettings = response.settings;
+      return response.settings;
+    },
+    async loadOpenVikingPluginStatus(instanceId: string, checkLatest = false) {
+      const response = await api<{ plugin: PublicOpenVikingPluginStatus }>(
+        `/api/admin/instances/${instanceId}/openviking-plugin?checkLatest=${checkLatest ? "true" : "false"}`
+      );
+      this.openVikingPluginStatusByInstanceId = {
+        ...this.openVikingPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.openVikingPluginVersions)
+      };
+      return this.openVikingPluginStatusByInstanceId[instanceId];
+    },
+    async loadOpenVikingPluginVersions() {
+      const response = await api<{ versions: PublicOpenVikingPluginVersions }>("/api/admin/openviking-plugins/versions");
+      this.openVikingPluginVersions = response.versions;
+      this.applyOpenVikingPluginVersions(response.versions);
+      return response.versions;
+    },
+    async installOpenVikingPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicOpenVikingPluginStatus }>(
+        `/api/admin/instances/${instanceId}/openviking-plugin/install`,
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
+      );
+      this.openVikingPluginStatusByInstanceId = {
+        ...this.openVikingPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.openVikingPluginVersions)
+      };
+      return this.openVikingPluginStatusByInstanceId[instanceId];
+    },
+    async uninstallOpenVikingPlugin(instanceId: string) {
+      const response = await api<{ plugin: PublicOpenVikingPluginStatus }>(
+        `/api/admin/instances/${instanceId}/openviking-plugin/uninstall`,
+        { method: "POST" }
+      );
+      this.openVikingPluginStatusByInstanceId = {
+        ...this.openVikingPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.openVikingPluginVersions)
+      };
+      return this.openVikingPluginStatusByInstanceId[instanceId];
+    },
+    async upgradeOpenVikingPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicOpenVikingPluginStatus }>(
+        `/api/admin/instances/${instanceId}/openviking-plugin/upgrade`,
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
+      );
+      this.openVikingPluginStatusByInstanceId = {
+        ...this.openVikingPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.openVikingPluginVersions)
+      };
+      return this.openVikingPluginStatusByInstanceId[instanceId];
+    },
+    async reinstallOpenVikingPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicOpenVikingPluginStatus }>(
+        `/api/admin/instances/${instanceId}/openviking-plugin/reinstall`,
+        {
+          method: "POST",
+          ...jsonBody({ version })
+        }
+      );
+      this.openVikingPluginStatusByInstanceId = {
+        ...this.openVikingPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.openVikingPluginVersions)
+      };
+      return this.openVikingPluginStatusByInstanceId[instanceId];
+    },
+    async batchCheckOpenVikingPlugins(instanceIds: string[]) {
+      return this.batchOpenVikingPlugins("check", instanceIds);
+    },
+    async batchInstallOpenVikingPlugins(instanceIds: string[], version = "") {
+      return this.batchOpenVikingPlugins("install", instanceIds, version);
+    },
+    async batchUninstallOpenVikingPlugins(instanceIds: string[]) {
+      return this.batchOpenVikingPlugins("uninstall", instanceIds);
+    },
+    async batchUpgradeOpenVikingPlugins(instanceIds: string[], version = "") {
+      return this.batchOpenVikingPlugins("upgrade", instanceIds, version);
+    },
+    async batchReinstallOpenVikingPlugins(instanceIds: string[], version = "") {
+      return this.batchOpenVikingPlugins("reinstall", instanceIds, version);
+    },
+    async batchOpenVikingPlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
+      const response = await api<{ plugins: OpenVikingPluginBatchItem[] }>(`/api/admin/openviking-plugins/${action}`, {
+        method: "POST",
+        ...jsonBody({ instanceIds, version })
+      });
+      const next = { ...this.openVikingPluginStatusByInstanceId };
+      for (const item of response.plugins) {
+        next[item.instanceId] = withPluginVersion(item.plugin, this.openVikingPluginVersions);
+      }
+      this.openVikingPluginStatusByInstanceId = next;
+      return response.plugins;
+    },
+    applyOpenVikingPluginVersions(versions: PublicOpenVikingPluginVersions) {
+      const next = { ...this.openVikingPluginStatusByInstanceId };
+      for (const [instanceId, plugin] of Object.entries(next)) {
+        next[instanceId] = withPluginVersion(plugin, versions);
+      }
+      this.openVikingPluginStatusByInstanceId = next;
     },
     async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
@@ -381,6 +515,13 @@ export const useAdminStore = defineStore("admin", {
           [payload.instanceId]: withWechatPluginVersion(payload.plugin, this.wechatPluginVersions)
         };
       }
+      if (event.type === "openviking.plugin.updated") {
+        const payload = event.payload as { instanceId: string; plugin: PublicOpenVikingPluginStatus };
+        this.openVikingPluginStatusByInstanceId = {
+          ...this.openVikingPluginStatusByInstanceId,
+          [payload.instanceId]: withPluginVersion(payload.plugin, this.openVikingPluginVersions)
+        };
+      }
       if (event.type === "wechat.bindLink.updated") {
         const payload = event.payload as { token: string; link: PublicWechatBindLink };
         this.wechatBindLinkByToken = {
@@ -417,6 +558,13 @@ function withWechatPluginVersion(
   plugin: PublicWechatPluginStatus,
   versions: PublicWechatPluginVersions
 ): PublicWechatPluginStatus {
+  return withPluginVersion(plugin, versions);
+}
+
+function withPluginVersion<T extends PublicWechatPluginStatus>(
+  plugin: T,
+  versions: PublicWechatPluginVersions
+): T {
   if (!plugin.installed || !plugin.currentVersion || !versions.latest) {
     return plugin;
   }

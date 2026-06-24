@@ -1,0 +1,139 @@
+@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+
+cd /d "%~dp0"
+
+call :load_env_if_missing WEB_HOST_PORT
+call :load_env_if_missing ADMIN_EMAIL
+call :load_env_if_missing ADMIN_PASSWORD
+call :load_env_if_missing OPENCLAW_RUNNER_IMAGE
+
+if not defined WEB_HOST_PORT set "WEB_HOST_PORT=4300"
+if not defined ADMIN_EMAIL set "ADMIN_EMAIL=admin@example.com"
+if not defined ADMIN_PASSWORD set "ADMIN_PASSWORD=ChangeMe123!"
+if not defined OPENCLAW_RUNNER_IMAGE set "OPENCLAW_RUNNER_IMAGE=ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest"
+
+set "COMPOSE=docker compose -f compose.yaml"
+if exist "compose.local.yaml" set "COMPOSE=docker compose -f compose.yaml -f compose.local.yaml"
+
+echo ========================================
+echo  Claw Manager full reset
+echo ========================================
+echo.
+echo This will stop project containers, delete Docker volumes, delete .\data,
+echo rebuild runner/API/Web images, then start services.
+
+call :check_docker || goto fail
+
+echo.
+echo [Step 1/6] Stopping compose services and deleting volumes...
+%COMPOSE% down -v
+if errorlevel 1 goto fail
+
+echo.
+echo [Step 2/6] Removing OpenClaw instance containers...
+call :remove_openclaw_containers || goto fail
+
+echo.
+echo [Step 3/6] Deleting local data directory...
+call :delete_data_dir || goto fail
+
+echo.
+echo [Step 4/6] Building OpenClaw runner image...
+call :build_runner_image || goto fail
+
+echo.
+echo [Step 5/6] Building API/Web images...
+%COMPOSE% build api web
+if errorlevel 1 goto fail
+
+echo.
+echo [Step 6/6] Starting services...
+%COMPOSE% up -d
+if errorlevel 1 goto fail
+
+call :print_summary
+call :pause_exit
+exit /b 0
+
+:remove_openclaw_containers
+for /f "usebackq delims=" %%I in (`docker ps -aq --filter "name=clawbot-openclaw"`) do (
+  echo   Removing %%I
+  docker rm -f %%I >nul
+  if errorlevel 1 exit /b 1
+)
+for /f "usebackq delims=" %%I in (`docker ps -aq --filter "name=claw-manager-openclaw"`) do (
+  echo   Removing %%I
+  docker rm -f %%I >nul
+  if errorlevel 1 exit /b 1
+)
+echo [OK] OpenClaw instance container cleanup finished.
+exit /b 0
+
+:delete_data_dir
+if exist "data\" (
+  echo [INFO] Deleting %CD%\data
+  rmdir /s /q "data"
+  if exist "data\" (
+    echo [ERROR] Failed to delete .\data.
+    exit /b 1
+  )
+  echo [OK] Local data directory deleted.
+) else (
+  echo [INFO] Local data directory does not exist.
+)
+exit /b 0
+
+:build_runner_image
+echo [INFO] Runner image tag: %OPENCLAW_RUNNER_IMAGE%
+docker build -f containers/openclaw-runner/Dockerfile -t "%OPENCLAW_RUNNER_IMAGE%" .
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:check_docker
+docker compose version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Docker Compose is not available. Start Docker Desktop and try again.
+  exit /b 1
+)
+exit /b 0
+
+:print_summary
+echo.
+echo ========================================
+echo  Done
+echo ========================================
+echo.
+echo Admin URL:
+echo   http://127.0.0.1:%WEB_HOST_PORT%
+echo.
+echo Admin login defaults:
+echo   Email:    %ADMIN_EMAIL%
+echo   Password: %ADMIN_PASSWORD%
+echo.
+echo Note:
+echo   Values above come from .env or compose defaults.
+echo.
+exit /b 0
+
+:fail
+echo.
+echo [ERROR] Script failed.
+call :pause_exit
+exit /b 1
+
+:pause_exit
+echo.
+echo Press any key to exit...
+pause >nul
+exit /b 0
+
+:load_env_if_missing
+set "ENV_KEY=%~1"
+call set "ENV_CURRENT=%%%ENV_KEY%%%"
+if defined ENV_CURRENT exit /b 0
+if not exist ".env" exit /b 0
+for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+  if /I "%%A"=="%ENV_KEY%" set "%ENV_KEY%=%%B"
+)
+exit /b 0

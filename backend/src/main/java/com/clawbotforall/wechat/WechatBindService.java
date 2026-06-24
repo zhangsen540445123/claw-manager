@@ -355,7 +355,7 @@ public class WechatBindService {
               projectsDir,
               project,
               "node_modules",
-              "@tencent-weixin",
+              "@claw-manager",
               "openclaw-weixin",
               relativePath
             );

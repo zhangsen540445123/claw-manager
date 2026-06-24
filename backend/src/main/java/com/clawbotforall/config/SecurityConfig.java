@@ -43,6 +43,7 @@ public class SecurityConfig {
                 "/api/health",
                 "/api/session",
                 "/api/login",
+                "/api/internal/openviking/**",
                 "/api/public/wechat-bind-links/**",
                 "/actuator/health",
                 "/v3/api-docs/**",

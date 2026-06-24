@@ -103,6 +103,37 @@ class ApplicationIntegrationTest {
     assertThat(jdbcTemplate.queryForObject(
         """
             SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'openviking_settings'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'openviking_settings'
+              AND column_name = 'root_api_key'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'openviking_user_keys'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
             FROM (
               SELECT index_name
               FROM information_schema.statistics

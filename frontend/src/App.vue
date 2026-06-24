@@ -30,6 +30,7 @@ const adminRoutePaths = {
   presets: "/admin/model-presets",
   create: "/admin/instances/new",
   instances: "/admin/instances",
+  openVikingSettings: "/admin/openviking-settings",
   wechat: "/admin/wechat-links",
   wechatPlugins: "/admin/wechat-plugins",
   wechatUsers: "/admin/wechat-users",
@@ -100,7 +101,7 @@ async function logout() {
 }
 
 async function navigate(
-  routeName: "overview" | "presets" | "create" | "instances" | "wechat" | "wechatPlugins" | "wechatUsers" | "ops" | "account"
+  routeName: "overview" | "presets" | "create" | "instances" | "openVikingSettings" | "wechat" | "wechatPlugins" | "wechatUsers" | "ops" | "account"
 ) {
   if (routeName === "account") {
     void router.push("/change-password");

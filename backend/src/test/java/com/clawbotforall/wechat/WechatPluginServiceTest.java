@@ -75,7 +75,7 @@ class WechatPluginServiceTest {
         eventPublisher,
         new ObjectMapper(),
         executor,
-        () -> List.of("2.6.0", "2.5.0", "2.4.4", "2.3.0", "2.2.0", "2.1.0")
+        () -> List.of("2026.6.26", "2026.6.25", "2026.6.24", "2026.6.23", "2026.6.22", "2026.6.21")
     );
   }
 
@@ -92,7 +92,7 @@ class WechatPluginServiceTest {
           List<String> command = invocation.getArgument(1);
           commands.add(command);
           RuntimeExecListener listener = invocation.getArgument(4);
-          writeInstalledPluginVersion(paths, "2.6.0");
+          writeInstalledPluginVersion(paths, "2026.6.26");
           listener.onComplete(0);
           return execHandle;
         });
@@ -112,12 +112,12 @@ class WechatPluginServiceTest {
             "openclaw",
             "plugins",
             "install",
-            "npm:@tencent-weixin/openclaw-weixin",
+            "npm:@claw-manager/openclaw-weixin",
             "--force"
         )
     );
     assertThat(status.installed()).isTrue();
-    assertThat(status.currentVersion()).isEqualTo("2.6.0");
+    assertThat(status.currentVersion()).isEqualTo("2026.6.26");
     verify(mutationMapper).updateInstancePlugins(
         eq("inst_1"),
         eq("[\"openclaw-weixin\"]"),
@@ -129,7 +129,7 @@ class WechatPluginServiceTest {
   }
 
   @Test
-  void startInstallUsesSelectedOfficialVersion() throws Exception {
+  void startInstallUsesSelectedClawManagerVersion() throws Exception {
     InstanceEntity instance = instance();
     InstancePaths paths = emptyPluginPaths();
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
@@ -141,12 +141,12 @@ class WechatPluginServiceTest {
           List<String> command = invocation.getArgument(1);
           commands.add(command);
           RuntimeExecListener listener = invocation.getArgument(4);
-          writeInstalledPluginVersion(paths, "2.4.4");
+          writeInstalledPluginVersion(paths, "2026.6.23");
           listener.onComplete(0);
           return execHandle;
         });
 
-    PublicWechatPluginStatus started = service.startInstall(instance, "2.4.4");
+    PublicWechatPluginStatus started = service.startInstall(instance, "2026.6.23");
 
     assertThat(started.status()).isEqualTo("installing");
     executor.runNext();
@@ -156,23 +156,23 @@ class WechatPluginServiceTest {
             "openclaw",
             "plugins",
             "install",
-            "npm:@tencent-weixin/openclaw-weixin@2.4.4",
+            "npm:@claw-manager/openclaw-weixin@2026.6.23",
             "--force"
         )
     );
-    assertThat(service.status(instance, false).currentVersion()).isEqualTo("2.4.4");
+    assertThat(service.status(instance, false).currentVersion()).isEqualTo("2026.6.23");
   }
 
   @Test
-  void pluginVersionsExposeLatestAndRecentFiveOfficialVersions() {
+  void pluginVersionsExposeLatestAndRecentFiveClawManagerVersions() {
     WechatPluginVersions versions = service.versions();
 
-    assertThat(versions.latest()).isEqualTo("2.6.0");
-    assertThat(versions.versions()).containsExactly("2.6.0", "2.5.0", "2.4.4", "2.3.0", "2.2.0");
+    assertThat(versions.latest()).isEqualTo("2026.6.26");
+    assertThat(versions.versions()).containsExactly("2026.6.26", "2026.6.25", "2026.6.24", "2026.6.23", "2026.6.22");
   }
 
   @Test
-  void pluginVersionsReturnEmptyWhenOfficialRegistryIsUnavailableWithoutCache() {
+  void pluginVersionsReturnEmptyWhenClawManagerRegistryIsUnavailableWithoutCache() {
     service = new WechatPluginService(
         openClawRuntime,
         commandService,
@@ -205,17 +205,17 @@ class WechatPluginServiceTest {
         executor,
         () -> {
           calls.incrementAndGet();
-          return List.of("2.6.0", "2.5.0", "2.4.4");
+          return List.of("2026.6.26", "2026.6.25", "2026.6.24");
         }
     );
     InstanceEntity instance = instance();
-    installedPluginPaths("2.5.0");
+    installedPluginPaths("2026.6.24");
 
-    assertThat(service.versions().latest()).isEqualTo("2.6.0");
+    assertThat(service.versions().latest()).isEqualTo("2026.6.26");
     PublicWechatPluginStatus status = service.status(instance, true);
 
     assertThat(calls).hasValue(1);
-    assertThat(status.latestVersion()).isEqualTo("2.6.0");
+    assertThat(status.latestVersion()).isEqualTo("2026.6.26");
     assertThat(status.upgradable()).isTrue();
   }
 
@@ -224,12 +224,25 @@ class WechatPluginServiceTest {
     InstanceEntity instance = instance();
     InstancePaths paths = emptyPluginPaths();
     writeProjectPackage(paths, "aaa-unrelated-project", "9.9.9");
-    writeProjectPackage(paths, "tencent-weixin-openclaw-weixin-7783ac86ba", "2.4.4");
+    writeProjectPackage(paths, "claw-manager-openclaw-weixin-7783ac86ba", "2026.6.23");
     when(fileService.paths("inst_1")).thenReturn(paths);
 
     PublicWechatPluginStatus status = service.status(instance, false);
 
-    assertThat(status.currentVersion()).isEqualTo("2.4.4");
+    assertThat(status.currentVersion()).isEqualTo("2026.6.23");
+  }
+
+  @Test
+  void statusIgnoresLegacyOfficialWechatPluginProjectDirectory() throws Exception {
+    InstanceEntity instance = instance();
+    InstancePaths paths = emptyPluginPaths();
+    writeLegacyOfficialProjectPackage(paths, "tencent-weixin-openclaw-weixin-7783ac86ba", "2.4.6");
+    when(fileService.paths("inst_1")).thenReturn(paths);
+
+    PublicWechatPluginStatus status = service.status(instance, false);
+
+    assertThat(status.installed()).isFalse();
+    assertThat(status.currentVersion()).isBlank();
   }
 
   @Test
@@ -251,7 +264,7 @@ class WechatPluginServiceTest {
     InstanceEntity instance = instance();
     instance.setPluginsAllow("[\"openclaw-weixin\",\"other-plugin\"]");
     instance.setPluginsEntries("{\"openclaw-weixin\":{\"enabled\":true},\"other-plugin\":{\"enabled\":true}}");
-    InstancePaths paths = installedPluginPaths("2.5.0");
+    InstancePaths paths = installedPluginPaths("2026.6.24");
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
     when(fileService.paths("inst_1")).thenReturn(paths);
     when(commandService.listModels("inst_1")).thenReturn(List.of());
@@ -284,7 +297,7 @@ class WechatPluginServiceTest {
   @Test
   void startUpgradeRunsOpenClawPluginUpdateInBackground() throws Exception {
     InstanceEntity instance = instance();
-    InstancePaths paths = installedPluginPaths("2.5.0");
+    InstancePaths paths = installedPluginPaths("2026.6.24");
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
     when(fileService.paths("inst_1")).thenReturn(paths);
     when(commandService.listModels("inst_1")).thenReturn(List.of());
@@ -294,7 +307,7 @@ class WechatPluginServiceTest {
           List<String> command = invocation.getArgument(1);
           commands.add(command);
           RuntimeExecListener listener = invocation.getArgument(4);
-          writeInstalledPluginVersion(paths, "2.6.0");
+          writeInstalledPluginVersion(paths, "2026.6.26");
           listener.onComplete(0);
           return execHandle;
         });
@@ -309,7 +322,7 @@ class WechatPluginServiceTest {
             "openclaw",
             "plugins",
             "install",
-            "npm:@tencent-weixin/openclaw-weixin@2.6.0",
+            "npm:@claw-manager/openclaw-weixin@2026.6.26",
             "--force"
         )
     );
@@ -325,12 +338,12 @@ class WechatPluginServiceTest {
   @Test
   void startUpgradeRejectsSameOrLowerVersion() throws Exception {
     InstanceEntity instance = instance();
-    installedPluginPaths("2.5.0");
+    installedPluginPaths("2026.6.24");
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
 
-    assertThatThrownBy(() -> service.startUpgrade(instance, "2.5.0"))
+    assertThatThrownBy(() -> service.startUpgrade(instance, "2026.6.24"))
         .hasMessageContaining("目标版本必须高于当前版本");
-    assertThatThrownBy(() -> service.startUpgrade(instance, "2.4.4"))
+    assertThatThrownBy(() -> service.startUpgrade(instance, "2026.6.23"))
         .hasMessageContaining("目标版本必须高于当前版本");
     assertThat(commands).isEmpty();
   }
@@ -340,7 +353,7 @@ class WechatPluginServiceTest {
     InstanceEntity instance = instance();
     instance.setPluginsAllow("[\"openclaw-weixin\"]");
     instance.setPluginsEntries("{\"openclaw-weixin\":{\"enabled\":true}}");
-    InstancePaths paths = installedPluginPaths("2.5.0");
+    InstancePaths paths = installedPluginPaths("2026.6.24");
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
     when(commandService.listModels("inst_1")).thenReturn(List.of());
     when(openClawRuntime.startExec(eq(instance), any(List.class), anyLong(), anyMap(), any(RuntimeExecListener.class)))
@@ -349,7 +362,7 @@ class WechatPluginServiceTest {
           List<String> command = invocation.getArgument(1);
           commands.add(command);
           RuntimeExecListener listener = invocation.getArgument(4);
-          writeInstalledPluginVersion(paths, "2.5.0");
+          writeInstalledPluginVersion(paths, "2026.6.24");
           listener.onComplete(0);
           return execHandle;
         });
@@ -364,7 +377,7 @@ class WechatPluginServiceTest {
             "openclaw",
             "plugins",
             "install",
-            "npm:@tencent-weixin/openclaw-weixin@2.5.0",
+            "npm:@claw-manager/openclaw-weixin@2026.6.24",
             "--force"
         )
     );
@@ -414,10 +427,25 @@ class WechatPluginServiceTest {
   }
 
   private void writeInstalledPluginVersion(InstancePaths paths, String version) throws Exception {
-    writeProjectPackage(paths, "tencent-weixin-openclaw-weixin", version);
+    writeProjectPackage(paths, "claw-manager-openclaw-weixin", version);
   }
 
   private void writeProjectPackage(InstancePaths paths, String projectName, String version) throws Exception {
+    Files.createDirectories(
+        paths.homeDir().resolve(".openclaw").resolve("npm").resolve("projects").resolve(projectName)
+    );
+    Files.writeString(
+        paths.homeDir()
+            .resolve(".openclaw")
+            .resolve("npm")
+            .resolve("projects")
+            .resolve(projectName)
+            .resolve("package.json"),
+        "{\"private\":true,\"dependencies\":{\"@claw-manager/openclaw-weixin\":\"" + version + "\"}}"
+    );
+  }
+
+  private void writeLegacyOfficialProjectPackage(InstancePaths paths, String projectName, String version) throws Exception {
     Files.createDirectories(
         paths.homeDir().resolve(".openclaw").resolve("npm").resolve("projects").resolve(projectName)
     );

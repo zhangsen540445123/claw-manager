@@ -177,6 +177,23 @@ export interface PublicWechatPluginVersions {
   versions: string[];
 }
 
+export type PublicOpenVikingPluginStatus = PublicWechatPluginStatus;
+
+export type PublicOpenVikingPluginVersions = PublicWechatPluginVersions;
+
+export interface PublicOpenVikingSettings {
+  baseUrl: string;
+  trustedModeEnabled: boolean;
+  accountId: string;
+  pluginPackage: string;
+  rootApiKeyConfigured: boolean;
+  rootApiKeyFingerprint: string;
+  identitySecretConfigured: boolean;
+  identitySecretSource: string;
+  identitySecretFingerprint: string;
+  updatedAt?: string | null;
+}
+
 export interface WechatBindLinkPage {
   links: PublicWechatBindLink[];
   total: number;

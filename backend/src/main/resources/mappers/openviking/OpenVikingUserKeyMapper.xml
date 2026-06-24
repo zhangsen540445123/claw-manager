@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.openviking.OpenVikingUserKeyMapper">
+  <resultMap id="OpenVikingUserKeyMap" type="com.clawbotforall.openviking.OpenVikingUserKeyEntity">
+    <id property="accountId" column="account_id"/>
+    <id property="openvikingUserId" column="openviking_user_id"/>
+    <result property="userKey" column="user_key"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="find" resultMap="OpenVikingUserKeyMap">
+    SELECT *
+    FROM openviking_user_keys
+    WHERE account_id = #{accountId}
+      AND openviking_user_id = #{openvikingUserId}
+    LIMIT 1
+  </select>
+
+  <insert id="upsert" parameterType="com.clawbotforall.openviking.OpenVikingUserKeyEntity">
+    INSERT INTO openviking_user_keys
+      (account_id, openviking_user_id, user_key, created_at, updated_at)
+    VALUES
+      (#{accountId}, #{openvikingUserId}, #{userKey}, #{createdAt}, #{updatedAt})
+    ON DUPLICATE KEY UPDATE
+      user_key = VALUES(user_key),
+      updated_at = VALUES(updated_at)
+  </insert>
+</mapper>

@@ -3,6 +3,7 @@ import AdminOverviewView from "./views/admin/AdminOverviewView.vue";
 import InstanceCreateView from "./views/admin/InstanceCreateView.vue";
 import InstancesView from "./views/admin/InstancesView.vue";
 import ModelPresetsView from "./views/admin/ModelPresetsView.vue";
+import OpenVikingSettingsView from "./views/admin/OpenVikingSettingsView.vue";
 import OpsView from "./views/admin/OpsView.vue";
 import WechatLinksView from "./views/admin/WechatLinksView.vue";
 import WechatPluginsView from "./views/admin/WechatPluginsView.vue";
@@ -20,6 +21,7 @@ export const router = createRouter({
     { path: "/admin/model-presets", name: "admin-model-presets", component: ModelPresetsView, meta: { shellKey: "presets", title: "模型预设" } },
     { path: "/admin/instances/new", name: "admin-instance-new", component: InstanceCreateView, meta: { shellKey: "create", title: "创建实例" } },
     { path: "/admin/instances", name: "admin-instances", component: InstancesView, meta: { shellKey: "instances", title: "实例管理" } },
+    { path: "/admin/openviking-settings", name: "admin-openviking-settings", component: OpenVikingSettingsView, meta: { shellKey: "openVikingSettings", title: "OpenViking 配置" } },
     { path: "/admin/wechat-plugins", name: "admin-wechat-plugins", component: WechatPluginsView, meta: { shellKey: "wechatPlugins", title: "插件管理" } },
     { path: "/admin/wechat-links", name: "admin-wechat-links", component: WechatLinksView, meta: { shellKey: "wechat", title: "微信扫码" } },
     { path: "/admin/wechat-users", name: "admin-wechat-users", component: WechatUsersView, meta: { shellKey: "wechatUsers", title: "用户中心" } },

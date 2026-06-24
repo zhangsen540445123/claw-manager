@@ -152,6 +152,28 @@ class InstanceFileServiceTest {
         .containsEntry("replyProgressMessages", true);
   }
 
+  @Test
+  void enablesOpenVikingContextEngineSlotWhenPluginIsAllowedOnInstance() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    draft.instance().setPluginsAllow("[\"openviking\"]");
+    draft.instance().setPluginsEntries("{\"openviking\":{\"enabled\":true}}");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    @SuppressWarnings("unchecked")
+    Map<String, Object> plugins = (Map<String, Object>) config.get("plugins");
+    assertThat(plugins.get("slots"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("contextEngine", "openviking");
+  }
+
   private ClawbotProperties testProperties() {
     return new ClawbotProperties(
         new ClawbotProperties.Paths(tempDir.toString()),

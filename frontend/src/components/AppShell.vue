@@ -4,6 +4,7 @@ import {
   Boxes,
   ChevronsLeft,
   ChevronsRight,
+  Database,
   PackageCheck,
   PlusSquare,
   QrCode,
@@ -21,6 +22,7 @@ type ShellNavKey =
   | "presets"
   | "create"
   | "instances"
+  | "openVikingSettings"
   | "wechat"
   | "wechatPlugins"
   | "wechatUsers"
@@ -47,6 +49,7 @@ const navItems = computed(() => {
     { key: "presets" as const, label: "模型预设", icon: SlidersHorizontal },
     { key: "create" as const, label: "创建实例", icon: PlusSquare },
     { key: "instances" as const, label: "实例管理", icon: Boxes },
+    { key: "openVikingSettings" as const, label: "OpenViking", icon: Database },
     { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
     { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "wechatUsers" as const, label: "用户中心", icon: UsersRound },
@@ -59,6 +62,7 @@ const routeTitles: Record<string, string> = {
   presets: "模型预设",
   create: "创建实例",
   instances: "实例管理",
+  openVikingSettings: "OpenViking 配置",
   wechat: "扫码链接",
   wechatPlugins: "插件管理",
   wechatUsers: "用户中心",

@@ -2,6 +2,7 @@ package com.clawbotforall.config;
 
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * 绑定应用配置命名空间下的后端配置属性。
@@ -13,6 +14,7 @@ public record ClawbotProperties(
     Security security,
     Runtime runtime
 ) {
+  @ConstructorBinding
   public ClawbotProperties {
     if (paths == null) {
       paths = new Paths("data");

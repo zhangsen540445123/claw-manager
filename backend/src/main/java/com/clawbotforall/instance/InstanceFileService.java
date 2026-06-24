@@ -27,6 +27,7 @@ public class InstanceFileService {
 
   private static final int GATEWAY_PORT = 18789;
   private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
+  private static final String OPENVIKING_PLUGIN_ID = "openviking";
   private static final String CONTROL_UI_ROOT = "/usr/local/lib/node_modules/openclaw/dist/control-ui";
 
   private final ClawbotProperties properties;
@@ -272,6 +273,9 @@ public class InstanceFileService {
     Map<String, Object> plugins = new LinkedHashMap<>();
     plugins.put("allow", allow);
     plugins.put("entries", entries);
+    if (allow.contains(OPENVIKING_PLUGIN_ID)) {
+      plugins.put("slots", Map.of("contextEngine", OPENVIKING_PLUGIN_ID));
+    }
     return plugins;
   }
 

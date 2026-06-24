@@ -1,6 +1,7 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.runtime.InstanceStats;
+import com.clawbotforall.openviking.PublicOpenVikingPluginStatus;
 import com.clawbotforall.wechat.PublicWechatBindLink;
 import com.clawbotforall.wechat.PublicWechatPluginStatus;
 import com.clawbotforall.ws.AppEvent;
@@ -73,6 +74,13 @@ public class InstanceEventPublisher {
     payload.put("instanceId", instanceId);
     payload.put("plugin", plugin);
     appEventPublisher.sendToTopic(ADMIN_WECHAT_TOPIC, AppEvent.of("wechat.plugin.updated", traceId(), payload));
+  }
+
+  public void publishOpenVikingPluginUpdated(String instanceId, PublicOpenVikingPluginStatus plugin) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("instanceId", instanceId);
+    payload.put("plugin", plugin);
+    appEventPublisher.sendToTopic(ADMIN_WECHAT_TOPIC, AppEvent.of("openviking.plugin.updated", traceId(), payload));
   }
 
   public void publishWechatBindLinkUpdated(String token, PublicWechatBindLink link) {
