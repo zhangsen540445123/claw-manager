@@ -100,4 +100,4 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 - `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` 需要包含实际外层 Web 来源；默认覆盖 `4300` 和并行调试用 `14300`。
 - 真实实例验证曾确认 `/proxy/{instanceId}/` 可返回 OpenClaw Control UI HTML，静态 JS 资源可通过代理下载，WebSocket 代理可收到 Gateway `connect.challenge`。
 
-更完整的迁移记录见 `docs/refactor-memory.md`。
+更完整的迁移记录见 `docs/history/refactor-memory.md`。
