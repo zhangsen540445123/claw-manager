@@ -5,6 +5,7 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceEventPublisher;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceMutationMapper;
+import com.clawbotforall.plugin.PluginOperationCoordinator;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecHandle;
@@ -72,6 +73,7 @@ public class WechatPluginService {
   private final InstanceMutationMapper mutationMapper;
   private final InstanceEventPublisher eventPublisher;
   private final ObjectMapper objectMapper;
+  private final PluginOperationCoordinator operationCoordinator;
   private final Executor executor;
   private final Supplier<List<String>> clawManagerVersionSupplier;
   private final ConcurrentMap<String, PublicWechatPluginStatus> taskStatuses = new ConcurrentHashMap<>();
@@ -86,7 +88,8 @@ public class WechatPluginService {
       InstanceFileService fileService,
       InstanceMutationMapper mutationMapper,
       InstanceEventPublisher eventPublisher,
-      ObjectMapper objectMapper
+      ObjectMapper objectMapper,
+      PluginOperationCoordinator operationCoordinator
   ) {
     this(
         openClawRuntime,
@@ -96,7 +99,8 @@ public class WechatPluginService {
         eventPublisher,
         objectMapper,
         defaultExecutor(),
-        () -> fetchClawManagerVersionsFromNpm(objectMapper)
+        () -> fetchClawManagerVersionsFromNpm(objectMapper),
+        operationCoordinator
     );
   }
 
@@ -110,12 +114,37 @@ public class WechatPluginService {
       Executor executor,
       Supplier<List<String>> clawManagerVersionSupplier
   ) {
+    this(
+        openClawRuntime,
+        commandService,
+        fileService,
+        mutationMapper,
+        eventPublisher,
+        objectMapper,
+        executor,
+        clawManagerVersionSupplier,
+        new PluginOperationCoordinator()
+    );
+  }
+
+  WechatPluginService(
+      OpenClawRuntime openClawRuntime,
+      InstanceCommandService commandService,
+      InstanceFileService fileService,
+      InstanceMutationMapper mutationMapper,
+      InstanceEventPublisher eventPublisher,
+      ObjectMapper objectMapper,
+      Executor executor,
+      Supplier<List<String>> clawManagerVersionSupplier,
+      PluginOperationCoordinator operationCoordinator
+  ) {
     this.openClawRuntime = openClawRuntime;
     this.commandService = commandService;
     this.fileService = fileService;
     this.mutationMapper = mutationMapper;
     this.eventPublisher = eventPublisher;
     this.objectMapper = objectMapper;
+    this.operationCoordinator = operationCoordinator;
     this.executor = executor;
     this.clawManagerVersionSupplier = clawManagerVersionSupplier;
   }
@@ -184,6 +213,7 @@ public class WechatPluginService {
     if (running != null) {
       return running;
     }
+    requireNoOtherPluginTask(instance);
     if (isWechatPluginInstalled(instance)) {
       throw new ApiException(HttpStatus.CONFLICT, "微信插件已安装，请使用重新安装或升级。");
     }
@@ -217,6 +247,7 @@ public class WechatPluginService {
     if (running != null) {
       return running;
     }
+    requireNoOtherPluginTask(instance);
     if (!isWechatPluginInstalled(instance)) {
       PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无需卸载。");
       taskStatuses.put(instance.getId(), missing);
@@ -255,6 +286,7 @@ public class WechatPluginService {
     if (running != null) {
       return running;
     }
+    requireNoOtherPluginTask(instance);
     String currentVersion = currentVersion(instance);
     if (currentVersion.isBlank()) {
       PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无法升级。");
@@ -292,6 +324,7 @@ public class WechatPluginService {
     if (running != null) {
       return running;
     }
+    requireNoOtherPluginTask(instance);
     String currentVersion = currentVersion(instance);
     if (currentVersion.isBlank()) {
       PublicWechatPluginStatus missing = missingStatus("微信插件尚未安装，无法重新安装。");
@@ -503,6 +536,13 @@ public class WechatPluginService {
     return existing == null ? runningStatus(fallbackStatus, "", fallbackMessage) : existing;
   }
 
+  private void requireNoOtherPluginTask(InstanceEntity instance) {
+    String owner = operationCoordinator.currentOwner(instance.getId());
+    if (!owner.isBlank() && !"微信插件".equals(owner)) {
+      throw new ApiException(HttpStatus.CONFLICT, owner + "正在执行，请等待当前插件任务完成后再操作。");
+    }
+  }
+
   private PublicWechatPluginStatus startTask(
       InstanceEntity instance,
       String runningStatus,
@@ -518,6 +558,10 @@ public class WechatPluginService {
     if (taskJobs.putIfAbsent(instanceId, true) != null) {
       return existing == null ? runningStatus(runningStatus, "", progressMessage) : existing;
     }
+    if (!operationCoordinator.tryStart(instanceId, "微信插件")) {
+      taskJobs.remove(instanceId);
+      throw new ApiException(HttpStatus.CONFLICT, operationCoordinator.currentOwner(instanceId) + "正在执行，请等待当前插件任务完成后再操作。");
+    }
     PublicWechatPluginStatus started = runningStatus(runningStatus, "", startedMessage);
     taskStatuses.put(instanceId, started);
     publish(instance, started);
@@ -525,6 +569,7 @@ public class WechatPluginService {
       executor.execute(() -> runTask(instance, runningStatus, progressMessage, failurePrefix, command, success));
     } catch (RuntimeException error) {
       taskJobs.remove(instanceId);
+      operationCoordinator.finish(instanceId, "微信插件");
       PublicWechatPluginStatus failed = failedStatus(failurePrefix, message(error), "");
       taskStatuses.put(instanceId, failed);
       publish(instance, failed);
@@ -559,6 +604,7 @@ public class WechatPluginService {
       publish(instance, failed);
     } finally {
       taskJobs.remove(instanceId);
+      operationCoordinator.finish(instanceId, "微信插件");
     }
   }
 

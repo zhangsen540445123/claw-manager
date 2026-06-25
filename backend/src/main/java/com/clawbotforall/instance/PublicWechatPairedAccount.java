@@ -7,6 +7,7 @@ public record PublicWechatPairedAccount(
     String accountId,
     String phone,
     String wechatUserId,
+    String openVikingUserId,
     String remark,
     String baseUrl,
     String savedAt,

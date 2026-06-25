@@ -7,6 +7,7 @@
     <result property="trustedModeEnabled" column="trusted_mode_enabled"/>
     <result property="accountId" column="account_id"/>
     <result property="pluginPackage" column="plugin_package"/>
+    <result property="identitySalt" column="identity_salt"/>
     <result property="rootApiKey" column="root_api_key"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -21,14 +22,15 @@
 
   <insert id="upsert" parameterType="com.clawbotforall.openviking.OpenVikingSettingsEntity">
     INSERT INTO openviking_settings
-      (id, base_url, trusted_mode_enabled, account_id, plugin_package, root_api_key, created_at, updated_at)
+      (id, base_url, trusted_mode_enabled, account_id, plugin_package, identity_salt, root_api_key, created_at, updated_at)
     VALUES
-      (#{id}, #{baseUrl}, #{trustedModeEnabled}, #{accountId}, #{pluginPackage}, #{rootApiKey}, #{createdAt}, #{updatedAt})
+      (#{id}, #{baseUrl}, #{trustedModeEnabled}, #{accountId}, #{pluginPackage}, #{identitySalt}, #{rootApiKey}, #{createdAt}, #{updatedAt})
     ON DUPLICATE KEY UPDATE
       base_url = VALUES(base_url),
       trusted_mode_enabled = VALUES(trusted_mode_enabled),
       account_id = VALUES(account_id),
       plugin_package = VALUES(plugin_package),
+      identity_salt = VALUES(identity_salt),
       root_api_key = VALUES(root_api_key),
       updated_at = VALUES(updated_at)
   </insert>

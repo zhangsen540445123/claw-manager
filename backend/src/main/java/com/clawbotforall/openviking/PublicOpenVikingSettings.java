@@ -7,8 +7,8 @@ public record PublicOpenVikingSettings(
     String pluginPackage,
     boolean rootApiKeyConfigured,
     String rootApiKeyFingerprint,
-    boolean identitySecretConfigured,
-    String identitySecretSource,
-    String identitySecretFingerprint,
+    boolean saltConfigured,
+    String saltSource,
+    String saltFingerprint,
     String updatedAt
 ) {}

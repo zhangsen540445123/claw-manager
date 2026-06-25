@@ -40,6 +40,10 @@ public class OpenVikingIdentityService {
   }
 
   public Optional<OpenVikingSenderIdentity> resolveSenderIdentity(Object rawSenderId) {
+    return resolveSenderIdentity(rawSenderId, identityHashSecret());
+  }
+
+  public Optional<OpenVikingSenderIdentity> resolveSenderIdentity(Object rawSenderId, String identitySalt) {
     if (!(rawSenderId instanceof String senderId)) {
       return Optional.empty();
     }
@@ -47,7 +51,11 @@ public class OpenVikingIdentityService {
     if (normalized.isBlank()) {
       return Optional.empty();
     }
-    String senderHash = hmacSha256Hex(identityHashSecret(), normalized).substring(0, 32);
+    String salt = identitySalt == null ? "" : identitySalt.trim();
+    if (salt.isBlank()) {
+      return Optional.empty();
+    }
+    String senderHash = hmacSha256Hex(salt, normalized).substring(0, 32);
     return Optional.of(new OpenVikingSenderIdentity(normalized, senderHash, "wx_" + senderHash));
   }
 

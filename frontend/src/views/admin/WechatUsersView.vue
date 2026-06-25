@@ -15,6 +15,7 @@ interface WechatUserRow {
   accountId: string;
   phone: string;
   wechatUserId: string;
+  openVikingUserId: string;
   remark: string;
   baseUrl: string;
   boundAt?: string | null;
@@ -75,6 +76,7 @@ const filteredUsers = computed(() => {
       user.phone,
       user.accountId,
       user.wechatUserId,
+      user.openVikingUserId,
       user.remark,
       user.instanceName
     ].some((value) => value.toLowerCase().includes(keyword));
@@ -111,6 +113,7 @@ function toUserRow(instance: PublicInstance, account: PublicWechatPairedAccount)
     accountId: account.accountId,
     phone: account.phone,
     wechatUserId: account.wechatUserId,
+    openVikingUserId: account.openVikingUserId,
     remark: account.remark,
     baseUrl: account.baseUrl,
     boundAt: account.boundAt,
@@ -277,7 +280,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
 
       <el-form class="management-form history-filter-form" label-position="top" @submit.prevent>
         <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="手机号 / OpenClaw账号 / 微信 userId / 备注" clearable />
+          <el-input v-model="filters.keyword" placeholder="手机号 / OpenClaw账号 / 微信 userId / OpenViking 用户ID / 备注" clearable />
         </el-form-item>
         <el-form-item label="实例">
           <el-select v-model="filters.instanceId" clearable placeholder="全部实例">
@@ -315,6 +318,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
         </el-table-column>
         <el-table-column prop="accountId" label="OpenClaw账号" min-width="230" />
         <el-table-column prop="wechatUserId" label="微信 userId" min-width="180" />
+        <el-table-column prop="openVikingUserId" label="OpenViking 用户ID" min-width="230" />
         <el-table-column label="通道状态" min-width="190">
           <template #default="{ row }">
             <div class="channel-status-cell">

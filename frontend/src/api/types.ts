@@ -92,6 +92,7 @@ export interface PublicWechatPairedAccount {
   accountId: string;
   phone: string;
   wechatUserId: string;
+  openVikingUserId: string;
   remark: string;
   baseUrl: string;
   savedAt?: string | null;
@@ -188,9 +189,9 @@ export interface PublicOpenVikingSettings {
   pluginPackage: string;
   rootApiKeyConfigured: boolean;
   rootApiKeyFingerprint: string;
-  identitySecretConfigured: boolean;
-  identitySecretSource: string;
-  identitySecretFingerprint: string;
+  saltConfigured: boolean;
+  saltSource: string;
+  saltFingerprint: string;
   updatedAt?: string | null;
 }
 

@@ -49,6 +49,7 @@ public class OpenVikingSettingsService {
     next.setTrustedModeEnabled(booleanValue(payload == null ? null : payload.get("trustedModeEnabled"), current.isTrustedModeEnabled()));
     next.setAccountId(defaultIfBlank(value(payload, "accountId", current.getAccountId()), "claw-manager"));
     next.setPluginPackage(defaultIfBlank(value(payload, "pluginPackage", current.getPluginPackage()), DEFAULT_PLUGIN_PACKAGE));
+    next.setIdentitySalt(resolveIdentitySalt(payload, current.getIdentitySalt()));
     next.setRootApiKey(resolveRootApiKey(payload, current.getRootApiKey()));
     next.setCreatedAt(current.getCreatedAt() == null || current.getCreatedAt().isBlank() ? now : current.getCreatedAt());
     next.setUpdatedAt(now);
@@ -63,7 +64,7 @@ public class OpenVikingSettingsService {
         entity.getBaseUrl(),
         entity.isTrustedModeEnabled(),
         entity.getAccountId(),
-        identityService.identityHashSecret(),
+        effectiveIdentitySalt(entity),
         entity.getPluginPackage(),
         defaultString(entity.getRootApiKey()),
         brokerTokenService.brokerToken(),
@@ -72,7 +73,7 @@ public class OpenVikingSettingsService {
   }
 
   private PublicOpenVikingSettings toPublic(OpenVikingSettingsEntity entity) {
-    String secret = identityService.identityHashSecret();
+    String salt = effectiveIdentitySalt(entity);
     return new PublicOpenVikingSettings(
         entity.getBaseUrl(),
         entity.isTrustedModeEnabled(),
@@ -80,9 +81,9 @@ public class OpenVikingSettingsService {
         entity.getPluginPackage(),
         hasText(entity.getRootApiKey()),
         fingerprint(entity.getRootApiKey()),
-        !secret.isBlank(),
-        "generated",
-        fingerprint(secret),
+        !salt.isBlank(),
+        hasText(entity.getIdentitySalt()) ? "configured" : "generated",
+        fingerprint(salt),
         entity.getUpdatedAt()
     );
   }
@@ -95,9 +96,10 @@ public class OpenVikingSettingsService {
     OpenVikingSettingsEntity defaults = new OpenVikingSettingsEntity();
     defaults.setId(GLOBAL_ID);
     defaults.setBaseUrl("");
-    defaults.setTrustedModeEnabled(false);
+    defaults.setTrustedModeEnabled(true);
     defaults.setAccountId("claw-manager");
     defaults.setPluginPackage(DEFAULT_PLUGIN_PACKAGE);
+    defaults.setIdentitySalt("");
     defaults.setRootApiKey("");
     defaults.setCreatedAt("");
     defaults.setUpdatedAt("");
@@ -108,8 +110,25 @@ public class OpenVikingSettingsService {
     entity.setBaseUrl(normalizeBaseUrl(entity.getBaseUrl()));
     entity.setAccountId(defaultIfBlank(entity.getAccountId(), "claw-manager"));
     entity.setPluginPackage(defaultIfBlank(entity.getPluginPackage(), DEFAULT_PLUGIN_PACKAGE));
+    entity.setIdentitySalt(defaultString(entity.getIdentitySalt()));
     entity.setRootApiKey(defaultString(entity.getRootApiKey()));
     return entity;
+  }
+
+  private String effectiveIdentitySalt(OpenVikingSettingsEntity entity) {
+    String configured = defaultString(entity.getIdentitySalt());
+    return configured.isBlank() ? identityService.identityHashSecret() : configured;
+  }
+
+  private String resolveIdentitySalt(Map<String, Object> payload, String currentIdentitySalt) {
+    if (payload == null || !payload.containsKey("identitySalt")) {
+      return defaultIfBlank(currentIdentitySalt, identityService.identityHashSecret());
+    }
+    Object value = payload.get("identitySalt");
+    String normalized = value == null ? "" : String.valueOf(value).trim();
+    return normalized.isBlank()
+        ? defaultIfBlank(currentIdentitySalt, identityService.identityHashSecret())
+        : normalized;
   }
 
   private static String resolveRootApiKey(Map<String, Object> payload, String currentRootApiKey) {

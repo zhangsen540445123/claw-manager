@@ -15,6 +15,7 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceEventPublisher;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceMutationMapper;
+import com.clawbotforall.plugin.PluginOperationCoordinator;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecHandle;
 import com.clawbotforall.runtime.RuntimeExecListener;
@@ -157,6 +158,31 @@ class OpenVikingPluginServiceTest {
     PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.28");
 
     assertThat(started.status()).isEqualTo("installing");
+  }
+
+  @Test
+  void installRejectsWhenWechatPluginTaskIsRunningForSameInstance() {
+    PluginOperationCoordinator coordinator = new PluginOperationCoordinator();
+    coordinator.tryStart("inst_1", "微信插件");
+    service = new OpenVikingPluginService(
+        openClawRuntime,
+        commandService,
+        fileService,
+        mutationMapper,
+        eventPublisher,
+        new ObjectMapper(),
+        settingsService,
+        executor,
+        () -> List.of("2026.6.28", "2026.6.27"),
+        coordinator
+    );
+    InstanceEntity instance = instance();
+    when(settingsService.effectiveSettings()).thenReturn(settings());
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
+
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.28"))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("微信插件");
   }
 
   private static OpenVikingEffectiveSettings settings() {

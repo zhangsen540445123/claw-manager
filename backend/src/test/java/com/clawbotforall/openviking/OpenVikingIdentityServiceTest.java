@@ -54,6 +54,18 @@ class OpenVikingIdentityServiceTest {
   }
 
   @Test
+  void derivesDifferentUserIdWhenSaltChanges() {
+    OpenVikingIdentityService service = new OpenVikingIdentityService(properties());
+
+    OpenVikingSenderIdentity first = service.resolveSenderIdentity("wxid_Alpha", "salt-one").orElseThrow();
+    OpenVikingSenderIdentity second = service.resolveSenderIdentity("wxid_Alpha", "salt-two").orElseThrow();
+
+    assertThat(first.openVikingUserId()).startsWith("wx_");
+    assertThat(second.openVikingUserId()).startsWith("wx_");
+    assertThat(second.openVikingUserId()).isNotEqualTo(first.openVikingUserId());
+  }
+
+  @Test
   void blankOrNonStringSenderDoesNotProduceIdentity() throws Exception {
     persistSecret("secret");
     OpenVikingIdentityService service = new OpenVikingIdentityService(properties());

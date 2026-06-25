@@ -39,7 +39,7 @@ public class OpenVikingUserKeyService {
     requireText(settings.accountId(), "OpenViking Account ID 不能为空。");
     requireText(settings.rootApiKey(), "OpenViking Root API Key 未配置。");
 
-    String openvikingUserId = resolveOpenVikingUserId(request);
+    String openvikingUserId = resolveOpenVikingUserId(request, settings.identityHashSecret());
     String lockKey = settings.accountId() + ":" + openvikingUserId;
     Object lock = locks.computeIfAbsent(lockKey, ignored -> new Object());
     synchronized (lock) {
@@ -72,7 +72,7 @@ public class OpenVikingUserKeyService {
     }
   }
 
-  private String resolveOpenVikingUserId(OpenVikingUserResolveRequest request) {
+  private String resolveOpenVikingUserId(OpenVikingUserResolveRequest request, String identitySalt) {
     String supplied = request == null ? "" : trim(request.openvikingUserId());
     if (!supplied.isBlank()) {
       if (!OPENVIKING_USER_ID_PATTERN.matcher(supplied).matches()) {
@@ -80,7 +80,7 @@ public class OpenVikingUserKeyService {
       }
       return supplied;
     }
-    return identityService.resolveSenderIdentity(request == null ? null : request.senderId())
+    return identityService.resolveSenderIdentity(request == null ? null : request.senderId(), identitySalt)
         .map(OpenVikingSenderIdentity::openVikingUserId)
         .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "OpenViking user identity is unavailable for this turn."));
   }

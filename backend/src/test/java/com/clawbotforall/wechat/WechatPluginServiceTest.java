@@ -16,11 +16,13 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceEventPublisher;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceMutationMapper;
+import com.clawbotforall.plugin.PluginOperationCoordinator;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecHandle;
 import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
+import com.clawbotforall.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -408,6 +410,29 @@ class WechatPluginServiceTest {
     assertThat(first.status()).isEqualTo("installing");
     assertThat(second.status()).isEqualTo("installing");
     assertThat(executor.size()).isEqualTo(1);
+  }
+
+  @Test
+  void startInstallRejectsWhenOpenVikingPluginTaskIsRunningForSameInstance() {
+    PluginOperationCoordinator coordinator = new PluginOperationCoordinator();
+    coordinator.tryStart("inst_1", "OpenViking 插件");
+    service = new WechatPluginService(
+        openClawRuntime,
+        commandService,
+        fileService,
+        mutationMapper,
+        eventPublisher,
+        new ObjectMapper(),
+        executor,
+        () -> List.of("2026.6.26", "2026.6.25"),
+        coordinator
+    );
+    InstanceEntity instance = instance();
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "2026-06-19T00:00:00Z"));
+
+    assertThatThrownBy(() -> service.startInstall(instance))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("OpenViking 插件");
   }
 
   private InstancePaths emptyPluginPaths() {

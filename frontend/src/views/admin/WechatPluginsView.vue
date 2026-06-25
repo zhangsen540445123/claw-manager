@@ -114,12 +114,22 @@ function pluginStatus(instanceId: string) {
     : admin.openVikingPluginStatusByInstanceId[instanceId] || null;
 }
 
+function otherPluginStatus(instanceId: string) {
+  return activePlugin.value === "wechat"
+    ? admin.openVikingPluginStatusByInstanceId[instanceId] || null
+    : admin.wechatPluginStatusByInstanceId[instanceId] || null;
+}
+
 function isRunning(instance: PublicInstance) {
   return instance.status === "running";
 }
 
 function isTaskRunning(status: PublicWechatPluginStatus | null) {
   return Boolean(status && runningStatuses.has(status.status));
+}
+
+function isOtherPluginTaskRunning(instance: PublicInstance) {
+  return isTaskRunning(otherPluginStatus(instance.id));
 }
 
 function statusTagType(status: PublicWechatPluginStatus | null) {
@@ -144,22 +154,22 @@ function statusText(status: PublicWechatPluginStatus | null) {
 
 function canInstall(instance: PublicInstance) {
   const status = pluginStatus(instance.id);
-  return isRunning(instance) && !status?.installed && !isTaskRunning(status);
+  return isRunning(instance) && !status?.installed && !isTaskRunning(status) && !isOtherPluginTaskRunning(instance);
 }
 
 function canUninstall(instance: PublicInstance) {
   const status = pluginStatus(instance.id);
-  return isRunning(instance) && Boolean(status?.installed) && !isTaskRunning(status);
+  return isRunning(instance) && Boolean(status?.installed) && !isTaskRunning(status) && !isOtherPluginTaskRunning(instance);
 }
 
 function canUpgrade(instance: PublicInstance) {
   const status = pluginStatus(instance.id);
-  return isRunning(instance) && Boolean(status?.installed && status.upgradable) && !isTaskRunning(status);
+  return isRunning(instance) && Boolean(status?.installed && status.upgradable) && !isTaskRunning(status) && !isOtherPluginTaskRunning(instance);
 }
 
 function canReinstall(instance: PublicInstance) {
   const status = pluginStatus(instance.id);
-  return isRunning(instance) && Boolean(status?.installed) && !isTaskRunning(status);
+  return isRunning(instance) && Boolean(status?.installed) && !isTaskRunning(status) && !isOtherPluginTaskRunning(instance);
 }
 
 function canRunBatch(action: PluginAction) {
@@ -171,6 +181,20 @@ function canRunBatch(action: PluginAction) {
   if (action === "uninstall") return selectedInstances.value.some(canUninstall);
   if (action === "upgrade") return selectedInstances.value.some(canUpgrade);
   return selectedInstances.value.some(canReinstall);
+}
+
+function batchTargetIds(action: PluginAction) {
+  if (action === "check") {
+    return selectedIds.value;
+  }
+  const predicate = action === "install"
+    ? canInstall
+    : action === "uninstall"
+      ? canUninstall
+      : action === "upgrade"
+        ? canUpgrade
+        : canReinstall;
+  return selectedInstances.value.filter(predicate).map((instance) => instance.id);
 }
 
 function actionVersion() {
@@ -257,12 +281,18 @@ async function runBatch(action: PluginAction) {
   actionLoading.value = `batch:${action}`;
   error.value = "";
   try {
-    if (action === "check") await batchCheck(selectedIds.value);
-    if (action === "install") await batchInstall(selectedIds.value);
-    if (action === "uninstall") await batchUninstall(selectedIds.value);
-    if (action === "upgrade") await batchUpgrade(selectedIds.value);
-    if (action === "reinstall") await batchReinstall(selectedIds.value);
-    ElMessage.success("批量任务已提交。");
+    const targetIds = batchTargetIds(action);
+    const skipped = selectedIds.value.length - targetIds.length;
+    if (targetIds.length === 0) {
+      ElMessage.warning("没有可操作的实例。");
+      return;
+    }
+    if (action === "check") await batchCheck(targetIds);
+    if (action === "install") await batchInstall(targetIds);
+    if (action === "uninstall") await batchUninstall(targetIds);
+    if (action === "upgrade") await batchUpgrade(targetIds);
+    if (action === "reinstall") await batchReinstall(targetIds);
+    ElMessage.success(skipped > 0 ? `批量任务已提交，已跳过 ${skipped} 个正在执行其他插件任务的实例。` : "批量任务已提交。");
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "批量操作失败";
     ElMessage.error(error.value);

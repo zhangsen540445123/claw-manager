@@ -27,13 +27,14 @@ class OpenVikingSettingsServiceTest {
     PublicOpenVikingSettings settings = service.publicSettings();
 
     assertThat(settings.baseUrl()).isBlank();
-    assertThat(settings.trustedModeEnabled()).isFalse();
+    assertThat(settings.trustedModeEnabled()).isTrue();
     assertThat(settings.accountId()).isEqualTo("claw-manager");
     assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.28");
     assertThat(settings.rootApiKeyConfigured()).isFalse();
     assertThat(settings.rootApiKeyFingerprint()).isBlank();
-    assertThat(settings.identitySecretConfigured()).isTrue();
-    assertThat(settings.identitySecretFingerprint()).hasSize(16);
+    assertThat(settings.saltConfigured()).isTrue();
+    assertThat(settings.saltSource()).isEqualTo("generated");
+    assertThat(settings.saltFingerprint()).hasSize(16);
   }
 
   @Test
@@ -50,7 +51,8 @@ class OpenVikingSettingsServiceTest {
         "trustedModeEnabled", false,
         "accountId", " account-main ",
         "pluginPackage", " npm:@claw-manager/openviking-openclaw-plugin@2026.6.28 ",
-        "rootApiKey", " ov-root-secret "
+        "rootApiKey", " ov-root-secret ",
+        "identitySalt", " shared-salt "
     ));
 
     assertThat(settings.baseUrl()).isEqualTo("http://openviking:1933");
@@ -59,8 +61,31 @@ class OpenVikingSettingsServiceTest {
     assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.28");
     assertThat(settings.rootApiKeyConfigured()).isTrue();
     assertThat(settings.rootApiKeyFingerprint()).hasSize(16);
+    assertThat(settings.saltConfigured()).isTrue();
+    assertThat(settings.saltSource()).isEqualTo("configured");
     assertThat(mapper.saved.getRootApiKey()).isEqualTo("ov-root-secret");
+    assertThat(mapper.saved.getIdentitySalt()).isEqualTo("shared-salt");
     assertThat(mapper.saved.getId()).isEqualTo("global");
+  }
+
+  @Test
+  void updateSettingsKeepsExistingSaltWhenPayloadOmitsItOrLeavesItBlank() {
+    FakeOpenVikingSettingsMapper mapper = new FakeOpenVikingSettingsMapper();
+    OpenVikingSettingsEntity entity = new OpenVikingSettingsEntity();
+    entity.setId("global");
+    entity.setIdentitySalt("existing-salt");
+    mapper.saved = entity;
+    OpenVikingSettingsService service = new OpenVikingSettingsService(
+        mapper,
+        new OpenVikingIdentityService(properties()),
+        new OpenVikingBrokerTokenService(properties())
+    );
+
+    PublicOpenVikingSettings omitted = service.updateSettings(Map.of("baseUrl", "http://openviking:1933"));
+    PublicOpenVikingSettings blank = service.updateSettings(Map.of("identitySalt", "   "));
+
+    assertThat(omitted.saltFingerprint()).isEqualTo(blank.saltFingerprint());
+    assertThat(mapper.saved.getIdentitySalt()).isEqualTo("existing-salt");
   }
 
   @Test
@@ -117,11 +142,9 @@ class OpenVikingSettingsServiceTest {
     entity.setTrustedModeEnabled(false);
     entity.setAccountId("claw-manager");
     entity.setPluginPackage("npm:@claw-manager/openviking-openclaw-plugin@2026.6.28");
+    entity.setIdentitySalt("configured-salt");
     entity.setRootApiKey("root-key");
     mapper.saved = entity;
-    Path secretPath = tempDir.resolve("openviking").resolve("identity-hash-secret");
-    Files.createDirectories(secretPath.getParent());
-    Files.writeString(secretPath, "configured-secret");
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
         new OpenVikingIdentityService(properties()),
@@ -131,7 +154,7 @@ class OpenVikingSettingsServiceTest {
     OpenVikingEffectiveSettings settings = service.effectiveSettings();
 
     assertThat(settings.baseUrl()).isEqualTo("http://openviking:1933");
-    assertThat(settings.identityHashSecret()).isEqualTo("configured-secret");
+    assertThat(settings.identityHashSecret()).isEqualTo("configured-salt");
     assertThat(settings.rootApiKey()).isEqualTo("root-key");
     assertThat(settings.brokerToken()).isNotBlank();
     assertThat(settings.internalBaseUrl()).isEqualTo("http://claw-manager-api:8080");

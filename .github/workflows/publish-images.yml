@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "claw-manager.version"
+      - "backend/**"
+      - "frontend/**"
       - "containers/openclaw-runner/Dockerfile"
       - "containers/openclaw-runner/entrypoint.sh"
   workflow_dispatch:
@@ -23,7 +25,8 @@ jobs:
     name: Detect image changes
     runs-on: ubuntu-latest
     outputs:
-      app: ${{ steps.filter.outputs.app }}
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
       runner: ${{ steps.filter.outputs.runner }}
       version: ${{ steps.version.outputs.version }}
 
@@ -36,12 +39,15 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            app:
+            api:
               - "claw-manager.version"
+              - "backend/**"
+            web:
+              - "claw-manager.version"
+              - "frontend/**"
             runner:
               - "claw-manager.version"
-              - "containers/openclaw-runner/Dockerfile"
-              - "containers/openclaw-runner/entrypoint.sh"
+              - "containers/openclaw-runner/**"
 
       - name: Read image version
         id: version
@@ -64,12 +70,12 @@ jobs:
       matrix:
         include:
           - label: api image
-            group: app
+            group: api
             image_name: claw-manager-api
             context: backend
             dockerfile: backend/Dockerfile
           - label: web image
-            group: app
+            group: web
             image_name: claw-manager-web
             context: frontend
             dockerfile: frontend/Dockerfile
@@ -90,7 +96,9 @@ jobs:
           should_build=false
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             should_build=true
-          elif [ "${{ matrix.group }}" = "app" ] && [ "${{ needs.detect-changes.outputs.app }}" = "true" ]; then
+          elif [ "${{ matrix.group }}" = "api" ] && [ "${{ needs.detect-changes.outputs.api }}" = "true" ]; then
+            should_build=true
+          elif [ "${{ matrix.group }}" = "web" ] && [ "${{ needs.detect-changes.outputs.web }}" = "true" ]; then
             should_build=true
           elif [ "${{ matrix.group }}" = "runner" ] && [ "${{ needs.detect-changes.outputs.runner }}" = "true" ]; then
             should_build=true

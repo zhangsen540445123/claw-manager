@@ -10,6 +10,7 @@ public class OpenVikingSettingsEntity {
   private boolean trustedModeEnabled;
   private String accountId;
   private String pluginPackage;
+  private String identitySalt;
   private String rootApiKey;
   private String createdAt;
   private String updatedAt;
@@ -56,6 +57,14 @@ public class OpenVikingSettingsEntity {
 
   public void setPluginPackage(String pluginPackage) {
     this.pluginPackage = pluginPackage;
+  }
+
+  public String getIdentitySalt() {
+    return identitySalt;
+  }
+
+  public void setIdentitySalt(String identitySalt) {
+    this.identitySalt = identitySalt;
   }
 
   public String getRootApiKey() {

@@ -5,6 +5,7 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceEventPublisher;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.instance.InstanceMutationMapper;
+import com.clawbotforall.plugin.PluginOperationCoordinator;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecListener;
@@ -63,6 +64,7 @@ public class OpenVikingPluginService {
   private final InstanceEventPublisher eventPublisher;
   private final ObjectMapper objectMapper;
   private final OpenVikingSettingsService settingsService;
+  private final PluginOperationCoordinator operationCoordinator;
   private final Executor executor;
   private final Supplier<List<String>> versionSupplier;
   private final ConcurrentMap<String, PublicOpenVikingPluginStatus> taskStatuses = new ConcurrentHashMap<>();
@@ -77,7 +79,8 @@ public class OpenVikingPluginService {
       InstanceMutationMapper mutationMapper,
       InstanceEventPublisher eventPublisher,
       ObjectMapper objectMapper,
-      OpenVikingSettingsService settingsService
+      OpenVikingSettingsService settingsService,
+      PluginOperationCoordinator operationCoordinator
   ) {
     this(
         openClawRuntime,
@@ -92,7 +95,8 @@ public class OpenVikingPluginService {
           thread.setDaemon(true);
           return thread;
         }),
-        () -> fetchVersionsFromNpm(objectMapper)
+        () -> fetchVersionsFromNpm(objectMapper),
+        operationCoordinator
     );
   }
 
@@ -107,6 +111,32 @@ public class OpenVikingPluginService {
       Executor executor,
       Supplier<List<String>> versionSupplier
   ) {
+    this(
+        openClawRuntime,
+        commandService,
+        fileService,
+        mutationMapper,
+        eventPublisher,
+        objectMapper,
+        settingsService,
+        executor,
+        versionSupplier,
+        new PluginOperationCoordinator()
+    );
+  }
+
+  OpenVikingPluginService(
+      OpenClawRuntime openClawRuntime,
+      InstanceCommandService commandService,
+      InstanceFileService fileService,
+      InstanceMutationMapper mutationMapper,
+      InstanceEventPublisher eventPublisher,
+      ObjectMapper objectMapper,
+      OpenVikingSettingsService settingsService,
+      Executor executor,
+      Supplier<List<String>> versionSupplier,
+      PluginOperationCoordinator operationCoordinator
+  ) {
     this.openClawRuntime = openClawRuntime;
     this.commandService = commandService;
     this.fileService = fileService;
@@ -114,6 +144,7 @@ public class OpenVikingPluginService {
     this.eventPublisher = eventPublisher;
     this.objectMapper = objectMapper;
     this.settingsService = settingsService;
+    this.operationCoordinator = operationCoordinator;
     this.executor = executor;
     this.versionSupplier = versionSupplier;
   }
@@ -237,10 +268,15 @@ public class OpenVikingPluginService {
     if (taskJobs.putIfAbsent(instance.getId(), true) != null) {
       return runningStatus(runningStatus, startedMessage);
     }
+    if (!operationCoordinator.tryStart(instance.getId(), "OpenViking 插件")) {
+      taskJobs.remove(instance.getId());
+      throw new ApiException(HttpStatus.CONFLICT, operationCoordinator.currentOwner(instance.getId()) + "正在执行，请等待当前插件任务完成后再操作。");
+    }
     PublicOpenVikingPluginStatus started = runningStatus(runningStatus, startedMessage);
     taskStatuses.put(instance.getId(), started);
     publish(instance, started);
-    executor.execute(() -> {
+    try {
+      executor.execute(() -> {
       try {
         PublicOpenVikingPluginStatus completed = body.run();
         taskStatuses.put(instance.getId(), completed);
@@ -251,8 +287,14 @@ public class OpenVikingPluginService {
         publish(instance, failed);
       } finally {
         taskJobs.remove(instance.getId());
+        operationCoordinator.finish(instance.getId(), "OpenViking 插件");
       }
-    });
+      });
+    } catch (RuntimeException error) {
+      taskJobs.remove(instance.getId());
+      operationCoordinator.finish(instance.getId(), "OpenViking 插件");
+      throw error;
+    }
     return started;
   }
 

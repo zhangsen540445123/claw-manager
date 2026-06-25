@@ -228,6 +228,7 @@ export const useAdminStore = defineStore("admin", {
       trustedModeEnabled: boolean;
       accountId: string;
       pluginPackage: string;
+      identitySalt?: string;
       rootApiKey?: string;
       clearRootApiKey?: boolean;
     }) {

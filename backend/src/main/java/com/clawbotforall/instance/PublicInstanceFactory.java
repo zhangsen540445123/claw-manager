@@ -1,6 +1,8 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.openviking.OpenVikingIdentityService;
+import com.clawbotforall.openviking.OpenVikingSettingsService;
 import com.clawbotforall.web.RequestOrigins;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,10 +24,19 @@ public class PublicInstanceFactory {
 
   private final ObjectMapper objectMapper;
   private final ClawbotProperties properties;
+  private final OpenVikingSettingsService openVikingSettingsService;
+  private final OpenVikingIdentityService openVikingIdentityService;
 
-  public PublicInstanceFactory(ObjectMapper objectMapper, ClawbotProperties properties) {
+  public PublicInstanceFactory(
+      ObjectMapper objectMapper,
+      ClawbotProperties properties,
+      OpenVikingSettingsService openVikingSettingsService,
+      OpenVikingIdentityService openVikingIdentityService
+  ) {
     this.objectMapper = objectMapper;
     this.properties = properties;
+    this.openVikingSettingsService = openVikingSettingsService;
+    this.openVikingIdentityService = openVikingIdentityService;
   }
 
   public PublicInstance from(
@@ -126,6 +137,9 @@ public class PublicInstanceFactory {
             (left, right) -> left,
             LinkedHashMap::new
         ));
+    String identitySalt = pairedAccounts.isEmpty()
+        ? ""
+        : openVikingSettingsService.effectiveSettings().identityHashSecret();
     List<PublicWechatPairedAccount> accounts = pairedAccounts.stream()
         .map(account -> {
           WechatAccountChannelEntity channel = channelByAccountId.get(account.getAccountId());
@@ -133,6 +147,7 @@ public class PublicInstanceFactory {
               defaultString(account.getAccountId()),
               defaultString(account.getPhone()),
               defaultString(account.getWechatUserId()),
+              openVikingUserId(account.getWechatUserId(), identitySalt),
               defaultString(account.getRemark()),
               defaultString(account.getBaseUrl()),
               account.getSavedAt(),
@@ -206,6 +221,12 @@ public class PublicInstanceFactory {
     plugins.put("allow", allow);
     plugins.put("entries", entries);
     return plugins;
+  }
+
+  private String openVikingUserId(String wechatUserId, String identitySalt) {
+    return openVikingIdentityService.resolveSenderIdentity(wechatUserId, identitySalt)
+        .map(com.clawbotforall.openviking.OpenVikingSenderIdentity::openVikingUserId)
+        .orElse("");
   }
 
   private String dashboardUrl(InstanceEntity instance, HttpServletRequest request) {

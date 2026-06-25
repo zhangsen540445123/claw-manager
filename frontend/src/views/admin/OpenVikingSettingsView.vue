@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { RefreshCw, Save } from "lucide-vue-next";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import { formatDateTime } from "../../utils/adminUi";
@@ -12,9 +12,10 @@ const saving = ref(false);
 const error = ref("");
 const form = reactive({
   baseUrl: "",
-  trustedModeEnabled: false,
+  trustedModeEnabled: true,
   accountId: "claw-manager",
   pluginPackage: "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+  identitySalt: "",
   rootApiKey: "",
   clearRootApiKey: false
 });
@@ -32,6 +33,7 @@ async function loadSettings() {
     form.trustedModeEnabled = settings.trustedModeEnabled;
     form.accountId = settings.accountId || "claw-manager";
     form.pluginPackage = settings.pluginPackage || "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28";
+    form.identitySalt = "";
     form.rootApiKey = "";
     form.clearRootApiKey = false;
   } catch (cause) {
@@ -43,6 +45,21 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  if (form.identitySalt.trim() && admin.openVikingSettings?.saltConfigured) {
+    try {
+      await ElMessageBox.confirm(
+        "修改身份盐值会让同一个微信用户映射到新的 OpenViking 用户ID。旧记忆不会删除，但将无法按原用户标识召回，除非恢复原盐值。确认继续？",
+        "确认修改身份盐值",
+        {
+          type: "warning",
+          confirmButtonText: "确认修改",
+          cancelButtonText: "取消"
+        }
+      );
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   error.value = "";
   try {
@@ -51,9 +68,11 @@ async function saveSettings() {
       trustedModeEnabled: form.trustedModeEnabled,
       accountId: form.accountId,
       pluginPackage: form.pluginPackage,
+      identitySalt: form.identitySalt,
       rootApiKey: form.rootApiKey,
       clearRootApiKey: form.clearRootApiKey
     });
+    form.identitySalt = "";
     form.rootApiKey = "";
     form.clearRootApiKey = false;
     ElMessage.success("OpenViking 配置已保存。");
@@ -68,7 +87,7 @@ async function saveSettings() {
 
 <template>
   <section class="workspace">
-    <PageHeader title="OpenViking 配置" description="配置所有 OpenClaw 实例共享的 OpenViking 服务端和插件安装预置。">
+    <PageHeader title="OpenViking预设" description="配置所有 OpenClaw 实例共享的 OpenViking 服务端和插件安装预置。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="loading" @click="loadSettings">刷新</el-button>
       </template>
@@ -89,6 +108,14 @@ async function saveSettings() {
         </el-form-item>
         <el-form-item label="OpenViking 插件包">
           <el-input v-model="form.pluginPackage" placeholder="npm:@claw-manager/openviking-openclaw-plugin@2026.6.28" />
+        </el-form-item>
+        <el-form-item label="身份盐值">
+          <el-input
+            v-model="form.identitySalt"
+            type="password"
+            show-password
+            placeholder="留空则保持当前身份盐值"
+          />
         </el-form-item>
         <el-form-item label="Root API Key">
           <el-input
@@ -112,16 +139,16 @@ async function saveSettings() {
             <el-descriptions-item label="Root Key 指纹">
               {{ admin.openVikingSettings?.rootApiKeyFingerprint || "-" }}
             </el-descriptions-item>
-            <el-descriptions-item label="Identity Secret">
-              <el-tag :type="admin.openVikingSettings?.identitySecretConfigured ? 'success' : 'danger'" effect="plain">
-                {{ admin.openVikingSettings?.identitySecretConfigured ? "已配置" : "不可用" }}
+            <el-descriptions-item label="身份盐值">
+              <el-tag :type="admin.openVikingSettings?.saltConfigured ? 'success' : 'danger'" effect="plain">
+                {{ admin.openVikingSettings?.saltConfigured ? "已配置" : "不可用" }}
               </el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="Secret 来源">
-              {{ admin.openVikingSettings?.identitySecretSource || "-" }}
+            <el-descriptions-item label="盐值来源">
+              {{ admin.openVikingSettings?.saltSource || "-" }}
             </el-descriptions-item>
-            <el-descriptions-item label="Secret 指纹">
-              {{ admin.openVikingSettings?.identitySecretFingerprint || "-" }}
+            <el-descriptions-item label="盐值指纹">
+              {{ admin.openVikingSettings?.saltFingerprint || "-" }}
             </el-descriptions-item>
             <el-descriptions-item label="更新时间">
               {{ formatDateTime(admin.openVikingSettings?.updatedAt) }}

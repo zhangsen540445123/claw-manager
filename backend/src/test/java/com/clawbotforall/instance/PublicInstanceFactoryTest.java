@@ -1,8 +1,13 @@
 package com.clawbotforall.instance;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.openviking.OpenVikingEffectiveSettings;
+import com.clawbotforall.openviking.OpenVikingIdentityService;
+import com.clawbotforall.openviking.OpenVikingSettingsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
@@ -11,9 +16,29 @@ import org.springframework.mock.web.MockHttpServletRequest;
 
 class PublicInstanceFactoryTest {
 
+  private final OpenVikingSettingsService openVikingSettingsService = mock(OpenVikingSettingsService.class);
   private final PublicInstanceFactory factory = new PublicInstanceFactory(
       new ObjectMapper(),
-      new ClawbotProperties(
+      properties(),
+      openVikingSettingsService,
+      new OpenVikingIdentityService(properties())
+  );
+
+  PublicInstanceFactoryTest() {
+    when(openVikingSettingsService.effectiveSettings()).thenReturn(new OpenVikingEffectiveSettings(
+        "http://openviking:1933",
+        true,
+        "claw-manager",
+        "display-salt",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+        "root-key",
+        "broker-token",
+        "http://claw-manager-api:8080"
+    ));
+  }
+
+  private static ClawbotProperties properties() {
+    return new ClawbotProperties(
           new ClawbotProperties.Paths("data"),
           new ClawbotProperties.Admin("", "平台管理员", ""),
           new ClawbotProperties.Security("clawbot_session", 14),
@@ -31,8 +56,8 @@ class PublicInstanceFactoryTest {
               128_000,
               List.of()
           )
-      )
-  );
+    );
+  }
 
   @Test
   void exposesFrontendCompatibleInstanceShape() {
@@ -100,6 +125,7 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.plugins().get("allow")).asList().isEmpty();
     assertThat(publicInstance.wechatBinding().pairedAccounts()).hasSize(1);
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().remark()).isEqualTo("战神");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().openVikingUserId()).startsWith("wx_");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().channelStatus()).isEqualTo("ready");
     assertThat(publicInstance.wechatBinding().status()).isEqualTo("ready");
   }
