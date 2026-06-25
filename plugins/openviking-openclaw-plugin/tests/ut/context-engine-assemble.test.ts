@@ -670,6 +670,248 @@ describe("context-engine assemble()", () => {
     );
   });
 
+  it("injects sender-scoped auto-recall during main assemble even when the OV session does not exist yet", async () => {
+    const { engine, client, getClient, getClientForSender, logger } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-new-recall"),
+    );
+    client.find
+      .mockResolvedValueOnce({
+        memories: [
+          {
+            uri: "viking://user/wx_sender/memories/profile.md",
+            level: 2,
+            category: "profile",
+            abstract: "The user is called Da Chui.",
+            score: 0.92,
+          },
+        ],
+        resources: [],
+        total: 1,
+      })
+      .mockResolvedValueOnce({ memories: [], resources: [], total: 0 });
+    const liveMessages = [{ role: "user", content: "who am I?" }];
+
+    const result = await engine.assemble({
+      prompt: "who am I?",
+      sessionId: "session-new-recall",
+      messages: liveMessages,
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "wx_sender" },
+    });
+
+    expect(getClientForSender).toHaveBeenCalledWith("wx_sender");
+    expect(getClient).not.toHaveBeenCalled();
+    expect(client.find).toHaveBeenCalled();
+    expect(client.getSessionContext).toHaveBeenCalledWith("session-new-recall", 4096, "agent:session-new-recall");
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.content).toMatch(/^<relevant-memories>/);
+    expect(result.messages[0]?.content).toContain("Source: openviking-auto-recall");
+    expect(result.messages[0]?.content).toContain("The user is called Da Chui.");
+    expect(result.messages[0]?.content).toContain("who am I?");
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("assemble skipped because OV session does not exist"),
+    );
+  });
+
+  it("injects sender profile memory for identity questions even when the OV session does not exist yet", async () => {
+    const { engine, client, getClient, getClientForSender, logger } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallScoreThreshold: 0.15,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-profile-recall"),
+    );
+    client.read.mockResolvedValueOnce("# 大锤\n- 用户名或称呼是“大锤”。");
+    const liveMessages = [{ role: "user", content: "我是谁？" }];
+
+    const result = await engine.assemble({
+      prompt: "我是谁？",
+      sessionId: "session-profile-recall",
+      messages: liveMessages,
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "wx_sender" },
+    });
+
+    expect(getClientForSender).toHaveBeenCalledWith("wx_sender");
+    expect(getClient).not.toHaveBeenCalled();
+    expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-profile-recall");
+    expect(client.find).not.toHaveBeenCalled();
+    expect(client.getSessionContext).toHaveBeenCalledWith("session-profile-recall", 4096, "agent:session-profile-recall");
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.content).toMatch(/^<relevant-memories>/);
+    expect(result.messages[0]?.content).toContain("Source: openviking-auto-recall");
+    expect(result.messages[0]?.content).toContain("用户名或称呼是“大锤”");
+    expect(result.messages[0]?.content).toContain("我是谁？");
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to semantic auto-recall when sender profile memory is unavailable", async () => {
+    const { engine, client } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-profile-fallback"),
+    );
+    client.read.mockRejectedValueOnce(new Error("not found"));
+    client.find.mockResolvedValueOnce({
+      memories: [
+        {
+          uri: "viking://user/wx_sender/memories/profile.md",
+          level: 2,
+          category: "profile",
+          abstract: "The user is called Da Chui.",
+          score: 0.92,
+        },
+      ],
+      resources: [],
+      total: 1,
+    });
+    const liveMessages = [{ role: "user", content: "who am I?" }];
+
+    const result = await engine.assemble({
+      prompt: "who am I?",
+      sessionId: "session-profile-fallback",
+      messages: liveMessages,
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "wx_sender" },
+    });
+
+    expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-profile-fallback");
+    expect(client.find).toHaveBeenCalled();
+    expect(result.messages[0]?.content).toContain("The user is called Da Chui.");
+  });
+
+  it("keeps ordinary low-score memories filtered by the default recall threshold", async () => {
+    const { engine, client } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallScoreThreshold: 0.15,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-low-score"),
+    );
+    client.find.mockResolvedValueOnce({
+      memories: [
+        {
+          uri: "viking://user/wx_sender/memories/profile.md",
+          level: 2,
+          category: "profile",
+          abstract: "The user is called Da Chui.",
+          score: 0.007,
+        },
+      ],
+      resources: [],
+      total: 1,
+    });
+    const liveMessages = [{ role: "user", content: "聊聊今天的计划安排" }];
+
+    const result = await engine.assemble({
+      prompt: "聊聊今天的计划安排",
+      sessionId: "session-low-score",
+      messages: liveMessages,
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "wx_sender" },
+    });
+
+    expect(client.read).not.toHaveBeenCalledWith("viking://user/memories/profile.md", expect.anything());
+    expect(client.find).toHaveBeenCalled();
+    expect(result.messages).toEqual(liveMessages);
+    expect(String(result.messages[0]?.content)).not.toContain("<relevant-memories>");
+  });
+
+  it("keeps main assemble passthrough on a new OV session when sender-scoped auto-recall has no hits", async () => {
+    const { engine, client } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-new-empty"),
+    );
+    client.find.mockResolvedValue({ memories: [], resources: [], total: 0 });
+    const liveMessages = [{ role: "user", content: "who am I?" }];
+
+    const result = await engine.assemble({
+      prompt: "who am I?",
+      sessionId: "session-new-empty",
+      messages: liveMessages,
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "wx_sender" },
+    });
+
+    expect(client.find).toHaveBeenCalled();
+    expect(result).toEqual({
+      messages: liveMessages,
+      estimatedTokens: roughEstimate(liveMessages),
+    });
+  });
+
   it("passes through live messages when the session matches bypassSessionPatterns", async () => {
     const { engine, client, getClient } = makeEngine(
       {

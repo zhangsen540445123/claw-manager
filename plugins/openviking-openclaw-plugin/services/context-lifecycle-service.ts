@@ -1,7 +1,7 @@
 // Canonical ContextEngine lifecycle service: assemble / afterTurn / compact / commit orchestration.
 import { DEFAULT_PHASE2_POLL_TIMEOUT_MS, type OpenVikingClient, type OVMessage } from "../client.js";
 import type { EffectiveQueryConfig } from "../query-config.js";
-import { buildAutoRecallContext, prepareRecallQuery } from "../auto-recall.js";
+import { buildAutoRecallContext, isIdentityProfileQuery, prepareRecallQuery } from "../auto-recall.js";
 import { toJsonLog } from "../memory-ranking.js";
 import { openClawSessionToOvStorageId } from "../routing/identity-routing.js";
 import { readOpenVikingSenderHandoff } from "../sender-handoff.js";
@@ -429,6 +429,138 @@ function assemblePassthrough(
   return { messages: liveMessages, estimatedTokens: originalTokens };
 }
 
+type AutoRecallAttemptResult =
+  | {
+      kind: "injected";
+      block: string;
+      memoryCount: number;
+      estimatedTokens: number;
+    }
+  | {
+      kind: "passthrough";
+      reason: string;
+      extra?: Record<string, unknown>;
+    };
+
+async function tryBuildSenderScopedAutoRecall(
+  params: Pick<
+    AssembleOpenVikingSessionParams,
+    | "sessionId"
+    | "sessionKey"
+    | "messages"
+    | "cfg"
+    | "queryConfigStore"
+    | "traceRecorder"
+    | "logger"
+    | "extractAgentMessageText"
+    | "hasAutoRecallBlock"
+  > & {
+    ovSessionId: string;
+    sender: LifecycleSenderIdentity;
+    agentId: string;
+    reasonPrefix: string;
+    getClient: () => Promise<OpenVikingClient | undefined>;
+  },
+): Promise<AutoRecallAttemptResult> {
+  const {
+    sessionId,
+    sessionKey,
+    messages,
+    cfg,
+    queryConfigStore,
+    traceRecorder,
+    logger,
+    extractAgentMessageText,
+    hasAutoRecallBlock,
+    ovSessionId,
+    sender,
+    agentId,
+    reasonPrefix,
+    getClient,
+  } = params;
+  const latestMessage = messages.at(-1);
+
+  if (latestMessage?.role !== "user") {
+    return {
+      kind: "passthrough",
+      reason: `${reasonPrefix}_non_user_tail`,
+      extra: { latestRole: latestMessage?.role ?? null },
+    };
+  }
+  if (!cfg.autoRecall) {
+    return { kind: "passthrough", reason: `${reasonPrefix}_auto_recall_disabled` };
+  }
+  if (hasAutoRecallBlock(latestMessage)) {
+    return { kind: "passthrough", reason: `${reasonPrefix}_recall_already_injected` };
+  }
+
+  const recallQuery = prepareRecallQuery(extractAgentMessageText(latestMessage));
+  if (!recallQuery.query || (!isIdentityProfileQuery(recallQuery.query) && recallQuery.query.length < 5)) {
+    return { kind: "passthrough", reason: `${reasonPrefix}_empty_recall_query` };
+  }
+  if (recallQuery.truncated) {
+    logger.info(
+      `openviking: recall query truncated (` +
+        `chars=${recallQuery.originalChars}->${recallQuery.finalChars})`,
+    );
+  }
+
+  try {
+    const client = await getClient();
+    if (!client) {
+      logger.info("openviking.identity_missing.skip_recall");
+      return {
+        kind: "passthrough",
+        reason: "identity_missing",
+        extra: { senderIdFound: sender.found },
+      };
+    }
+    const queryConfig = await queryConfigStore?.getEffective({
+      agentId,
+      sessionId,
+      sessionKey,
+      ovSessionId,
+    });
+    const recall = await buildAutoRecallContext({
+      cfg,
+      queryConfig,
+      client,
+      agentId,
+      queryText: recallQuery.query,
+      logger,
+      verbose: (message) => logger.info(message),
+      traceRecorder: traceRecorder as never,
+      sessionId,
+      sessionKey,
+      ovSessionId,
+      queryTruncated: recallQuery.truncated,
+      rawUserTextPreview: recallQuery.query,
+    });
+
+    if (!recall.block) {
+      return {
+        kind: "passthrough",
+        reason: `${reasonPrefix}_no_recall_hits`,
+        extra: { memoryCount: recall.memoryCount },
+      };
+    }
+
+    return {
+      kind: "injected",
+      block: recall.block,
+      memoryCount: recall.memoryCount,
+      estimatedTokens: recall.estimatedTokens,
+    };
+  } catch (err) {
+    logger.warn?.(`openviking: auto-recall failed: ${String(err)}`);
+    return {
+      kind: "passthrough",
+      reason: `${reasonPrefix}_recall_failed`,
+      extra: { error: String(err) },
+    };
+  }
+}
+
 export async function assembleOpenVikingSession({
   sessionId,
   sessionKey,
@@ -455,9 +587,10 @@ export async function assembleOpenVikingSession({
 }: AssembleOpenVikingSessionParams): Promise<AssembleOpenVikingSessionResult> {
   const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
   const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
-  const latestMessage = messages.at(-1);
   const isTransformContextAssemble = !isMainAssemble;
   const originalTokens = roughEstimate(messages);
+  let messagesWithRecall = messages;
+  let tokensWithRecall = originalTokens;
 
   rememberSessionAgentId?.({
     sessionId,
@@ -478,86 +611,50 @@ export async function assembleOpenVikingSession({
     return assemblePassthrough({ diag, ovSessionId, reason: "session_bypassed", liveMessages: messages, originalTokens });
   }
 
+  let clientResolved = false;
+  let resolvedClient: OpenVikingClient | undefined;
+  const resolveSenderScopedClient = async (): Promise<OpenVikingClient | undefined> => {
+    if (!clientResolved) {
+      resolvedClient = getClientForSender
+        ? await getClientForSender(sender.scope)
+        : await getClient();
+      clientResolved = true;
+    }
+    return resolvedClient;
+  };
+
   if (isTransformContextAssemble) {
-    if (latestMessage?.role !== "user") {
+    const routingRef = sessionId ?? sessionKey ?? ovSessionId;
+    const agentId = resolveAgentId(routingRef, sessionKey, ovSessionId);
+    const recall = await tryBuildSenderScopedAutoRecall({
+      sessionId,
+      sessionKey,
+      messages,
+      cfg,
+      queryConfigStore,
+      traceRecorder,
+      logger,
+      extractAgentMessageText,
+      hasAutoRecallBlock,
+      ovSessionId,
+      sender,
+      agentId,
+      reasonPrefix: "transform_context",
+      getClient: resolveSenderScopedClient,
+    });
+
+    if (recall.kind !== "injected") {
       return assemblePassthrough({
         diag,
         ovSessionId,
-        reason: "transform_context_non_user_tail",
+        reason: recall.reason,
         liveMessages: messages,
         originalTokens,
-        extra: { latestRole: latestMessage?.role ?? null },
+        extra: recall.extra,
       });
     }
-    if (!cfg.autoRecall) {
-      return assemblePassthrough({ diag, ovSessionId, reason: "transform_context_auto_recall_disabled", liveMessages: messages, originalTokens });
-    }
-    if (hasAutoRecallBlock(latestMessage)) {
-      return assemblePassthrough({ diag, ovSessionId, reason: "transform_context_recall_already_injected", liveMessages: messages, originalTokens });
-    }
 
-    const recallQuery = prepareRecallQuery(extractAgentMessageText(latestMessage));
-    if (!recallQuery.query || recallQuery.query.length < 5) {
-      return assemblePassthrough({ diag, ovSessionId, reason: "transform_context_empty_recall_query", liveMessages: messages, originalTokens });
-    }
-    if (recallQuery.truncated) {
-      logger.info(
-        `openviking: recall query truncated (` +
-          `chars=${recallQuery.originalChars}->${recallQuery.finalChars})`,
-      );
-    }
-
-    try {
-      const client = getClientForSender
-        ? await getClientForSender(sender.scope)
-        : await getClient();
-      if (!client) {
-        logger.info("openviking.identity_missing.skip_recall");
-        return assemblePassthrough({
-          diag,
-          ovSessionId,
-          reason: "identity_missing",
-          liveMessages: messages,
-          originalTokens,
-          extra: { senderIdFound: sender.found },
-        });
-      }
-      const routingRef = sessionId ?? sessionKey ?? ovSessionId;
-      const agentId = resolveAgentId(routingRef, sessionKey, ovSessionId);
-      const queryConfig = await queryConfigStore?.getEffective({
-        agentId,
-        sessionId,
-        sessionKey,
-        ovSessionId,
-      });
-      const recall = await buildAutoRecallContext({
-        cfg,
-        queryConfig,
-        client,
-        agentId,
-        queryText: recallQuery.query,
-        logger,
-        verbose: (message) => logger.info(message),
-        traceRecorder: traceRecorder as never,
-        sessionId,
-        sessionKey,
-        ovSessionId,
-        queryTruncated: recallQuery.truncated,
-        rawUserTextPreview: recallQuery.query,
-      });
-
-      if (!recall.block) {
-        return assemblePassthrough({
-          diag,
-          ovSessionId,
-          reason: "transform_context_no_recall_hits",
-          liveMessages: messages,
-          originalTokens,
-          extra: { memoryCount: recall.memoryCount },
-        });
-      }
-
-      const withRecall = prependRecallToLatestUserMessage(messages, recall.block);
+    const withRecall = prependRecallToLatestUserMessage(messages, recall.block);
       const estimatedTokens = roughEstimate(withRecall);
       diag("assemble_result", ovSessionId, {
         passthrough: false,
@@ -570,36 +667,45 @@ export async function assembleOpenVikingSession({
         messages: messageDigest(withRecall),
       });
       return { messages: withRecall, estimatedTokens };
-    } catch (err) {
-      logger.warn?.(`openviking: auto-recall failed: ${String(err)}`);
-      return assemblePassthrough({
-        diag,
-        ovSessionId,
-        reason: "transform_context_recall_failed",
-        liveMessages: messages,
-        originalTokens,
-        extra: { error: String(err) },
-      });
-    }
   }
 
   try {
-    const client = getClientForSender
-      ? await getClientForSender(sender.scope)
-      : await getClient();
+    const routingRef = sessionId ?? sessionKey ?? ovSessionId;
+    const agentId = resolveAgentId(routingRef, sessionKey, ovSessionId);
+    const recall = await tryBuildSenderScopedAutoRecall({
+      sessionId,
+      sessionKey,
+      messages,
+      cfg,
+      queryConfigStore,
+      traceRecorder,
+      logger,
+      extractAgentMessageText,
+      hasAutoRecallBlock,
+      ovSessionId,
+      sender,
+      agentId,
+      reasonPrefix: "main_assemble",
+      getClient: resolveSenderScopedClient,
+    });
+    messagesWithRecall = recall.kind === "injected"
+      ? prependRecallToLatestUserMessage(messages, recall.block)
+      : messages;
+    tokensWithRecall = recall.kind === "injected"
+      ? roughEstimate(messagesWithRecall)
+      : originalTokens;
+    const client = await resolveSenderScopedClient();
     if (!client) {
       logger.info("openviking.identity_missing.skip_context");
       return assemblePassthrough({
         diag,
         ovSessionId,
         reason: "identity_missing",
-        liveMessages: messages,
+        liveMessages: messagesWithRecall,
         originalTokens,
         extra: { senderIdFound: sender.found },
       });
     }
-    const routingRef = sessionId ?? sessionKey ?? ovSessionId;
-    const agentId = resolveAgentId(routingRef, sessionKey, ovSessionId);
     const ctx = await client.getSessionContext(ovSessionId, tokenBudget, agentId);
 
     const preAbstracts = ctx?.pre_archive_abstracts ?? [];
@@ -611,8 +717,8 @@ export async function assembleOpenVikingSession({
         diag,
         ovSessionId,
         reason: "no_ov_data",
-        liveMessages: messages,
-        originalTokens,
+        liveMessages: messagesWithRecall,
+        originalTokens: tokensWithRecall,
         extra: { archiveCount: 0, activeCount: 0 },
       });
     }
@@ -621,8 +727,8 @@ export async function assembleOpenVikingSession({
         diag,
         ovSessionId,
         reason: "ov_msgs_fewer_than_input",
-        liveMessages: messages,
-        originalTokens,
+        liveMessages: messagesWithRecall,
+        originalTokens: tokensWithRecall,
         extra: { archiveCount: 0, activeCount },
       });
     }
@@ -642,13 +748,16 @@ export async function assembleOpenVikingSession({
         diag,
         ovSessionId,
         reason: "sanitized_empty",
-        liveMessages: messages,
-        originalTokens,
+        liveMessages: messagesWithRecall,
+        originalTokens: tokensWithRecall,
         extra: { archiveCount: preAbstracts.length, activeCount },
       });
     }
 
-    const assembledTokens = roughEstimate(sanitized) + instruction.tokens;
+    const outputMessages = recall.kind === "injected"
+      ? prependRecallToLatestUserMessage(sanitized, recall.block)
+      : sanitized;
+    const assembledTokens = roughEstimate(outputMessages) + instruction.tokens;
     const tokensSaved = originalTokens - assembledTokens;
     const savingPct = originalTokens > 0 ? Math.round((tokensSaved / originalTokens) * 100) : 0;
 
@@ -656,7 +765,7 @@ export async function assembleOpenVikingSession({
       passthrough: false,
       archiveCount: preAbstracts.length,
       activeCount,
-      outputMessagesCount: sanitized.length,
+      outputMessagesCount: outputMessages.length,
       inputTokenEstimate: originalTokens,
       estimatedTokens: assembledTokens,
       tokensSaved,
@@ -667,11 +776,13 @@ export async function assembleOpenVikingSession({
       sessionBudget: budgets.sessionContext,
       reservedBudget: budgets.reserved,
       senderIdFound: sender.found,
-      messages: messageDigest(sanitized),
+      autoRecallMemoryCount: recall.kind === "injected" ? recall.memoryCount : 0,
+      autoRecallTokens: recall.kind === "injected" ? recall.estimatedTokens : 0,
+      messages: messageDigest(outputMessages),
     });
 
     return {
-      messages: sanitized,
+      messages: outputMessages,
       estimatedTokens: assembledTokens,
       ...(instruction.text ? { systemPromptAddition: instruction.text } : {}),
     };
@@ -688,8 +799,8 @@ export async function assembleOpenVikingSession({
         diag,
         ovSessionId,
         reason: "session_not_found",
-        liveMessages: messages,
-        originalTokens,
+        liveMessages: messagesWithRecall,
+        originalTokens: tokensWithRecall,
         extra: { error: errorMessage, senderIdFound: sender.found },
       });
     }

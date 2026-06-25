@@ -163,7 +163,7 @@ class OpenVikingUserKeyServiceTest {
           false,
           "claw-manager",
           "secret",
-          "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+          "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
           rootKey,
           "broker-token",
           "http://claw-manager-api:8080"

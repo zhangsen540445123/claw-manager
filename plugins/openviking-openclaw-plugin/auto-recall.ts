@@ -21,6 +21,7 @@ import { estimateTextTokens } from "./token-estimator.js";
 
 const RECALL_QUERY_MAX_CHARS = 4_000;
 export const AUTO_RECALL_SOURCE_MARKER = "Source: openviking-auto-recall";
+const USER_PROFILE_MEMORY_URI = "viking://user/memories/profile.md";
 
 type Logger = {
   info: (msg: string) => void;
@@ -40,6 +41,8 @@ const EXPERIENCE_INTENT_RE =
 const QUESTION_ONLY_RE =
   /^(?:什么是|是什么|区别|解释|讲讲|怎么看|为什么|如何理解|where is|what is|explain|difference between)\b|[?？]$/i;
 const CASUAL_RE = /闲聊|翻译|总结当前对话|天气|笑话|hello|hi\b|你好/i;
+const IDENTITY_PROFILE_QUERY_RE =
+  /我是谁|我叫什[么麼]|我的名字|怎么称呼我|怎麼稱呼我|你认识我吗|你認識我嗎|\bwho am i\b|\bwhat is my name\b|\bmy name\b|\bcall me\b/i;
 
 export type ExperienceRecallTrigger =
   | "task_start"
@@ -86,6 +89,10 @@ export function prepareRecallQuery(rawText: string): PreparedRecallQuery {
     originalChars,
     finalChars: query.length,
   };
+}
+
+export function isIdentityProfileQuery(queryText: string): boolean {
+  return IDENTITY_PROFILE_QUERY_RE.test(queryText.trim());
 }
 
 /** Estimate token count using the shared CJK-aware fallback for diagnostics. */
@@ -221,6 +228,57 @@ export function buildRecallContextBlock(memoryLines: string[]): string {
   ].join("\n");
 }
 
+async function tryBuildIdentityProfileRecall(params: {
+  client: OpenVikingClient;
+  agentId: string;
+  queryText: string;
+  cfg: Required<MemoryOpenVikingConfig>;
+  verbose?: (message: string) => void;
+}): Promise<{ block?: string; memoryCount: number; estimatedTokens: number }> {
+  if (!isIdentityProfileQuery(params.queryText)) {
+    return { memoryCount: 0, estimatedTokens: 0 };
+  }
+
+  try {
+    const profile = await params.client.read(USER_PROFILE_MEMORY_URI, params.agentId);
+    const content = typeof profile === "string" ? profile.trim() : "";
+    if (!content) {
+      params.verbose?.("openviking: identity profile recall skipped because profile.md is empty");
+      return { memoryCount: 0, estimatedTokens: 0 };
+    }
+    const { lines, estimatedTokens } = await buildMemoryLinesWithBudget(
+      [
+        {
+          uri: USER_PROFILE_MEMORY_URI,
+          level: 2,
+          category: "profile",
+          abstract: content,
+          score: 1,
+        },
+      ],
+      async () => content,
+      {
+        recallPreferAbstract: true,
+        recallMaxInjectedChars: params.cfg.recallMaxInjectedChars,
+        recallTokenBudget: params.cfg.recallTokenBudget,
+      },
+    );
+    if (lines.length === 0) {
+      params.verbose?.("openviking: identity profile recall skipped because profile.md exceeds injection budget");
+      return { memoryCount: 0, estimatedTokens: 0 };
+    }
+    params.verbose?.("openviking: identity profile recall injected profile.md");
+    return {
+      block: buildRecallContextBlock(lines),
+      memoryCount: 1,
+      estimatedTokens,
+    };
+  } catch {
+    params.verbose?.("openviking: identity profile recall skipped because profile.md is unavailable");
+    return { memoryCount: 0, estimatedTokens: 0 };
+  }
+}
+
 function newTraceId(): string {
   return `recall_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -327,7 +385,8 @@ export async function buildAutoRecallContext(params: {
   const { cfg, client, agentId, queryText, logger, verbose } = params;
   const queryConfig = params.queryConfig;
 
-  if (!cfg.autoRecall || queryText.length < 5) {
+  const identityProfileQuery = isIdentityProfileQuery(queryText);
+  if (!cfg.autoRecall || (!identityProfileQuery && queryText.length < 5)) {
     return { memoryCount: 0, estimatedTokens: 0 };
   }
 
@@ -335,6 +394,22 @@ export async function buildAutoRecallContext(params: {
   if (!precheck.ok) {
     verbose?.(`openviking: skipping auto-recall because precheck failed (${precheck.reason})`);
     return { memoryCount: 0, estimatedTokens: 0 };
+  }
+
+  if (identityProfileQuery) {
+    const identityProfileRecall = await tryBuildIdentityProfileRecall({
+      client,
+      agentId,
+      queryText,
+      cfg,
+      verbose,
+    });
+    if (identityProfileRecall.block) {
+      return identityProfileRecall;
+    }
+    if (queryText.length < 5) {
+      return { memoryCount: 0, estimatedTokens: 0 };
+    }
   }
 
   return withTimeout(
@@ -438,6 +513,18 @@ export async function buildAutoRecallContext(params: {
         categoryWeights: queryConfig.categoryWeights,
         resourceTypeWeights: queryConfig.resourceTypeWeights,
       } : undefined);
+      if (allMemories.length > 0 && memories.length === 0) {
+        const highestScore = allMemories.reduce(
+          (highest, item) => Math.max(highest, typeof item.score === "number" ? item.score : 0),
+          0,
+        );
+        verbose?.(
+          `openviking: auto-recall candidates filtered out ` +
+            `(candidates=${allMemories.length}, leafCandidates=${leafOnly.length}, ` +
+            `afterThreshold=${processed.length}, highestScore=${highestScore.toFixed(6)}, ` +
+            `scoreThreshold=${scoreThreshold})`,
+        );
+      }
 
       const recordTrace = async (injectedMemories: FindResultItem[], injectedCount: number, estimatedTokens?: number) => {
         const entry: RecallTraceEntry = {

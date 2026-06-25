@@ -72,7 +72,7 @@ class OpenVikingPluginServiceTest {
         new ObjectMapper(),
         settingsService,
         executor,
-        () -> List.of("2026.6.28", "2026.6.27")
+        () -> List.of("2026.6.30", "2026.6.29")
     );
   }
 
@@ -92,12 +92,12 @@ class OpenVikingPluginServiceTest {
           return execHandle;
         });
 
-    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.28");
+    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.30");
     executor.runNext();
 
     assertThat(started.status()).isEqualTo("installing");
     assertThat(commands).containsExactly(
-        List.of("openclaw", "plugins", "install", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28", "--force"),
+        List.of("openclaw", "plugins", "install", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30", "--force"),
         List.of(
             "openclaw",
             "openviking",
@@ -123,9 +123,9 @@ class OpenVikingPluginServiceTest {
   @Test
   void installRejectsMissingBaseUrl() {
     InstanceEntity instance = instance();
-    when(settingsService.effectiveSettings()).thenReturn(new OpenVikingEffectiveSettings("", false, "claw-manager", "secret", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28", "root-key", "broker-token", "http://claw-manager-api:8080"));
+    when(settingsService.effectiveSettings()).thenReturn(new OpenVikingEffectiveSettings("", false, "claw-manager", "secret", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30", "root-key", "broker-token", "http://claw-manager-api:8080"));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.28"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("OpenViking Base URL");
   }
@@ -138,13 +138,13 @@ class OpenVikingPluginServiceTest {
         false,
         "claw-manager",
         "secret",
-        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
         "",
         "broker-token",
         "http://claw-manager-api:8080"
     ));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.28"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("Root API Key");
   }
@@ -155,7 +155,7 @@ class OpenVikingPluginServiceTest {
     when(settingsService.effectiveSettings()).thenReturn(settings());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
 
-    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.28");
+    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.30");
 
     assertThat(started.status()).isEqualTo("installing");
   }
@@ -173,14 +173,14 @@ class OpenVikingPluginServiceTest {
         new ObjectMapper(),
         settingsService,
         executor,
-        () -> List.of("2026.6.28", "2026.6.27"),
+        () -> List.of("2026.6.30", "2026.6.29"),
         coordinator
     );
     InstanceEntity instance = instance();
     when(settingsService.effectiveSettings()).thenReturn(settings());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.28"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("微信插件");
   }
@@ -191,7 +191,7 @@ class OpenVikingPluginServiceTest {
         false,
         "claw-manager",
         "secret",
-        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
         "root-key",
         "broker-token",
         "http://claw-manager-api:8080"

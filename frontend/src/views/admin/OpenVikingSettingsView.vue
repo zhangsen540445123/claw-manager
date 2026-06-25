@@ -14,7 +14,7 @@ const form = reactive({
   baseUrl: "",
   trustedModeEnabled: true,
   accountId: "claw-manager",
-  pluginPackage: "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28",
+  pluginPackage: "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
   identitySalt: "",
   rootApiKey: "",
   clearRootApiKey: false
@@ -32,7 +32,7 @@ async function loadSettings() {
     form.baseUrl = settings.baseUrl || "";
     form.trustedModeEnabled = settings.trustedModeEnabled;
     form.accountId = settings.accountId || "claw-manager";
-    form.pluginPackage = settings.pluginPackage || "npm:@claw-manager/openviking-openclaw-plugin@2026.6.28";
+    form.pluginPackage = settings.pluginPackage || "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30";
     form.identitySalt = "";
     form.rootApiKey = "";
     form.clearRootApiKey = false;
@@ -107,7 +107,7 @@ async function saveSettings() {
           <el-input v-model="form.accountId" placeholder="claw-manager" />
         </el-form-item>
         <el-form-item label="OpenViking 插件包">
-          <el-input v-model="form.pluginPackage" placeholder="npm:@claw-manager/openviking-openclaw-plugin@2026.6.28" />
+          <el-input v-model="form.pluginPackage" placeholder="npm:@claw-manager/openviking-openclaw-plugin@2026.6.30" />
         </el-form-item>
         <el-form-item label="身份盐值">
           <el-input
