@@ -157,6 +157,24 @@
       "advanced": true,
       "help": "Outer time budget for the whole auto-recall flow, including search, ranking, and memory reads."
     },
+    "recallPrecheckTimeoutMs": {
+      "label": "Recall Health Precheck Timeout (ms)",
+      "placeholder": "2000",
+      "advanced": true,
+      "help": "Time budget for the lightweight OpenViking /health precheck before auto-recall."
+    },
+    "recallHealthCacheTtlMs": {
+      "label": "Recall Health Cache TTL (ms)",
+      "placeholder": "30000",
+      "advanced": true,
+      "help": "Duration to trust a successful auto-recall health precheck without rechecking."
+    },
+    "recallHealthStaleTtlMs": {
+      "label": "Recall Health Stale TTL (ms)",
+      "placeholder": "300000",
+      "advanced": true,
+      "help": "Duration to allow recall after a failed precheck when OpenViking was recently healthy."
+    },
     "recallResources": {
       "label": "Recall Resources",
       "help": "Include resources (viking://resources) in auto-recall and default memory_recall search. Enables account-level shared knowledge retrieval.",
@@ -329,6 +347,21 @@
         "type": "number",
         "minimum": 1000,
         "maximum": 300000
+      },
+      "recallPrecheckTimeoutMs": {
+        "type": "number",
+        "minimum": 100,
+        "maximum": 300000
+      },
+      "recallHealthCacheTtlMs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 300000
+      },
+      "recallHealthStaleTtlMs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 3600000
       },
       "recallResources": {
         "type": "boolean"

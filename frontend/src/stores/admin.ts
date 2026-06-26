@@ -249,8 +249,10 @@ export const useAdminStore = defineStore("admin", {
       };
       return this.openVikingPluginStatusByInstanceId[instanceId];
     },
-    async loadOpenVikingPluginVersions() {
-      const response = await api<{ versions: PublicOpenVikingPluginVersions }>("/api/admin/openviking-plugins/versions");
+    async loadOpenVikingPluginVersions(forceRefresh = false) {
+      const response = await api<{ versions: PublicOpenVikingPluginVersions }>(
+        `/api/admin/openviking-plugins/versions${forceRefresh ? "?forceRefresh=true" : ""}`
+      );
       this.openVikingPluginVersions = response.versions;
       this.applyOpenVikingPluginVersions(response.versions);
       return response.versions;

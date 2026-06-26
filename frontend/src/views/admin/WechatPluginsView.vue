@@ -94,7 +94,7 @@ async function refreshVersions(showMessage = true) {
   try {
     const versions = activePlugin.value === "wechat"
       ? await admin.loadWechatPluginVersions()
-      : await admin.loadOpenVikingPluginVersions();
+      : await admin.loadOpenVikingPluginVersions(showMessage);
     if (showMessage) {
       ElMessage.success(versions.latest ? pluginMeta.value.refreshSuccess : "版本暂不可用，请稍后重试。");
     }

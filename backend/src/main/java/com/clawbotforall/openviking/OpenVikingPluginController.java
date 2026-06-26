@@ -47,9 +47,12 @@ public class OpenVikingPluginController {
   }
 
   @GetMapping("/api/admin/openviking-plugins/versions")
-  public Map<String, Object> versions(Authentication authentication) {
+  public Map<String, Object> versions(
+      @RequestParam(defaultValue = "false") boolean forceRefresh,
+      Authentication authentication
+  ) {
     requireAdmin(authentication);
-    return Map.of("versions", pluginService.versions());
+    return Map.of("versions", pluginService.versions(forceRefresh));
   }
 
   @PostMapping("/api/admin/instances/{instanceId}/openviking-plugin/install")

@@ -171,8 +171,12 @@ public class OpenVikingPluginService {
   }
 
   public OpenVikingPluginVersions versions() {
+    return versions(false);
+  }
+
+  public OpenVikingPluginVersions versions(boolean forceRefresh) {
     CachedVersions cached = cachedVersions.get();
-    if (cached != null && Instant.now().toEpochMilli() - cached.loadedAtMs() < VERSION_CACHE_TTL_MS) {
+    if (!forceRefresh && cached != null && Instant.now().toEpochMilli() - cached.loadedAtMs() < VERSION_CACHE_TTL_MS) {
       return publicVersions(cached.versions());
     }
     try {

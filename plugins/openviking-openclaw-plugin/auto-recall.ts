@@ -390,10 +390,23 @@ export async function buildAutoRecallContext(params: {
     return { memoryCount: 0, estimatedTokens: 0 };
   }
 
-  const precheck = await quickRecallPrecheck(client, agentId);
+  const precheck = await quickRecallPrecheck(client, agentId, {
+    timeoutMs: cfg.recallPrecheckTimeoutMs,
+    cacheTtlMs: cfg.recallHealthCacheTtlMs,
+    staleTtlMs: cfg.recallHealthStaleTtlMs,
+  });
   if (!precheck.ok) {
-    verbose?.(`openviking: skipping auto-recall because precheck failed (${precheck.reason})`);
+    verbose?.(
+      `openviking: skipping auto-recall because precheck failed (${precheck.reason}; ` +
+        `timeoutMs=${cfg.recallPrecheckTimeoutMs})`,
+    );
     return { memoryCount: 0, estimatedTokens: 0 };
+  }
+  if (precheck.degraded) {
+    verbose?.(
+      `openviking: auto-recall proceeding with stale health (${precheck.reason}; ` +
+        `timeoutMs=${cfg.recallPrecheckTimeoutMs}, staleTtlMs=${cfg.recallHealthStaleTtlMs})`,
+    );
   }
 
   if (identityProfileQuery) {

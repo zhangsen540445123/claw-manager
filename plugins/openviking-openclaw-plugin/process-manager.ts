@@ -29,13 +29,44 @@ export async function quickHealthCheck(
   }
 }
 
+type RecallHealthState = {
+  lastHealthyAtMs?: number;
+};
+
+export type RecallPrecheckOptions = {
+  timeoutMs?: number;
+  cacheTtlMs?: number;
+  staleTtlMs?: number;
+  nowMs?: () => number;
+};
+
+const recallHealthStates = new WeakMap<object, RecallHealthState>();
+
 export async function quickRecallPrecheck(
   client: OpenVikingClient,
   agentId?: string,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const healthOk = await quickHealthCheck(client, agentId, 500);
-  if (healthOk) {
+  options: RecallPrecheckOptions = {},
+): Promise<{ ok: true; degraded?: true; reason?: string } | { ok: false; reason: string }> {
+  const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 500));
+  const cacheTtlMs = Math.max(0, Math.floor(options.cacheTtlMs ?? 0));
+  const staleTtlMs = Math.max(0, Math.floor(options.staleTtlMs ?? 0));
+  const now = options.nowMs ?? Date.now;
+  const nowMs = now();
+  const state = recallHealthStates.get(client as object);
+
+  if (state?.lastHealthyAtMs !== undefined && nowMs - state.lastHealthyAtMs <= cacheTtlMs) {
     return { ok: true };
   }
-  return { ok: false, reason: "health check failed" };
+
+  const healthOk = await quickHealthCheck(client, agentId, timeoutMs);
+  if (healthOk) {
+    recallHealthStates.set(client as object, { lastHealthyAtMs: now() });
+    return { ok: true };
+  }
+
+  const lastHealthyAtMs = state?.lastHealthyAtMs;
+  if (lastHealthyAtMs !== undefined && nowMs - lastHealthyAtMs <= staleTtlMs) {
+    return { ok: true, degraded: true, reason: "recent health check is stale" };
+  }
+  return { ok: false, reason: "no recent healthy OpenViking check" };
 }

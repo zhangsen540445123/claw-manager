@@ -30,7 +30,7 @@ class PublicInstanceFactoryTest {
         true,
         "claw-manager",
         "display-salt",
-        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34",
         "root-key",
         "broker-token",
         "http://claw-manager-api:8080"

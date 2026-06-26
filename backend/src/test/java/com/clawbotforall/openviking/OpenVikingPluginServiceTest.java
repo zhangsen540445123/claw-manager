@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -72,7 +73,7 @@ class OpenVikingPluginServiceTest {
         new ObjectMapper(),
         settingsService,
         executor,
-        () -> List.of("2026.6.30", "2026.6.29")
+        () -> List.of("2026.6.34", "2026.6.29")
     );
   }
 
@@ -92,12 +93,12 @@ class OpenVikingPluginServiceTest {
           return execHandle;
         });
 
-    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.30");
+    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.34");
     executor.runNext();
 
     assertThat(started.status()).isEqualTo("installing");
     assertThat(commands).containsExactly(
-        List.of("openclaw", "plugins", "install", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30", "--force"),
+        List.of("openclaw", "plugins", "install", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34", "--force"),
         List.of(
             "openclaw",
             "openviking",
@@ -123,9 +124,9 @@ class OpenVikingPluginServiceTest {
   @Test
   void installRejectsMissingBaseUrl() {
     InstanceEntity instance = instance();
-    when(settingsService.effectiveSettings()).thenReturn(new OpenVikingEffectiveSettings("", false, "claw-manager", "secret", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30", "root-key", "broker-token", "http://claw-manager-api:8080"));
+    when(settingsService.effectiveSettings()).thenReturn(new OpenVikingEffectiveSettings("", false, "claw-manager", "secret", "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34", "root-key", "broker-token", "http://claw-manager-api:8080"));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.34"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("OpenViking Base URL");
   }
@@ -138,13 +139,13 @@ class OpenVikingPluginServiceTest {
         false,
         "claw-manager",
         "secret",
-        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34",
         "",
         "broker-token",
         "http://claw-manager-api:8080"
     ));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.34"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("Root API Key");
   }
@@ -155,7 +156,7 @@ class OpenVikingPluginServiceTest {
     when(settingsService.effectiveSettings()).thenReturn(settings());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
 
-    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.30");
+    PublicOpenVikingPluginStatus started = service.startInstall(instance, "2026.6.34");
 
     assertThat(started.status()).isEqualTo("installing");
   }
@@ -173,16 +174,41 @@ class OpenVikingPluginServiceTest {
         new ObjectMapper(),
         settingsService,
         executor,
-        () -> List.of("2026.6.30", "2026.6.29"),
+        () -> List.of("2026.6.34", "2026.6.29"),
         coordinator
     );
     InstanceEntity instance = instance();
     when(settingsService.effectiveSettings()).thenReturn(settings());
     when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
 
-    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.30"))
+    assertThatThrownBy(() -> service.startInstall(instance, "2026.6.34"))
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("微信插件");
+  }
+
+  @Test
+  void versionsUsesCacheUnlessForceRefreshIsRequested() {
+    AtomicInteger calls = new AtomicInteger();
+    service = new OpenVikingPluginService(
+        openClawRuntime,
+        commandService,
+        fileService,
+        mutationMapper,
+        eventPublisher,
+        new ObjectMapper(),
+        settingsService,
+        executor,
+        () -> List.of("2026.6." + calls.incrementAndGet())
+    );
+
+    OpenVikingPluginVersions first = service.versions(false);
+    OpenVikingPluginVersions cached = service.versions(false);
+    OpenVikingPluginVersions refreshed = service.versions(true);
+
+    assertThat(first.latest()).isEqualTo("2026.6.1");
+    assertThat(cached.latest()).isEqualTo("2026.6.1");
+    assertThat(refreshed.latest()).isEqualTo("2026.6.2");
+    assertThat(calls).hasValue(2);
   }
 
   private static OpenVikingEffectiveSettings settings() {
@@ -191,7 +217,7 @@ class OpenVikingPluginServiceTest {
         false,
         "claw-manager",
         "secret",
-        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.30",
+        "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34",
         "root-key",
         "broker-token",
         "http://claw-manager-api:8080"

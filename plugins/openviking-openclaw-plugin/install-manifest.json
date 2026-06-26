@@ -1,6 +1,6 @@
 {
   "manifestVersion": "1.0",
-  "pluginVersion": "2026.6.30",
+  "pluginVersion": "2026.6.34",
   "plugin": {
     "id": "openviking",
     "kind": "context-engine",

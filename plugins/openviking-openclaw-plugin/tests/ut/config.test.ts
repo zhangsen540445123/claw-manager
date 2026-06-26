@@ -260,6 +260,33 @@ describe("memoryOpenVikingConfigSchema.parse()", () => {
     expect(cfgHigh.autoRecallTimeoutMs).toBe(300000);
   });
 
+  it("defaults auto-recall health precheck timing for slower HTTPS services", () => {
+    const cfg = memoryOpenVikingConfigSchema.parse({});
+    expect(cfg.recallPrecheckTimeoutMs).toBe(2000);
+    expect(cfg.recallHealthCacheTtlMs).toBe(30000);
+    expect(cfg.recallHealthStaleTtlMs).toBe(300000);
+  });
+
+  it("clamps auto-recall health precheck timing within bounds", () => {
+    const cfgLow = memoryOpenVikingConfigSchema.parse({
+      recallPrecheckTimeoutMs: 10,
+      recallHealthCacheTtlMs: -1,
+      recallHealthStaleTtlMs: -1,
+    });
+    expect(cfgLow.recallPrecheckTimeoutMs).toBe(100);
+    expect(cfgLow.recallHealthCacheTtlMs).toBe(0);
+    expect(cfgLow.recallHealthStaleTtlMs).toBe(0);
+
+    const cfgHigh = memoryOpenVikingConfigSchema.parse({
+      recallPrecheckTimeoutMs: 999999,
+      recallHealthCacheTtlMs: 999999999,
+      recallHealthStaleTtlMs: 999999999,
+    });
+    expect(cfgHigh.recallPrecheckTimeoutMs).toBe(300000);
+    expect(cfgHigh.recallHealthCacheTtlMs).toBe(300000);
+    expect(cfgHigh.recallHealthStaleTtlMs).toBe(3600000);
+  });
+
   it("treats undefined/null as empty config", () => {
     const cfg1 = memoryOpenVikingConfigSchema.parse(undefined);
     const cfg2 = memoryOpenVikingConfigSchema.parse(null);

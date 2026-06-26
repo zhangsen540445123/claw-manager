@@ -26,6 +26,12 @@ export type MemoryOpenVikingConfig = {
   autoRecall?: boolean;
   /** Outer time budget for the whole auto-recall flow, including search, ranking, and reads. */
   autoRecallTimeoutMs?: number;
+  /** Time budget for the lightweight OpenViking /health precheck before auto-recall. */
+  recallPrecheckTimeoutMs?: number;
+  /** Duration to trust a successful auto-recall health precheck without rechecking. */
+  recallHealthCacheTtlMs?: number;
+  /** Duration to allow recall after a failed precheck when OpenViking was recently healthy. */
+  recallHealthStaleTtlMs?: number;
   /** Include resources in auto-recall and default memory_recall search. Default false. */
   recallResources?: boolean;
   recallLimit?: number;
@@ -110,6 +116,9 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_CAPTURE_MODE = "semantic";
 const DEFAULT_CAPTURE_MAX_LENGTH = 24000;
 const DEFAULT_AUTO_RECALL_TIMEOUT_MS = 5000;
+const DEFAULT_RECALL_PRECHECK_TIMEOUT_MS = 2000;
+const DEFAULT_RECALL_HEALTH_CACHE_TTL_MS = 30000;
+const DEFAULT_RECALL_HEALTH_STALE_TTL_MS = 300000;
 const DEFAULT_RECALL_LIMIT = 6;
 const DEFAULT_RECALL_SCORE_THRESHOLD = 0.15;
 const DEFAULT_RECALL_MAX_CONTENT_CHARS = 5000;
@@ -395,6 +404,9 @@ export const memoryOpenVikingConfigSchema = {
         "captureMaxLength",
         "autoRecall",
         "autoRecallTimeoutMs",
+        "recallPrecheckTimeoutMs",
+        "recallHealthCacheTtlMs",
+        "recallHealthStaleTtlMs",
         "recallResources",
         "recallLimit",
         "recallScoreThreshold",
@@ -517,6 +529,18 @@ export const memoryOpenVikingConfigSchema = {
       autoRecallTimeoutMs: Math.max(
         1000,
         Math.min(300_000, Math.floor(toNumber(cfg.autoRecallTimeoutMs, DEFAULT_AUTO_RECALL_TIMEOUT_MS))),
+      ),
+      recallPrecheckTimeoutMs: Math.max(
+        100,
+        Math.min(300_000, Math.floor(toNumber(cfg.recallPrecheckTimeoutMs, DEFAULT_RECALL_PRECHECK_TIMEOUT_MS))),
+      ),
+      recallHealthCacheTtlMs: Math.max(
+        0,
+        Math.min(300_000, Math.floor(toNumber(cfg.recallHealthCacheTtlMs, DEFAULT_RECALL_HEALTH_CACHE_TTL_MS))),
+      ),
+      recallHealthStaleTtlMs: Math.max(
+        0,
+        Math.min(3_600_000, Math.floor(toNumber(cfg.recallHealthStaleTtlMs, DEFAULT_RECALL_HEALTH_STALE_TTL_MS))),
       ),
       recallResources,
       recallLimit: Math.max(1, Math.floor(toNumber(cfg.recallLimit, DEFAULT_RECALL_LIMIT))),
@@ -740,6 +764,24 @@ export const memoryOpenVikingConfigSchema = {
       placeholder: String(DEFAULT_AUTO_RECALL_TIMEOUT_MS),
       advanced: true,
       help: "Outer time budget for the whole auto-recall flow, including search, ranking, and memory reads.",
+    },
+    recallPrecheckTimeoutMs: {
+      label: "Recall Health Precheck Timeout (ms)",
+      placeholder: String(DEFAULT_RECALL_PRECHECK_TIMEOUT_MS),
+      advanced: true,
+      help: "Time budget for the lightweight OpenViking /health precheck before auto-recall.",
+    },
+    recallHealthCacheTtlMs: {
+      label: "Recall Health Cache TTL (ms)",
+      placeholder: String(DEFAULT_RECALL_HEALTH_CACHE_TTL_MS),
+      advanced: true,
+      help: "Duration to trust a successful auto-recall health precheck without rechecking.",
+    },
+    recallHealthStaleTtlMs: {
+      label: "Recall Health Stale TTL (ms)",
+      placeholder: String(DEFAULT_RECALL_HEALTH_STALE_TTL_MS),
+      advanced: true,
+      help: "Duration to allow recall after a failed precheck when OpenViking was recently healthy.",
     },
     recallResources: {
       label: "Recall Resources",
