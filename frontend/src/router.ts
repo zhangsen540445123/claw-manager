@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import AdminOverviewView from "./views/admin/AdminOverviewView.vue";
 import InstanceCreateView from "./views/admin/InstanceCreateView.vue";
 import InstancesView from "./views/admin/InstancesView.vue";
+import ExternalApiView from "./views/admin/ExternalApiView.vue";
 import ModelPresetsView from "./views/admin/ModelPresetsView.vue";
 import OpenVikingSettingsView from "./views/admin/OpenVikingSettingsView.vue";
 import OpsView from "./views/admin/OpsView.vue";
@@ -25,6 +26,7 @@ export const router = createRouter({
     { path: "/admin/wechat-plugins", name: "admin-wechat-plugins", component: WechatPluginsView, meta: { shellKey: "wechatPlugins", title: "插件管理" } },
     { path: "/admin/wechat-links", name: "admin-wechat-links", component: WechatLinksView, meta: { shellKey: "wechat", title: "微信扫码" } },
     { path: "/admin/wechat-users", name: "admin-wechat-users", component: WechatUsersView, meta: { shellKey: "wechatUsers", title: "用户中心" } },
+    { path: "/admin/external-api", name: "admin-external-api", component: ExternalApiView, meta: { shellKey: "externalApi", title: "API接入" } },
     { path: "/admin/ops", name: "admin-ops", component: OpsView, meta: { shellKey: "ops", title: "系统运维" } },
     { path: "/login", name: "login", component: LoginView },
     { path: "/change-password", name: "change-password", component: ChangePasswordView },

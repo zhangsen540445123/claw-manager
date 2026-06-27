@@ -380,6 +380,7 @@ export function createMemoryOpenVikingContextEngine(params: {
       await afterTurnOpenVikingSession({
         sessionId: afterTurnParams.sessionId,
         sessionKey: resolveSessionKey(afterTurnParams),
+        sessionFile: afterTurnParams.sessionFile,
         messages: afterTurnParams.messages,
         prePromptMessageCount: afterTurnParams.prePromptMessageCount,
         isHeartbeat: afterTurnParams.isHeartbeat,

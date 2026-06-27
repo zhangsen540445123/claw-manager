@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -140,6 +140,40 @@ describe("context-engine afterTurn()", () => {
     }
   });
 
+  it("uses api OpenViking user id when API channel sender id is present", async () => {
+    const apiHash = "0123456789abcdef0123456789abcdef";
+    const { engine, getClient, getClientForSender, client } = makeEngine({
+      useSenderScopedClient: true,
+      cfgOverrides: {
+        identityHashSecret: "identity-secret",
+      },
+    });
+
+    await engine.afterTurn!({
+      sessionId: "session-api",
+      sessionKey: `agent:main:claw-manager-api:global:direct:api:${apiHash}:conversation`,
+      sessionFile: "",
+      messages: [
+        { role: "user", content: "请记住我的名字叫大锤" },
+        { role: "assistant", content: "记住了，大锤。" },
+      ],
+      prePromptMessageCount: 0,
+      runtimeContext: {
+        senderId: `api:${apiHash}`,
+      },
+    });
+
+    expect(getClientForSender).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderId: `api:${apiHash}`,
+        senderHash: apiHash,
+        openVikingUserId: `api_${apiHash}`,
+      }),
+    );
+    expect(getClient).not.toHaveBeenCalled();
+    expect(client.addSessionMessage).toHaveBeenCalled();
+  });
+
   it("does nothing when autoCapture is disabled", async () => {
     const { engine, client } = makeEngine({ autoCapture: false });
 
@@ -234,6 +268,95 @@ describe("context-engine afterTurn()", () => {
     // Second call: assistant message
     expect(client.addSessionMessage.mock.calls[1][1]).toBe("assistant");
     expect(client.addSessionMessage.mock.calls[1][2][0].text).toContain("hi there");
+  });
+
+  it("falls back to sessionFile JSONL when host messages do not include the completed turn", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "ov-session-file-"));
+    const sessionFile = path.join(tempDir, "api-session.jsonl");
+    await writeFile(
+      sessionFile,
+      [
+        JSON.stringify({ type: "session", id: "api-session" }),
+        JSON.stringify({
+          type: "message",
+          message: { role: "user", content: "请记住我的名字叫大锤" },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: [{ type: "text", text: "记住了，大锤。" }] },
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+    const { engine, client } = makeEngine({
+      useSenderScopedClient: true,
+      cfgOverrides: {
+        identityHashSecret: "identity-secret",
+      },
+    });
+
+    try {
+      await engine.afterTurn!({
+        sessionId: "api-session",
+        sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+        sessionFile,
+        messages: [{ role: "system", content: "host snapshot missing completed turn" }],
+        prePromptMessageCount: 0,
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+
+    expect(client.addSessionMessage).toHaveBeenCalledTimes(2);
+    expect(client.addSessionMessage.mock.calls[0][1]).toBe("user");
+    expect(client.addSessionMessage.mock.calls[0][2][0].text).toContain("大锤");
+    expect(client.addSessionMessage.mock.calls[1][1]).toBe("assistant");
+  });
+
+  it("forces async commit for explicit memory intent below the token threshold", async () => {
+    const { engine, client } = makeEngine({
+      commitTokenThreshold: 20000,
+      getSession: { pending_tokens: 100 },
+    });
+
+    await engine.afterTurn!({
+      sessionId: "s-memory-intent",
+      sessionFile: "",
+      messages: [
+        { role: "user", content: "请记住我的名字叫大锤" },
+        { role: "assistant", content: "记住了，大锤。" },
+      ],
+      prePromptMessageCount: 0,
+      runtimeContext: { openVikingUserId: "api_f9db8c63722f76a920d852d85f502177" },
+    });
+
+    expect(client.addSessionMessage).toHaveBeenCalled();
+    expect(client.commitSession).toHaveBeenCalledWith("s-memory-intent", {
+      wait: false,
+      agentId: "test-agent",
+      keepRecentCount: 10,
+    });
+  });
+
+  it("does not force commit for identity recall questions below the token threshold", async () => {
+    const { engine, client } = makeEngine({
+      commitTokenThreshold: 20000,
+      getSession: { pending_tokens: 100 },
+    });
+
+    await engine.afterTurn!({
+      sessionId: "s-identity-question",
+      sessionFile: "",
+      messages: [
+        { role: "user", content: "我是谁？" },
+        { role: "assistant", content: "我还不知道。" },
+      ],
+      prePromptMessageCount: 0,
+      runtimeContext: { openVikingUserId: "api_f9db8c63722f76a920d852d85f502177" },
+    });
+
+    expect(client.addSessionMessage).toHaveBeenCalled();
+    expect(client.commitSession).not.toHaveBeenCalled();
   });
 
   it("passes the latest non-system message timestamp to addSessionMessage as ISO string", async () => {

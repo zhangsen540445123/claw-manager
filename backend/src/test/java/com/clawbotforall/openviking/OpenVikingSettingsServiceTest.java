@@ -29,7 +29,7 @@ class OpenVikingSettingsServiceTest {
     assertThat(settings.baseUrl()).isBlank();
     assertThat(settings.trustedModeEnabled()).isTrue();
     assertThat(settings.accountId()).isEqualTo("claw-manager");
-    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.34");
+    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.36");
     assertThat(settings.rootApiKeyConfigured()).isFalse();
     assertThat(settings.rootApiKeyFingerprint()).isBlank();
     assertThat(settings.saltConfigured()).isTrue();
@@ -50,7 +50,7 @@ class OpenVikingSettingsServiceTest {
         "baseUrl", " http://openviking:1933/ ",
         "trustedModeEnabled", false,
         "accountId", " account-main ",
-        "pluginPackage", " npm:@claw-manager/openviking-openclaw-plugin@2026.6.34 ",
+        "pluginPackage", " npm:@claw-manager/openviking-openclaw-plugin@2026.6.36 ",
         "rootApiKey", " ov-root-secret ",
         "identitySalt", " shared-salt "
     ));
@@ -58,7 +58,7 @@ class OpenVikingSettingsServiceTest {
     assertThat(settings.baseUrl()).isEqualTo("http://openviking:1933");
     assertThat(settings.trustedModeEnabled()).isFalse();
     assertThat(settings.accountId()).isEqualTo("account-main");
-    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.34");
+    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.36");
     assertThat(settings.rootApiKeyConfigured()).isTrue();
     assertThat(settings.rootApiKeyFingerprint()).hasSize(16);
     assertThat(settings.saltConfigured()).isTrue();
@@ -96,7 +96,7 @@ class OpenVikingSettingsServiceTest {
     entity.setBaseUrl("http://openviking:1933");
     entity.setTrustedModeEnabled(false);
     entity.setAccountId("claw-manager");
-    entity.setPluginPackage("npm:@claw-manager/openviking-openclaw-plugin@2026.6.34");
+    entity.setPluginPackage("npm:@claw-manager/openviking-openclaw-plugin@2026.6.36");
     entity.setRootApiKey("existing-root-key");
     mapper.saved = entity;
     OpenVikingSettingsService service = new OpenVikingSettingsService(
@@ -141,7 +141,7 @@ class OpenVikingSettingsServiceTest {
     entity.setBaseUrl("http://openviking:1933");
     entity.setTrustedModeEnabled(false);
     entity.setAccountId("claw-manager");
-    entity.setPluginPackage("npm:@claw-manager/openviking-openclaw-plugin@2026.6.34");
+    entity.setPluginPackage("npm:@claw-manager/openviking-openclaw-plugin@2026.6.36");
     entity.setIdentitySalt("configured-salt");
     entity.setRootApiKey("root-key");
     mapper.saved = entity;

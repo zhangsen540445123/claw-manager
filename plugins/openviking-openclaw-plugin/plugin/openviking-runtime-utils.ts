@@ -38,6 +38,15 @@ export function extractToolSenderId(ctx: unknown): string | undefined {
     return undefined;
   }
   const toolCtx = ctx as Record<string, unknown>;
+  for (const key of ["openVikingUserId", "openvikingUserId"]) {
+    const value = toolCtx[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (/^(?:wx|api)_[0-9a-f]{32}$/.test(trimmed)) {
+        return trimmed;
+      }
+    }
+  }
   if (typeof toolCtx.requesterSenderId === "string") {
     const trimmed = toolCtx.requesterSenderId.trim();
     if (trimmed) {

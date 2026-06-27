@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class OpenVikingUserKeyService {
 
-  private static final Pattern OPENVIKING_USER_ID_PATTERN = Pattern.compile("wx_[0-9a-f]{32}");
+  private static final Pattern OPENVIKING_USER_ID_PATTERN = Pattern.compile("(?:wx|api)_[0-9a-f]{32}");
 
   private final OpenVikingUserKeyMapper userKeyMapper;
   private final OpenVikingSettingsService settingsService;

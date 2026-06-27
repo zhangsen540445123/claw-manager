@@ -1,10 +1,13 @@
 // Canonical ContextEngine lifecycle service: assemble / afterTurn / compact / commit orchestration.
+import { readFile } from "node:fs/promises";
+
 import { DEFAULT_PHASE2_POLL_TIMEOUT_MS, type OpenVikingClient, type OVMessage } from "../client.js";
 import type { EffectiveQueryConfig } from "../query-config.js";
 import { buildAutoRecallContext, isIdentityProfileQuery, prepareRecallQuery } from "../auto-recall.js";
 import { toJsonLog } from "../memory-ranking.js";
 import { openClawSessionToOvStorageId } from "../routing/identity-routing.js";
 import { readOpenVikingSenderHandoff } from "../sender-handoff.js";
+import { resolveApiSenderIdentity } from "../identity.js";
 import { extractNewTurnMessages } from "../text-utils.js";
 import { estimateAgentMessageTokens, estimateTextTokens } from "../token-estimator.js";
 import {
@@ -129,6 +132,7 @@ type AfterTurnClient = Pick<OpenVikingClient, "addSessionMessage" | "getSession"
 export type AfterTurnOpenVikingSessionParams = {
   sessionId: string;
   sessionKey?: string;
+  sessionFile?: string;
   messages?: AgentMessage[];
   prePromptMessageCount?: number;
   isHeartbeat?: boolean;
@@ -137,6 +141,7 @@ export type AfterTurnOpenVikingSessionParams = {
   cfg: {
     autoCapture: boolean;
     commitTokenThreshold: number;
+    commitOnMemoryIntent?: boolean;
     commitKeepRecentCount: number;
     logFindRequests: boolean;
   };
@@ -174,6 +179,10 @@ const RESERVED_MIN = 20_000;
 const RESERVED_RATIO = 0.15;
 const PHASE2_POLL_INTERVAL_MS = 800;
 const PHASE2_POLL_MAX_MS = DEFAULT_PHASE2_POLL_TIMEOUT_MS;
+const MEMORY_COMMIT_INTENT_RE =
+  /(?:请\s*)?(?:记住|记下)|我叫|我的名字|叫我|我是|我喜欢|我的偏好|\b(?:please\s+)?remember\b|\b(?:my\s+name\s+is|call\s+me|i\s+am|i'm|i\s+like|my\s+preference)\b/i;
+const MEMORY_RECALL_QUESTION_RE =
+  /我是谁|我叫什么|你认识我吗|\bwho\s+am\s+i\b|\bwhat\s+is\s+my\s+name\b|\bdo\s+you\s+know\s+me\b/i;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -841,6 +850,74 @@ function pickLatestCreatedAt(messages: AgentMessage[]): string | undefined {
   return undefined;
 }
 
+function toSessionFileAgentMessage(entry: unknown): AgentMessage | undefined {
+  if (!entry || typeof entry !== "object") {
+    return undefined;
+  }
+  const record = entry as Record<string, unknown>;
+  const rawMessage = record.message && typeof record.message === "object"
+    ? record.message as Record<string, unknown>
+    : record;
+  const role = typeof rawMessage.role === "string" ? rawMessage.role : "";
+  if (!role) {
+    return undefined;
+  }
+  return {
+    ...(rawMessage as AgentMessage),
+    timestamp: rawMessage.timestamp ?? record.timestamp,
+  };
+}
+
+async function readLatestTurnMessagesFromSessionFile(sessionFile?: string): Promise<AgentMessage[]> {
+  const file = typeof sessionFile === "string" ? sessionFile.trim() : "";
+  if (!file) {
+    return [];
+  }
+  let raw = "";
+  try {
+    raw = await readFile(file, "utf8");
+  } catch {
+    return [];
+  }
+  const messages: AgentMessage[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const message = toSessionFileAgentMessage(parsed);
+      if (message) {
+        messages.push(message);
+      }
+    } catch {
+      continue;
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      return messages.slice(i);
+    }
+  }
+  return [];
+}
+
+function hasExplicitMemoryCommitIntent(messages: ExtractedTurnMessage[]): boolean {
+  const text = messages
+    .filter((msg) => msg.role === "user")
+    .flatMap((msg) => msg.parts)
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || MEMORY_RECALL_QUESTION_RE.test(text)) {
+    return false;
+  }
+  return MEMORY_COMMIT_INTENT_RE.test(text);
+}
+
 type LifecycleSenderIdentity = {
   found: boolean;
   senderId?: string;
@@ -851,11 +928,47 @@ type LifecycleSenderIdentity = {
 
 function extractRuntimeSenderId(runtimeContext: Record<string, unknown> | undefined): LifecycleSenderIdentity {
   if (runtimeContext) {
+    for (const key of ["openVikingUserId", "openvikingUserId"]) {
+      const openVikingUserId = runtimeContext[key];
+      if (typeof openVikingUserId === "string") {
+        const trimmed = openVikingUserId.trim();
+        if (/^(?:wx|api)_[0-9a-f]{32}$/.test(trimmed)) {
+          const senderId =
+            typeof runtimeContext.SenderId === "string" && runtimeContext.SenderId.trim()
+              ? runtimeContext.SenderId.trim()
+              : typeof runtimeContext.requesterSenderId === "string" && runtimeContext.requesterSenderId.trim()
+                ? runtimeContext.requesterSenderId.trim()
+                : typeof runtimeContext.senderId === "string" && runtimeContext.senderId.trim()
+                  ? runtimeContext.senderId.trim()
+                  : undefined;
+          return {
+            found: true,
+            senderId,
+            openVikingUserId: trimmed,
+            scope: trimmed,
+          };
+        }
+      }
+    }
     for (const key of ["SenderId", "requesterSenderId", "senderId"]) {
       const senderId = runtimeContext[key];
       if (typeof senderId === "string") {
         const trimmed = senderId.trim();
         if (trimmed) {
+          const apiIdentity = resolveApiSenderIdentity(trimmed);
+          if (apiIdentity) {
+            return {
+              found: true,
+              senderId: apiIdentity.senderId,
+              senderHash: apiIdentity.senderHash,
+              openVikingUserId: apiIdentity.openVikingUserId,
+              scope: {
+                senderId: apiIdentity.senderId,
+                senderHash: apiIdentity.senderHash,
+                openVikingUserId: apiIdentity.openVikingUserId,
+              },
+            };
+          }
           return { found: true, senderId: trimmed, scope: trimmed };
         }
       }
@@ -964,6 +1077,7 @@ function messageDigest(messages: AgentMessage[], maxCharsPerMsg = 2000): Array<{
 export async function afterTurnOpenVikingSession({
   sessionId,
   sessionKey,
+  sessionFile,
   messages: rawMessages,
   prePromptMessageCount,
   isHeartbeat,
@@ -1010,7 +1124,29 @@ export async function afterTurnOpenVikingSession({
       return;
     }
 
-    const messages = rawMessages ?? [];
+    let messages = rawMessages ?? [];
+    let start =
+      typeof prePromptMessageCount === "number" && prePromptMessageCount >= 0
+        ? prePromptMessageCount
+        : 0;
+    let extractionSource = "host_messages";
+
+    let { messages: extractedMessagesRaw, newCount } = extractNewTurnMessages(messages, start);
+    let extractedMessages = coalesceConsecutiveToolMessages(extractedMessagesRaw);
+
+    if (extractedMessages.length === 0) {
+      const fallbackMessages = await readLatestTurnMessagesFromSessionFile(sessionFile);
+      if (fallbackMessages.length > 0) {
+        messages = fallbackMessages;
+        start = 0;
+        extractionSource = "session_file";
+        const fallback = extractNewTurnMessages(messages, start);
+        extractedMessagesRaw = fallback.messages;
+        newCount = fallback.newCount;
+        extractedMessages = coalesceConsecutiveToolMessages(extractedMessagesRaw);
+      }
+    }
+
     if (messages.length === 0) {
       diag("afterTurn_skip", ovSessionId, {
         reason: "no_messages",
@@ -1020,19 +1156,12 @@ export async function afterTurnOpenVikingSession({
       return;
     }
 
-    const start =
-      typeof prePromptMessageCount === "number" && prePromptMessageCount >= 0
-        ? prePromptMessageCount
-        : 0;
-
-    const { messages: extractedMessagesRaw, newCount } = extractNewTurnMessages(messages, start);
-    const extractedMessages = coalesceConsecutiveToolMessages(extractedMessagesRaw);
-
     if (extractedMessages.length === 0) {
       diag("afterTurn_skip", ovSessionId, {
         reason: "no_new_turn_messages",
         totalMessages: messages.length,
         prePromptMessageCount: start,
+        extractionSource,
         senderIdFound: sender.found,
       });
       return;
@@ -1051,6 +1180,7 @@ export async function afterTurnOpenVikingSession({
       newMessageCount: newCount,
       prePromptMessageCount: start,
       newTurnTokens,
+      extractionSource,
       senderIdFound: sender.found,
       messages: newMsgFull,
     });
@@ -1068,6 +1198,7 @@ export async function afterTurnOpenVikingSession({
     }
     const createdAt = pickLatestCreatedAt(turnMessages);
     const senderRoleId = toRoleId(sender.senderId ?? sender.openVikingUserId);
+    let capturedCount = 0;
     for (const msg of extractedMessages) {
       const ovParts = msg.parts.map((part) => {
         if (part.type === "text") {
@@ -1096,13 +1227,21 @@ export async function afterTurnOpenVikingSession({
           createdAt,
           msg.role === "user" ? senderRoleId : undefined,
         );
+        capturedCount += 1;
       }
     }
+    logger.info?.(
+      `openviking: afterTurn captured messages count=${capturedCount}, ` +
+        `source=${extractionSource}, session=${ovSessionId}, ` +
+        `user=${sender.openVikingUserId ?? sender.senderHash ?? (sender.found ? "resolved" : "missing")}`,
+    );
 
     const session = await client.getSession(ovSessionId, agentId);
     const pendingTokens = session.pending_tokens ?? 0;
+    const forceCommitForMemoryIntent =
+      cfg.commitOnMemoryIntent !== false && hasExplicitMemoryCommitIntent(extractedMessages);
 
-    if (pendingTokens < cfg.commitTokenThreshold) {
+    if (pendingTokens < cfg.commitTokenThreshold && !forceCommitForMemoryIntent) {
       diag("afterTurn_skip", ovSessionId, {
         reason: "below_threshold",
         pendingTokens,
@@ -1110,6 +1249,12 @@ export async function afterTurnOpenVikingSession({
         senderIdFound: sender.found,
       });
       return;
+    }
+    if (forceCommitForMemoryIntent && pendingTokens < cfg.commitTokenThreshold) {
+      logger.info?.(
+        `openviking: afterTurn force commit for memory intent ` +
+          `(session=${ovSessionId}, pendingTokens=${pendingTokens}, threshold=${cfg.commitTokenThreshold})`,
+      );
     }
 
     const commitResult = await client.commitSession(ovSessionId, {
@@ -1126,6 +1271,7 @@ export async function afterTurnOpenVikingSession({
     diag("afterTurn_commit", ovSessionId, {
       pendingTokens,
       commitTokenThreshold: cfg.commitTokenThreshold,
+      commitReason: forceCommitForMemoryIntent && pendingTokens < cfg.commitTokenThreshold ? "memory_intent" : "threshold",
       status: commitResult.status,
       archived: commitResult.archived ?? false,
       taskId: commitResult.task_id ?? null,

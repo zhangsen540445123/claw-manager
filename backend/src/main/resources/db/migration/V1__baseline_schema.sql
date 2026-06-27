@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS openviking_settings (
   base_url TEXT NULL,
   trusted_mode_enabled TINYINT(1) NOT NULL DEFAULT 1,
   account_id VARCHAR(120) NOT NULL DEFAULT 'claw-manager',
-  plugin_package VARCHAR(255) NOT NULL DEFAULT 'npm:@claw-manager/openviking-openclaw-plugin@2026.6.34',
+  plugin_package VARCHAR(255) NOT NULL DEFAULT 'npm:@claw-manager/openviking-openclaw-plugin@2026.6.36',
   identity_salt TEXT NULL,
   root_api_key TEXT NULL,
   created_at VARCHAR(40) NOT NULL,
@@ -177,4 +177,26 @@ CREATE TABLE IF NOT EXISTS openviking_user_keys (
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   PRIMARY KEY (account_id, openviking_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS external_api_settings (
+  id VARCHAR(64) PRIMARY KEY,
+  api_key TEXT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS external_api_user_routes (
+  openid_hash VARCHAR(64) PRIMARY KEY,
+  openid VARCHAR(255) NOT NULL,
+  openviking_user_id VARCHAR(128) NOT NULL,
+  instance_id VARCHAR(64) NOT NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  last_used_at VARCHAR(40) NOT NULL,
+  INDEX idx_external_api_user_routes_openid (openid),
+  INDEX idx_external_api_user_routes_openviking_user_id (openviking_user_id),
+  INDEX idx_external_api_user_routes_instance_id (instance_id),
+  CONSTRAINT fk_external_api_user_routes_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

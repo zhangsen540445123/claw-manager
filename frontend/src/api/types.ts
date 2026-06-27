@@ -182,6 +182,35 @@ export type PublicOpenVikingPluginStatus = PublicWechatPluginStatus;
 
 export type PublicOpenVikingPluginVersions = PublicWechatPluginVersions;
 
+export type PublicApiChannelPluginStatus = PublicWechatPluginStatus;
+
+export type PublicApiChannelPluginVersions = PublicWechatPluginVersions;
+
+export interface PublicExternalApiSettings {
+  enabled: boolean;
+  apiKey: string;
+  apiKeyConfigured: boolean;
+  apiKeyPreview: string;
+  updatedAt: string;
+}
+
+export interface PublicExternalApiUserRoute {
+  openid: string;
+  openidHash: string;
+  openvikingUserId: string;
+  instanceId: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string;
+}
+
+export interface ExternalApiUserRoutePage {
+  routes: PublicExternalApiUserRoute[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface PublicOpenVikingSettings {
   baseUrl: string;
   trustedModeEnabled: boolean;

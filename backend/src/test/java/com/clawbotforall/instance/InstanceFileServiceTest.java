@@ -153,6 +153,28 @@ class InstanceFileServiceTest {
   }
 
   @Test
+  void enablesApiChannelWhenPluginIsAllowedOnInstance() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    draft.instance().setPluginsAllow("[\"claw-manager-api\"]");
+    draft.instance().setPluginsEntries("{\"claw-manager-api\":{\"enabled\":true}}");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    @SuppressWarnings("unchecked")
+    Map<String, Object> channels = (Map<String, Object>) config.get("channels");
+    assertThat(channels.get("claw-manager-api"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("enabled", true);
+  }
+
+  @Test
   void enablesOpenVikingContextEngineSlotWhenPluginIsAllowedOnInstance() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");

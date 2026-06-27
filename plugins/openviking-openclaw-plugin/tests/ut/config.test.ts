@@ -20,6 +20,7 @@ describe("memoryOpenVikingConfigSchema.parse()", () => {
     expect(cfg.recallMaxInjectedChars).toBe(4000);
     expect(cfg.recallTokenBudget).toBe(4000);
     expect(cfg.commitTokenThreshold).toBe(20000);
+    expect(cfg.commitOnMemoryIntent).toBe(true);
     expect(cfg.captureMode).toBe("semantic");
     expect(cfg.captureMaxLength).toBe(24000);
     expect(cfg.autoRecallTimeoutMs).toBe(5000);

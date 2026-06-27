@@ -23,7 +23,12 @@ import org.springframework.stereotype.Service;
 public class OpenClawGatewayRpcService {
 
   private static final Logger log = LoggerFactory.getLogger(OpenClawGatewayRpcService.class);
-  private static final long START_CHANNEL_TIMEOUT_MS = 15_000;
+  private static final long START_CHANNEL_TIMEOUT_MS = 30_000;
+  private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
+  private static final String API_CHANNEL_ID = "claw-manager-api";
+  private static final String API_ACCOUNT_ID = "global";
+  private static final long API_CHANNEL_START_TIMEOUT_MS = 45_000;
+  private static final long API_CHANNEL_START_RETRY_DELAY_MS = 500;
 
   private final OpenClawRuntime openClawRuntime;
   private final ObjectMapper objectMapper;
@@ -40,27 +45,47 @@ public class OpenClawGatewayRpcService {
   public void startWechatChannel(InstanceEntity instance, List<String> accountIds) {
     Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
     if (normalizedAccountIds.isEmpty()) {
-      startAccount(instance, null);
+      startAccount(instance, WECHAT_CHANNEL_ID, null);
       return;
     }
     for (String accountId : normalizedAccountIds) {
-      startAccount(instance, accountId);
+      startAccount(instance, WECHAT_CHANNEL_ID, accountId);
     }
+  }
+
+  public void startApiChannel(InstanceEntity instance) {
+    long deadline = System.currentTimeMillis() + API_CHANNEL_START_TIMEOUT_MS;
+    RuntimeException lastError = null;
+    do {
+      try {
+        startAccount(instance, API_CHANNEL_ID, API_ACCOUNT_ID);
+        return;
+      } catch (RuntimeException error) {
+        lastError = error;
+        if (!isRetryableApiChannelStartError(error) || System.currentTimeMillis() >= deadline) {
+          throw error;
+        }
+        sleepBeforeApiChannelRetry();
+      }
+    } while (System.currentTimeMillis() < deadline);
+    throw lastError == null
+        ? new IllegalStateException("OpenClaw API Channel 启动失败。")
+        : lastError;
   }
 
   public void restartWechatChannel(InstanceEntity instance, List<String> accountIds) {
     Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
     if (normalizedAccountIds.isEmpty()) {
-      startAccount(instance, null);
+      startAccount(instance, WECHAT_CHANNEL_ID, null);
       return;
     }
     for (String accountId : normalizedAccountIds) {
       try {
-        stopAccount(instance, accountId);
+        stopAccount(instance, WECHAT_CHANNEL_ID, accountId);
       } catch (RuntimeException error) {
         log.warn("OpenClaw channels.stop 失败，将继续 start：instanceId={}, accountId={}, reason={}", instance.getId(), accountId, error.getMessage());
       }
-      startAccount(instance, accountId);
+      startAccount(instance, WECHAT_CHANNEL_ID, accountId);
     }
   }
 
@@ -75,20 +100,20 @@ public class OpenClawGatewayRpcService {
     return normalizedAccountIds;
   }
 
-  private void startAccount(InstanceEntity instance, String accountId) {
-    runChannelOperation(instance, "channels.start", accountId, true);
+  private void startAccount(InstanceEntity instance, String channelId, String accountId) {
+    runChannelOperation(instance, "channels.start", channelId, accountId, true);
   }
 
-  private void stopAccount(InstanceEntity instance, String accountId) {
-    runChannelOperation(instance, "channels.stop", accountId, false);
+  private void stopAccount(InstanceEntity instance, String channelId, String accountId) {
+    runChannelOperation(instance, "channels.stop", channelId, accountId, false);
   }
 
-  private void runChannelOperation(InstanceEntity instance, String method, String accountId, boolean requireStarted) {
+  private void runChannelOperation(InstanceEntity instance, String method, String channelId, String accountId, boolean requireStarted) {
     CompletableFuture<Integer> exit = new CompletableFuture<>();
     StringBuilder output = new StringBuilder();
     openClawRuntime.startExec(
         instance,
-        List.of("node", "--input-type=module", "-e", operationScript(method, accountId, requireStarted)),
+        List.of("node", "--input-type=module", "-e", operationScript(method, channelId, accountId, requireStarted)),
         START_CHANNEL_TIMEOUT_MS,
         Map.of(),
         new RuntimeExecListener() {
@@ -127,11 +152,13 @@ public class OpenClawGatewayRpcService {
     }
   }
 
-  private String operationScript(String method, String accountId, boolean requireStarted) {
+  private String operationScript(String method, String channelId, String accountId, boolean requireStarted) {
     String methodLiteral;
+    String channelLiteral;
     String accountLiteral;
     try {
       methodLiteral = objectMapper.writeValueAsString(method);
+      channelLiteral = objectMapper.writeValueAsString(defaultString(channelId).trim());
       accountLiteral = accountId == null || accountId.isBlank() ? "undefined" : objectMapper.writeValueAsString(accountId);
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("微信通道操作参数序列化失败。", error);
@@ -140,8 +167,9 @@ public class OpenClawGatewayRpcService {
         import { c as callGateway } from "/usr/local/lib/node_modules/openclaw/dist/call-BlqKbSL2.js";
         import { i as GATEWAY_CLIENT_NAMES, r as GATEWAY_CLIENT_MODES } from "/usr/local/lib/node_modules/openclaw/dist/client-info-CcqJJIan.js";
         const method = %s;
+        const channel = %s;
         const accountId = %s;
-        const params = { channel: "openclaw-weixin" };
+        const params = { channel };
         if (accountId) params.accountId = accountId;
         const result = await callGateway({
           method,
@@ -154,7 +182,7 @@ public class OpenClawGatewayRpcService {
         });
         console.log(JSON.stringify(result));
         if (%s && !result?.started) process.exitCode = 2;
-        """.formatted(methodLiteral, accountLiteral, requireStarted ? "true" : "false");
+        """.formatted(methodLiteral, channelLiteral, accountLiteral, requireStarted ? "true" : "false");
   }
 
   private static String defaultString(String value) {
@@ -173,5 +201,24 @@ public class OpenClawGatewayRpcService {
       return normalized;
     }
     return normalized.substring(normalized.length() - 1000);
+  }
+
+  private static boolean isRetryableApiChannelStartError(Throwable error) {
+    String message = message(error).toLowerCase();
+    return message.contains("unknown channel")
+        || message.contains("unknown method")
+        || message.contains("gateway")
+        || message.contains("timeout")
+        || message.contains("timed out")
+        || message.contains("超时");
+  }
+
+  private static void sleepBeforeApiChannelRetry() {
+    try {
+      Thread.sleep(API_CHANNEL_START_RETRY_DELAY_MS);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("OpenClaw API Channel 启动重试被中断。", error);
+    }
   }
 }

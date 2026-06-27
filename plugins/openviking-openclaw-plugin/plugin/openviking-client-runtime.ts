@@ -1,6 +1,6 @@
 import { OpenVikingClient } from "../client.js";
 import type { HttpTransport } from "../adapters/http-transport.js";
-import { resolveSenderIdentity } from "../identity.js";
+import { resolveApiSenderIdentity, resolveSenderIdentity } from "../identity.js";
 
 type Logger = {
   info: (message: string) => void;
@@ -30,6 +30,10 @@ function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isExplicitOpenVikingUserId(value: string): boolean {
+  return /^(?:wx|api)_[0-9a-f]{32}$/.test(value);
+}
+
 function resolveClientSenderIdentity(input: unknown, secret: string): ClientSenderIdentity | undefined {
   if (input && typeof input === "object") {
     const record = input as Record<string, unknown>;
@@ -43,7 +47,7 @@ function resolveClientSenderIdentity(input: unknown, secret: string): ClientSend
     }
     const objectSenderId = trimString(record.SenderId) || trimString(record.requesterSenderId) || trimString(record.senderId);
     if (objectSenderId) {
-      const identity = resolveSenderIdentity(objectSenderId, secret);
+      const identity = resolveApiSenderIdentity(objectSenderId) ?? resolveSenderIdentity(objectSenderId, secret);
       return identity
         ? {
             senderId: identity.senderId,
@@ -54,7 +58,13 @@ function resolveClientSenderIdentity(input: unknown, secret: string): ClientSend
     }
   }
 
-  const identity = resolveSenderIdentity(input, secret);
+  const stringInput = trimString(input);
+  if (isExplicitOpenVikingUserId(stringInput)) {
+    return {
+      openVikingUserId: stringInput,
+    };
+  }
+  const identity = resolveApiSenderIdentity(input) ?? resolveSenderIdentity(input, secret);
   return identity
     ? {
         senderId: identity.senderId,

@@ -231,6 +231,12 @@
       "advanced": true,
       "help": "Minimum estimated pending tokens before auto-commit triggers. Set to 0 to commit every turn."
     },
+    "commitOnMemoryIntent": {
+      "label": "Commit On Memory Intent",
+      "placeholder": "true",
+      "advanced": true,
+      "help": "When true, explicit memory intent such as 请记住/我叫/my name triggers an async commit even below Commit Token Threshold."
+    },
     "commitKeepRecentCount": {
       "label": "Commit Keep Recent Count",
       "placeholder": "10",
@@ -404,6 +410,9 @@
       },
       "commitTokenThreshold": {
         "type": "number"
+      },
+      "commitOnMemoryIntent": {
+        "type": "boolean"
       },
       "commitKeepRecentCount": {
         "type": "number",

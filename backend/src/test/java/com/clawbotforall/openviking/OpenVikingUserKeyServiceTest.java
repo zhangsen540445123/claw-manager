@@ -61,6 +61,18 @@ class OpenVikingUserKeyServiceTest {
   }
 
   @Test
+  void resolveCanUsePreDerivedApiOpenVikingUserId() {
+    FakeAdminClient adminClient = new FakeAdminClient("user-key-api");
+    OpenVikingUserKeyService service = service(new FakeUserKeyMapper(), adminClient, "root-key");
+
+    OpenVikingResolvedUserKey resolved = service.resolve(new OpenVikingUserResolveRequest("", "api_0123456789abcdef0123456789abcdef"));
+
+    assertThat(resolved.openvikingUserId()).isEqualTo("api_0123456789abcdef0123456789abcdef");
+    assertThat(resolved.userKey()).isEqualTo("user-key-api");
+    assertThat(adminClient.lastUserId).isEqualTo("api_0123456789abcdef0123456789abcdef");
+  }
+
+  @Test
   void resolveRejectsMissingIdentity() {
     OpenVikingUserKeyService service = service(new FakeUserKeyMapper(), new FakeAdminClient("user-key-a"), "root-key");
 
@@ -163,7 +175,7 @@ class OpenVikingUserKeyServiceTest {
           false,
           "claw-manager",
           "secret",
-          "npm:@claw-manager/openviking-openclaw-plugin@2026.6.34",
+          "npm:@claw-manager/openviking-openclaw-plugin@2026.6.36",
           rootKey,
           "broker-token",
           "http://claw-manager-api:8080"

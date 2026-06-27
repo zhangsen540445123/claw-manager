@@ -27,6 +27,7 @@ public class InstanceFileService {
 
   private static final int GATEWAY_PORT = 18789;
   private static final String WECHAT_CHANNEL_ID = "openclaw-weixin";
+  private static final String API_CHANNEL_ID = "claw-manager-api";
   private static final String OPENVIKING_PLUGIN_ID = "openviking";
   private static final String CONTROL_UI_ROOT = "/usr/local/lib/node_modules/openclaw/dist/control-ui";
 
@@ -280,15 +281,17 @@ public class InstanceFileService {
   }
 
   private Map<String, Object> channelsConfig(InstanceEntity instance) {
-    if (!readJsonList(instance.getPluginsAllow()).contains(WECHAT_CHANNEL_ID)) {
-      return Map.of();
-    }
-    Map<String, Object> wechatChannel = new LinkedHashMap<>();
-    wechatChannel.put("enabled", true);
-    wechatChannel.put("replyProgressMessages", true);
-
+    List<Object> allow = readJsonList(instance.getPluginsAllow());
     Map<String, Object> channels = new LinkedHashMap<>();
-    channels.put(WECHAT_CHANNEL_ID, wechatChannel);
+    if (allow.contains(WECHAT_CHANNEL_ID)) {
+      Map<String, Object> wechatChannel = new LinkedHashMap<>();
+      wechatChannel.put("enabled", true);
+      wechatChannel.put("replyProgressMessages", true);
+      channels.put(WECHAT_CHANNEL_ID, wechatChannel);
+    }
+    if (allow.contains(API_CHANNEL_ID)) {
+      channels.put(API_CHANNEL_ID, Map.of("enabled", true));
+    }
     return channels;
   }
 

@@ -1,0 +1,22 @@
+{
+  "id": "claw-manager-api",
+  "version": "2026.6.32",
+  "channels": [
+    "claw-manager-api"
+  ],
+  "channelConfigs": {
+    "claw-manager-api": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "label": "claw-manager-api",
+      "description": "Claw Manager external API channel configuration."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

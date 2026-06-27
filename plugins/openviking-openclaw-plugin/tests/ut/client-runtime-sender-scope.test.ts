@@ -133,6 +133,82 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
     expect((dataInit.headers as Headers).get("X-API-Key")).toBe("user-key-handoff");
   });
 
+  it("treats explicit api OpenViking user id strings as scoped identities", async () => {
+    const transport = vi.fn().mockImplementation(async (url: string) => {
+      if (url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve") {
+        return okResponse({ openvikingUserId: "api_0123456789abcdef0123456789abcdef", userKey: "user-key-api" });
+      }
+      return okResponse({ items: [] });
+    });
+    const runtime = createOpenVikingClientRuntime({
+      cfg: {
+        baseUrl: "http://127.0.0.1:1933",
+        apiKey: "",
+        peer_role: "assistant",
+        peer_prefix: "agent",
+        timeoutMs: 5000,
+        accountId: "claw-manager",
+        userId: "",
+        identityHashSecret: "secret",
+        clawManagerInternalBaseUrl: "http://claw-manager-api:8080",
+        openVikingBrokerToken: "broker-token",
+        logFindRequests: false,
+      },
+      rawPeerPrefix: "",
+      logger: { info: vi.fn() },
+      transport,
+    });
+
+    const client = await runtime.getClientForSender("api_0123456789abcdef0123456789abcdef");
+    await client?.find("hello", { limit: 1 });
+
+    const [, brokerInit] = transport.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(brokerInit.body))).toEqual({
+      openvikingUserId: "api_0123456789abcdef0123456789abcdef",
+    });
+    const [, dataInit] = transport.mock.calls[1] as [string, RequestInit];
+    expect((dataInit.headers as Headers).get("X-API-Key")).toBe("user-key-api");
+  });
+
+  it("maps API channel sender ids to api OpenViking user ids without rehashing", async () => {
+    const apiHash = "0123456789abcdef0123456789abcdef";
+    const transport = vi.fn().mockImplementation(async (url: string) => {
+      if (url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve") {
+        return okResponse({ openvikingUserId: `api_${apiHash}`, userKey: "user-key-api" });
+      }
+      return okResponse({ items: [] });
+    });
+    const runtime = createOpenVikingClientRuntime({
+      cfg: {
+        baseUrl: "http://127.0.0.1:1933",
+        apiKey: "",
+        peer_role: "assistant",
+        peer_prefix: "agent",
+        timeoutMs: 5000,
+        accountId: "claw-manager",
+        userId: "",
+        identityHashSecret: "secret",
+        clawManagerInternalBaseUrl: "http://claw-manager-api:8080",
+        openVikingBrokerToken: "broker-token",
+        logFindRequests: false,
+      },
+      rawPeerPrefix: "",
+      logger: { info: vi.fn() },
+      transport,
+    });
+
+    const client = await runtime.getClientForSender(`api:${apiHash}`);
+    await client?.find("hello", { limit: 1 });
+
+    const [, brokerInit] = transport.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(brokerInit.body))).toEqual({
+      senderId: `api:${apiHash}`,
+      openvikingUserId: `api_${apiHash}`,
+    });
+    const [, dataInit] = transport.mock.calls[1] as [string, RequestInit];
+    expect((dataInit.headers as Headers).get("X-API-Key")).toBe("user-key-api");
+  });
+
   it("does not return a client when sender identity is unavailable", async () => {
     const runtime = createOpenVikingClientRuntime({
       cfg: {

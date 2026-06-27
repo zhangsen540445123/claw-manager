@@ -7,7 +7,7 @@ import { useAdminStore } from "../../stores/admin";
 import type { PublicInstance, PublicWechatPluginStatus } from "../../api/types";
 import { formatDateTime } from "../../utils/adminUi";
 
-type PluginKind = "wechat" | "openviking";
+type PluginKind = "wechat" | "openviking" | "api";
 type PluginAction = "check" | "install" | "uninstall" | "upgrade" | "reinstall";
 
 const admin = useAdminStore();
@@ -21,8 +21,9 @@ const selectedVersion = ref("");
 
 const runningStatuses = new Set(["installing", "uninstalling", "upgrading", "reinstalling"]);
 
-const pluginMeta = computed(() => activePlugin.value === "wechat"
-  ? {
+const pluginMeta = computed(() => {
+  if (activePlugin.value === "wechat") {
+    return {
       title: "微信插件",
       description: "批量检测、安装、卸载和升级各 OpenClaw 实例内的微信渠道插件。",
       installConfirm: "卸载只移除微信插件和启用配置，保留微信账号状态与绑定历史。",
@@ -30,8 +31,10 @@ const pluginMeta = computed(() => activePlugin.value === "wechat"
       refreshSuccess: "Claw Manager 微信插件版本已刷新。",
       refreshFailed: "Claw Manager 微信插件版本读取失败",
       operationFailed: "微信插件操作失败"
-    }
-  : {
+    };
+  }
+  if (activePlugin.value === "openviking") {
+    return {
       title: "OpenViking 插件",
       description: "批量检测、安装、卸载和升级各 OpenClaw 实例内的 OpenViking 上下文引擎插件。",
       installConfirm: "卸载会移除 OpenViking 插件和上下文引擎启用配置，不删除 OpenViking 服务端数据。",
@@ -39,11 +42,26 @@ const pluginMeta = computed(() => activePlugin.value === "wechat"
       refreshSuccess: "OpenViking 插件版本已刷新。",
       refreshFailed: "OpenViking 插件版本读取失败",
       operationFailed: "OpenViking 插件操作失败"
-    });
+    };
+  }
+  return {
+    title: "API Channel 插件",
+    description: "批量检测、安装、卸载和升级各 OpenClaw 实例内的外部 API 渠道插件。",
+    installConfirm: "卸载会移除 API Channel 插件和启用配置，不删除 API 用户路由记录。",
+    reinstallConfirm: "重新安装会覆盖 API Channel 插件包并重新写入启用配置。",
+    refreshSuccess: "API Channel 插件版本已刷新。",
+    refreshFailed: "API Channel 插件版本读取失败",
+    operationFailed: "API Channel 插件操作失败"
+  };
+});
 
 const tableRows = computed(() => admin.instances);
 const selectedIds = computed(() => selectedInstances.value.map((instance) => instance.id));
-const currentVersions = computed(() => activePlugin.value === "wechat" ? admin.wechatPluginVersions : admin.openVikingPluginVersions);
+const currentVersions = computed(() => {
+  if (activePlugin.value === "wechat") return admin.wechatPluginVersions;
+  if (activePlugin.value === "openviking") return admin.openVikingPluginVersions;
+  return admin.apiChannelPluginVersions;
+});
 const versionOptions = computed(() => {
   const latest = currentVersions.value.latest;
   const options = [
@@ -94,7 +112,9 @@ async function refreshVersions(showMessage = true) {
   try {
     const versions = activePlugin.value === "wechat"
       ? await admin.loadWechatPluginVersions()
-      : await admin.loadOpenVikingPluginVersions(showMessage);
+      : activePlugin.value === "openviking"
+        ? await admin.loadOpenVikingPluginVersions(showMessage)
+        : await admin.loadApiChannelPluginVersions(showMessage);
     if (showMessage) {
       ElMessage.success(versions.latest ? pluginMeta.value.refreshSuccess : "版本暂不可用，请稍后重试。");
     }
@@ -109,15 +129,18 @@ async function refreshVersions(showMessage = true) {
 }
 
 function pluginStatus(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.wechatPluginStatusByInstanceId[instanceId] || null
-    : admin.openVikingPluginStatusByInstanceId[instanceId] || null;
+  if (activePlugin.value === "wechat") return admin.wechatPluginStatusByInstanceId[instanceId] || null;
+  if (activePlugin.value === "openviking") return admin.openVikingPluginStatusByInstanceId[instanceId] || null;
+  return admin.apiChannelPluginStatusByInstanceId[instanceId] || null;
 }
 
 function otherPluginStatus(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.openVikingPluginStatusByInstanceId[instanceId] || null
-    : admin.wechatPluginStatusByInstanceId[instanceId] || null;
+  const statuses = [
+    activePlugin.value !== "wechat" ? admin.wechatPluginStatusByInstanceId[instanceId] || null : null,
+    activePlugin.value !== "openviking" ? admin.openVikingPluginStatusByInstanceId[instanceId] || null : null,
+    activePlugin.value !== "api" ? admin.apiChannelPluginStatusByInstanceId[instanceId] || null : null
+  ];
+  return statuses.find((status) => isTaskRunning(status)) || null;
 }
 
 function isRunning(instance: PublicInstance) {
@@ -302,63 +325,63 @@ async function runBatch(action: PluginAction) {
 }
 
 function loadStatus(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.loadWechatPluginStatus(instanceId, false)
-    : admin.loadOpenVikingPluginStatus(instanceId, false);
+  if (activePlugin.value === "wechat") return admin.loadWechatPluginStatus(instanceId, false);
+  if (activePlugin.value === "openviking") return admin.loadOpenVikingPluginStatus(instanceId, false);
+  return admin.loadApiChannelPluginStatus(instanceId, false);
 }
 
 function installPlugin(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.installWechatPlugin(instanceId, actionVersion())
-    : admin.installOpenVikingPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "wechat") return admin.installWechatPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "openviking") return admin.installOpenVikingPlugin(instanceId, actionVersion());
+  return admin.installApiChannelPlugin(instanceId, actionVersion());
 }
 
 function uninstallPlugin(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.uninstallWechatPlugin(instanceId)
-    : admin.uninstallOpenVikingPlugin(instanceId);
+  if (activePlugin.value === "wechat") return admin.uninstallWechatPlugin(instanceId);
+  if (activePlugin.value === "openviking") return admin.uninstallOpenVikingPlugin(instanceId);
+  return admin.uninstallApiChannelPlugin(instanceId);
 }
 
 function upgradePlugin(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.upgradeWechatPlugin(instanceId, actionVersion())
-    : admin.upgradeOpenVikingPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "wechat") return admin.upgradeWechatPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "openviking") return admin.upgradeOpenVikingPlugin(instanceId, actionVersion());
+  return admin.upgradeApiChannelPlugin(instanceId, actionVersion());
 }
 
 function reinstallPlugin(instanceId: string) {
-  return activePlugin.value === "wechat"
-    ? admin.reinstallWechatPlugin(instanceId, actionVersion())
-    : admin.reinstallOpenVikingPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "wechat") return admin.reinstallWechatPlugin(instanceId, actionVersion());
+  if (activePlugin.value === "openviking") return admin.reinstallOpenVikingPlugin(instanceId, actionVersion());
+  return admin.reinstallApiChannelPlugin(instanceId, actionVersion());
 }
 
 function batchCheck(instanceIds: string[]) {
-  return activePlugin.value === "wechat"
-    ? admin.batchCheckWechatPlugins(instanceIds)
-    : admin.batchCheckOpenVikingPlugins(instanceIds);
+  if (activePlugin.value === "wechat") return admin.batchCheckWechatPlugins(instanceIds);
+  if (activePlugin.value === "openviking") return admin.batchCheckOpenVikingPlugins(instanceIds);
+  return admin.batchCheckApiChannelPlugins(instanceIds);
 }
 
 function batchInstall(instanceIds: string[]) {
-  return activePlugin.value === "wechat"
-    ? admin.batchInstallWechatPlugins(instanceIds, actionVersion())
-    : admin.batchInstallOpenVikingPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "wechat") return admin.batchInstallWechatPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "openviking") return admin.batchInstallOpenVikingPlugins(instanceIds, actionVersion());
+  return admin.batchInstallApiChannelPlugins(instanceIds, actionVersion());
 }
 
 function batchUninstall(instanceIds: string[]) {
-  return activePlugin.value === "wechat"
-    ? admin.batchUninstallWechatPlugins(instanceIds)
-    : admin.batchUninstallOpenVikingPlugins(instanceIds);
+  if (activePlugin.value === "wechat") return admin.batchUninstallWechatPlugins(instanceIds);
+  if (activePlugin.value === "openviking") return admin.batchUninstallOpenVikingPlugins(instanceIds);
+  return admin.batchUninstallApiChannelPlugins(instanceIds);
 }
 
 function batchUpgrade(instanceIds: string[]) {
-  return activePlugin.value === "wechat"
-    ? admin.batchUpgradeWechatPlugins(instanceIds, actionVersion())
-    : admin.batchUpgradeOpenVikingPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "wechat") return admin.batchUpgradeWechatPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "openviking") return admin.batchUpgradeOpenVikingPlugins(instanceIds, actionVersion());
+  return admin.batchUpgradeApiChannelPlugins(instanceIds, actionVersion());
 }
 
 function batchReinstall(instanceIds: string[]) {
-  return activePlugin.value === "wechat"
-    ? admin.batchReinstallWechatPlugins(instanceIds, actionVersion())
-    : admin.batchReinstallOpenVikingPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "wechat") return admin.batchReinstallWechatPlugins(instanceIds, actionVersion());
+  if (activePlugin.value === "openviking") return admin.batchReinstallOpenVikingPlugins(instanceIds, actionVersion());
+  return admin.batchReinstallApiChannelPlugins(instanceIds, actionVersion());
 }
 
 function handleSelectionChange(selection: PublicInstance[]) {
@@ -379,6 +402,7 @@ function handleSelectionChange(selection: PublicInstance[]) {
     <el-tabs v-model="activePlugin" class="plugin-tabs">
       <el-tab-pane label="微信插件" name="wechat" />
       <el-tab-pane label="OpenViking 插件" name="openviking" />
+      <el-tab-pane label="API Channel 插件" name="api" />
     </el-tabs>
 
     <el-card shadow="never">

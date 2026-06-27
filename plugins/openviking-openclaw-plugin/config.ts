@@ -44,6 +44,8 @@ export type MemoryOpenVikingConfig = {
   /** @deprecated Use recallMaxInjectedChars. */
   recallTokenBudget?: number;
   commitTokenThreshold?: number;
+  /** Commit below the token threshold when the latest user turn clearly asks to remember long-term information. */
+  commitOnMemoryIntent?: boolean;
   /**
    * WM v2: number of most-recent messages to keep live after an afterTurn
    * commit so the next turn still has immediate context. Forwarded to the
@@ -415,6 +417,7 @@ export const memoryOpenVikingConfigSchema = {
         "recallPreferAbstract",
         "recallTokenBudget",
         "commitTokenThreshold",
+        "commitOnMemoryIntent",
         "commitKeepRecentCount",
         "bypassSessionPatterns",
         "ingestReplyAssist",
@@ -562,6 +565,10 @@ export const memoryOpenVikingConfigSchema = {
         0,
         Math.min(100_000, Math.floor(toNumber(cfg.commitTokenThreshold, DEFAULT_COMMIT_TOKEN_THRESHOLD))),
       ),
+      commitOnMemoryIntent:
+        typeof cfg.commitOnMemoryIntent === "boolean"
+          ? cfg.commitOnMemoryIntent
+          : true,
       commitKeepRecentCount: Math.max(
         0,
         Math.min(
@@ -838,6 +845,12 @@ export const memoryOpenVikingConfigSchema = {
       placeholder: String(DEFAULT_COMMIT_TOKEN_THRESHOLD),
       advanced: true,
       help: "Minimum estimated pending tokens before auto-commit triggers. Set to 0 to commit every turn.",
+    },
+    commitOnMemoryIntent: {
+      label: "Commit On Memory Intent",
+      placeholder: "true",
+      advanced: true,
+      help: "When true, explicit memory intent such as 请记住/我叫/my name triggers an async commit even below Commit Token Threshold.",
     },
     commitKeepRecentCount: {
       label: "Commit Keep Recent Count",

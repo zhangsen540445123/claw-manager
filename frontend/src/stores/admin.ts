@@ -2,10 +2,15 @@ import { defineStore } from "pinia";
 import { api, jsonBody } from "../api/http";
 import type {
   AppEvent,
+  ExternalApiUserRoutePage,
   InstanceStats,
   ModelPresetSyncResult,
   ModelPresetUsage,
   ModelProviderDefinition,
+  PublicApiChannelPluginStatus,
+  PublicApiChannelPluginVersions,
+  PublicExternalApiSettings,
+  PublicExternalApiUserRoute,
   PublicOpenVikingPluginStatus,
   PublicOpenVikingPluginVersions,
   PublicOpenVikingSettings,
@@ -64,6 +69,11 @@ interface OpenVikingPluginBatchItem {
   plugin: PublicOpenVikingPluginStatus;
 }
 
+interface ApiChannelPluginBatchItem {
+  instanceId: string;
+  plugin: PublicApiChannelPluginStatus;
+}
+
 export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
@@ -77,6 +87,9 @@ export const useAdminStore = defineStore("admin", {
     openVikingSettings: null as PublicOpenVikingSettings | null,
     openVikingPluginStatusByInstanceId: {} as Record<string, PublicOpenVikingPluginStatus>,
     openVikingPluginVersions: { latest: "", versions: [] } as PublicOpenVikingPluginVersions,
+    externalApiSettings: null as PublicExternalApiSettings | null,
+    apiChannelPluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
+    apiChannelPluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
@@ -343,6 +356,130 @@ export const useAdminStore = defineStore("admin", {
         next[instanceId] = withPluginVersion(plugin, versions);
       }
       this.openVikingPluginStatusByInstanceId = next;
+    },
+    async loadExternalApiSettings() {
+      const response = await api<{ settings: PublicExternalApiSettings }>("/api/admin/external-api/settings");
+      this.externalApiSettings = response.settings;
+      return response.settings;
+    },
+    async saveExternalApiSettings(payload: { enabled: boolean; apiKey?: string; regenerateApiKey?: boolean }) {
+      const response = await api<{ settings: PublicExternalApiSettings }>("/api/admin/external-api/settings", {
+        method: "PUT",
+        ...jsonBody(payload)
+      });
+      this.externalApiSettings = response.settings;
+      return response.settings;
+    },
+    async loadExternalApiUsers(params: { keyword?: string; instanceId?: string; page?: number; pageSize?: number } = {}) {
+      const search = new URLSearchParams();
+      if (params.keyword) search.set("keyword", params.keyword);
+      if (params.instanceId) search.set("instanceId", params.instanceId);
+      search.set("page", String(params.page || 1));
+      search.set("pageSize", String(params.pageSize || 20));
+      return api<ExternalApiUserRoutePage>(`/api/admin/external-api/users?${search.toString()}`);
+    },
+    async migrateExternalApiUser(openidHash: string, instanceId: string) {
+      const response = await api<{ route: PublicExternalApiUserRoute }>("/api/admin/external-api/users/route", {
+        method: "PUT",
+        ...jsonBody({ openidHash, instanceId })
+      });
+      return response.route;
+    },
+    async loadApiChannelPluginStatus(instanceId: string, checkLatest = false) {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/api-channel-plugin?checkLatest=${checkLatest ? "true" : "false"}`
+      );
+      this.apiChannelPluginStatusByInstanceId = {
+        ...this.apiChannelPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.apiChannelPluginVersions)
+      };
+      return this.apiChannelPluginStatusByInstanceId[instanceId];
+    },
+    async loadApiChannelPluginVersions(forceRefresh = false) {
+      const response = await api<{ versions: PublicApiChannelPluginVersions }>(
+        `/api/admin/api-channel-plugins/versions${forceRefresh ? "?forceRefresh=true" : ""}`
+      );
+      this.apiChannelPluginVersions = response.versions;
+      this.applyApiChannelPluginVersions(response.versions);
+      return response.versions;
+    },
+    async installApiChannelPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/api-channel-plugin/install`,
+        { method: "POST", ...jsonBody({ version }) }
+      );
+      this.apiChannelPluginStatusByInstanceId = {
+        ...this.apiChannelPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.apiChannelPluginVersions)
+      };
+      return this.apiChannelPluginStatusByInstanceId[instanceId];
+    },
+    async uninstallApiChannelPlugin(instanceId: string) {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/api-channel-plugin/uninstall`,
+        { method: "POST" }
+      );
+      this.apiChannelPluginStatusByInstanceId = {
+        ...this.apiChannelPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.apiChannelPluginVersions)
+      };
+      return this.apiChannelPluginStatusByInstanceId[instanceId];
+    },
+    async upgradeApiChannelPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/api-channel-plugin/upgrade`,
+        { method: "POST", ...jsonBody({ version }) }
+      );
+      this.apiChannelPluginStatusByInstanceId = {
+        ...this.apiChannelPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.apiChannelPluginVersions)
+      };
+      return this.apiChannelPluginStatusByInstanceId[instanceId];
+    },
+    async reinstallApiChannelPlugin(instanceId: string, version = "") {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/api-channel-plugin/reinstall`,
+        { method: "POST", ...jsonBody({ version }) }
+      );
+      this.apiChannelPluginStatusByInstanceId = {
+        ...this.apiChannelPluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.apiChannelPluginVersions)
+      };
+      return this.apiChannelPluginStatusByInstanceId[instanceId];
+    },
+    async batchCheckApiChannelPlugins(instanceIds: string[]) {
+      return this.batchApiChannelPlugins("check", instanceIds);
+    },
+    async batchInstallApiChannelPlugins(instanceIds: string[], version = "") {
+      return this.batchApiChannelPlugins("install", instanceIds, version);
+    },
+    async batchUninstallApiChannelPlugins(instanceIds: string[]) {
+      return this.batchApiChannelPlugins("uninstall", instanceIds);
+    },
+    async batchUpgradeApiChannelPlugins(instanceIds: string[], version = "") {
+      return this.batchApiChannelPlugins("upgrade", instanceIds, version);
+    },
+    async batchReinstallApiChannelPlugins(instanceIds: string[], version = "") {
+      return this.batchApiChannelPlugins("reinstall", instanceIds, version);
+    },
+    async batchApiChannelPlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
+      const response = await api<{ plugins: ApiChannelPluginBatchItem[] }>(`/api/admin/api-channel-plugins/${action}`, {
+        method: "POST",
+        ...jsonBody({ instanceIds, version })
+      });
+      const next = { ...this.apiChannelPluginStatusByInstanceId };
+      for (const item of response.plugins) {
+        next[item.instanceId] = withPluginVersion(item.plugin, this.apiChannelPluginVersions);
+      }
+      this.apiChannelPluginStatusByInstanceId = next;
+      return response.plugins;
+    },
+    applyApiChannelPluginVersions(versions: PublicApiChannelPluginVersions) {
+      const next = { ...this.apiChannelPluginStatusByInstanceId };
+      for (const [instanceId, plugin] of Object.entries(next)) {
+        next[instanceId] = withPluginVersion(plugin, versions);
+      }
+      this.apiChannelPluginStatusByInstanceId = next;
     },
     async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
