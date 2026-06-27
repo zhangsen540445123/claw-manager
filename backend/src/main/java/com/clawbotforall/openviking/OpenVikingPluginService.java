@@ -56,6 +56,7 @@ public class OpenVikingPluginService {
   private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?");
   private static final long TASK_TIMEOUT_MS = 10 * 60 * 1000L;
   private static final long VERSION_CACHE_TTL_MS = 60 * 60 * 1000L;
+  private static final int DEFAULT_AUTO_RECALL_TIMEOUT_MS = 30_000;
 
   private final OpenClawRuntime openClawRuntime;
   private final InstanceCommandService commandService;
@@ -356,6 +357,7 @@ public class OpenVikingPluginService {
     config.put("accountId", settings.accountId());
     config.put("identityHashSecret", "${OPENVIKING_IDENTITY_HASH_SECRET}");
     config.put("peer_role", "assistant");
+    config.put("autoRecallTimeoutMs", DEFAULT_AUTO_RECALL_TIMEOUT_MS);
     Map<String, Object> entry = new LinkedHashMap<>();
     entry.put("enabled", true);
     entry.put("config", config);

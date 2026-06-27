@@ -115,7 +115,7 @@ class OpenVikingPluginServiceTest {
     verify(mutationMapper).updateInstancePlugins(
         eq("inst_1"),
         eq("[\"openviking\"]"),
-        eq("{\"openviking\":{\"enabled\":true,\"config\":{\"mode\":\"remote\",\"baseUrl\":\"http://openviking:1933\",\"accountId\":\"claw-manager\",\"identityHashSecret\":\"${OPENVIKING_IDENTITY_HASH_SECRET}\",\"peer_role\":\"assistant\"}}}"),
+        eq("{\"openviking\":{\"enabled\":true,\"config\":{\"mode\":\"remote\",\"baseUrl\":\"http://openviking:1933\",\"accountId\":\"claw-manager\",\"identityHashSecret\":\"${OPENVIKING_IDENTITY_HASH_SECRET}\",\"peer_role\":\"assistant\",\"autoRecallTimeoutMs\":30000}}}"),
         any()
     );
     verify(fileService).writeInstanceFiles(instance, List.of());
