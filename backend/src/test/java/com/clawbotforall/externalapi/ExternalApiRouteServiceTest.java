@@ -14,9 +14,17 @@ import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -113,6 +121,44 @@ class ExternalApiRouteServiceTest {
         .hasMessageContaining("API Channel 插件");
   }
 
+  @Test
+  void concurrentFirstOpenidsAreBalancedAcrossLeastLoadedInstances() throws Exception {
+    InstanceEntity instA = instance("inst_a", "2026-06-01T00:00:00Z");
+    InstanceEntity instB = instance("inst_b", "2026-06-02T00:00:00Z");
+    routeMapper.insertDelayMs = 50;
+    when(instanceMapper.listRuntimeActive()).thenReturn(List.of(instA, instB));
+    when(openClawRuntime.inspectInstance(instA)).thenReturn(new RuntimeState(true, "running", "now"));
+    when(openClawRuntime.inspectInstance(instB)).thenReturn(new RuntimeState(true, "running", "now"));
+    when(instanceMapper.listProvisioningByInstanceIds(List.of("inst_a", "inst_b")))
+        .thenReturn(List.of(ready("inst_a"), ready("inst_b")));
+    when(instanceMapper.countWechatAccountsByInstanceId("inst_a")).thenReturn(0);
+    when(instanceMapper.countWechatAccountsByInstanceId("inst_b")).thenReturn(0);
+    when(apiPluginService.isInstalled(instA)).thenReturn(true);
+    when(apiPluginService.isInstalled(instB)).thenReturn(true);
+
+    ExecutorService executor = Executors.newFixedThreadPool(10);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Callable<String>> tasks = IntStream.rangeClosed(1, 10)
+        .mapToObj(index -> (Callable<String>) () -> {
+          start.await();
+          return service.resolveOrCreateRoute("openid_" + index).instance().getId();
+        })
+        .toList();
+
+    List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
+    for (Callable<String> task : tasks) {
+      futures.add(executor.submit(task));
+    }
+    start.countDown();
+    Map<String, Long> distribution = new HashMap<>();
+    for (java.util.concurrent.Future<String> future : futures) {
+      distribution.merge(future.get(5, TimeUnit.SECONDS), 1L, Long::sum);
+    }
+    executor.shutdownNow();
+
+    assertThat(distribution).containsEntry("inst_a", 5L).containsEntry("inst_b", 5L);
+  }
+
   private ExternalApiResolvedRoute seedRoute(String openid, String instanceId) {
     ExternalApiIdentity identity = identityService.resolve(openid, "secret");
     ExternalApiUserRouteEntity entity = new ExternalApiUserRouteEntity();
@@ -179,8 +225,9 @@ class ExternalApiRouteServiceTest {
   }
 
   private static class InMemoryRouteMapper implements ExternalApiUserRouteMapper {
-    final Map<String, ExternalApiUserRouteEntity> rows = new HashMap<>();
-    final Map<String, Integer> counts = new HashMap<>();
+    final Map<String, ExternalApiUserRouteEntity> rows = new ConcurrentHashMap<>();
+    final Map<String, Integer> counts = new ConcurrentHashMap<>();
+    long insertDelayMs;
 
     @Override
     public ExternalApiUserRouteEntity findByOpenidHash(String openidHash) {
@@ -204,6 +251,13 @@ class ExternalApiRouteServiceTest {
 
     @Override
     public int insert(ExternalApiUserRouteEntity route) {
+      if (insertDelayMs > 0) {
+        try {
+          Thread.sleep(insertDelayMs);
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+        }
+      }
       rows.put(route.getOpenidHash(), route);
       return 1;
     }

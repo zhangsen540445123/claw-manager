@@ -29,6 +29,7 @@ public class ExternalApiRouteService {
   private final ExternalApiIdentityService identityService;
   private final ApiChannelPluginService apiPluginService;
   private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
+  private final Object routeAllocationLock = new Object();
 
   public ExternalApiRouteService(
       ExternalApiUserRouteMapper routeMapper,
@@ -58,18 +59,26 @@ public class ExternalApiRouteService {
         InstanceEntity instance = requireUsableInstance(existing.getInstanceId());
         return new ExternalApiResolvedRoute(instance, identity.openidHash(), existing.getOpenvikingUserId(), identity.senderId());
       }
-      InstanceEntity selected = selectLeastLoadedInstance();
-      String now = Instant.now().toString();
-      ExternalApiUserRouteEntity route = new ExternalApiUserRouteEntity();
-      route.setOpenid(identity.openid());
-      route.setOpenidHash(identity.openidHash());
-      route.setOpenvikingUserId(identity.openvikingUserId());
-      route.setInstanceId(selected.getId());
-      route.setCreatedAt(now);
-      route.setUpdatedAt(now);
-      route.setLastUsedAt(now);
-      routeMapper.insert(route);
-      return new ExternalApiResolvedRoute(selected, identity.openidHash(), identity.openvikingUserId(), identity.senderId());
+      synchronized (routeAllocationLock) {
+        existing = routeMapper.findByOpenidHash(identity.openidHash());
+        if (existing != null) {
+          routeMapper.updateLastUsed(identity.openidHash(), Instant.now().toString());
+          InstanceEntity instance = requireUsableInstance(existing.getInstanceId());
+          return new ExternalApiResolvedRoute(instance, identity.openidHash(), existing.getOpenvikingUserId(), identity.senderId());
+        }
+        InstanceEntity selected = selectLeastLoadedInstance();
+        String now = Instant.now().toString();
+        ExternalApiUserRouteEntity route = new ExternalApiUserRouteEntity();
+        route.setOpenid(identity.openid());
+        route.setOpenidHash(identity.openidHash());
+        route.setOpenvikingUserId(identity.openvikingUserId());
+        route.setInstanceId(selected.getId());
+        route.setCreatedAt(now);
+        route.setUpdatedAt(now);
+        route.setLastUsedAt(now);
+        routeMapper.insert(route);
+        return new ExternalApiResolvedRoute(selected, identity.openidHash(), identity.openvikingUserId(), identity.senderId());
+      }
     }
   }
 
