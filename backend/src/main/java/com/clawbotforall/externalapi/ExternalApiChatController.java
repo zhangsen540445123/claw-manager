@@ -54,7 +54,7 @@ public class ExternalApiChatController {
     String conversationId = trim(payload.conversationId()).isBlank() ? "default" : trim(payload.conversationId());
     String conversationHash = routeService.conversationHash(conversationId);
 
-    SseEmitter emitter = new SseEmitter(180_000L);
+    SseEmitter emitter = new SseEmitter(300_000L);
     executor.execute(() -> {
       try {
         send(emitter, "start", Map.of(
@@ -63,16 +63,22 @@ public class ExternalApiChatController {
             "conversationId", conversationId,
             "openVikingUserId", route.openvikingUserId()
         ));
-        Map<String, Object> result = queueService.sendApiChannelMessage(route.instance(), gatewayParams(
+        boolean[] sentDelta = {false};
+        Map<String, Object> result = queueService.streamApiChannelMessage(route.instance(), gatewayParams(
             requestId,
             route,
             conversationId,
             conversationHash,
             message,
             payload.metadata()
-        ));
+        ), text -> {
+          if (!text.isBlank()) {
+            send(emitter, "delta", Map.of("text", text));
+            sentDelta[0] = true;
+          }
+        });
         String text = stringify(result.get("text"));
-        if (!text.isBlank()) {
+        if (!sentDelta[0] && !text.isBlank()) {
           send(emitter, "delta", Map.of("text", text));
         }
         send(emitter, "done", Map.of(

@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,8 @@ type HandoffFile = {
   version: 1;
   entries: Record<string, ApiOpenVikingHandoff>;
 };
+
+let handoffWriteChain: Promise<void> = Promise.resolve();
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -67,6 +69,20 @@ export async function writeApiOpenVikingHandoff(params: {
   senderHash?: string;
   secret?: string;
 }): Promise<boolean> {
+  const write = handoffWriteChain
+    .catch(() => undefined)
+    .then(() => writeApiOpenVikingHandoffLocked(params));
+  handoffWriteChain = write.then(() => undefined, () => undefined);
+  return write;
+}
+
+async function writeApiOpenVikingHandoffLocked(params: {
+  stateDir?: string;
+  sessionKey?: string;
+  openVikingUserId?: string;
+  senderHash?: string;
+  secret?: string;
+}): Promise<boolean> {
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
   const openVikingUserId = trimString(params.openVikingUserId);
   const senderHash = trimString(params.senderHash);
@@ -82,7 +98,7 @@ export async function writeApiOpenVikingHandoff(params: {
     senderHash,
     updatedAt: new Date().toISOString(),
   };
-  const tempPath = `${filePath}.${process.pid}.tmp`;
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
   await rename(tempPath, filePath);
   return true;

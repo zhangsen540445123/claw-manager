@@ -775,6 +775,52 @@ describe("context-engine assemble()", () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it("injects sender profile memory from prompt-only main assemble for codename questions", async () => {
+    const { engine, client, getClient, getClientForSender } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: {
+          autoRecall: true,
+          recallScoreThreshold: 0.15,
+          recallPreferAbstract: true,
+        },
+      },
+    );
+    client.getSessionContext.mockRejectedValueOnce(
+      new Error("OpenViking request failed [NOT_FOUND]: Session not found: session-codename-prompt"),
+    );
+    client.read.mockResolvedValueOnce("# 用户\n- 代号：流式测试-1782586372661。");
+
+    const result = await engine.assemble({
+      prompt: "我的代号是啥？",
+      sessionId: "session-codename-prompt",
+      messages: [],
+      tokenBudget: 4096,
+      runtimeContext: { senderId: "api_sender" },
+    });
+
+    expect(getClientForSender).toHaveBeenCalledWith("api_sender");
+    expect(getClient).not.toHaveBeenCalled();
+    expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-codename-prompt");
+    expect(client.find).not.toHaveBeenCalled();
+    expect(client.getSessionContext).toHaveBeenCalledWith(
+      "session-codename-prompt",
+      4096,
+      "agent:session-codename-prompt",
+    );
+    expect(result.messages).toEqual([]);
+    expect(result.systemPromptAddition).toContain("<relevant-memories>");
+    expect(result.systemPromptAddition).toContain("Source: openviking-auto-recall");
+    expect(result.systemPromptAddition).toContain("代号：流式测试-1782586372661");
+  });
+
   it("falls back to semantic auto-recall when sender profile memory is unavailable", async () => {
     const { engine, client } = makeEngine(
       {

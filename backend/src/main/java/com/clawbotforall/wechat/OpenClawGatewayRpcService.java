@@ -54,23 +54,7 @@ public class OpenClawGatewayRpcService {
   }
 
   public void startApiChannel(InstanceEntity instance) {
-    long deadline = System.currentTimeMillis() + API_CHANNEL_START_TIMEOUT_MS;
-    RuntimeException lastError = null;
-    do {
-      try {
-        startAccount(instance, API_CHANNEL_ID, API_ACCOUNT_ID);
-        return;
-      } catch (RuntimeException error) {
-        lastError = error;
-        if (!isRetryableApiChannelStartError(error) || System.currentTimeMillis() >= deadline) {
-          throw error;
-        }
-        sleepBeforeApiChannelRetry();
-      }
-    } while (System.currentTimeMillis() < deadline);
-    throw lastError == null
-        ? new IllegalStateException("OpenClaw API Channel 启动失败。")
-        : lastError;
+    log.debug("API Channel monitor is auto-started by the plugin runtime: instanceId={}", instance.getId());
   }
 
   public void restartWechatChannel(InstanceEntity instance, List<String> accountIds) {
@@ -109,11 +93,15 @@ public class OpenClawGatewayRpcService {
   }
 
   private void runChannelOperation(InstanceEntity instance, String method, String channelId, String accountId, boolean requireStarted) {
+    runGatewayScript(instance, method, operationScript(method, channelId, accountId, requireStarted));
+  }
+
+  private void runGatewayScript(InstanceEntity instance, String method, String script) {
     CompletableFuture<Integer> exit = new CompletableFuture<>();
     StringBuilder output = new StringBuilder();
     openClawRuntime.startExec(
         instance,
-        List.of("node", "--input-type=module", "-e", operationScript(method, channelId, accountId, requireStarted)),
+        List.of("node", "--input-type=module", "-e", script),
         START_CHANNEL_TIMEOUT_MS,
         Map.of(),
         new RuntimeExecListener() {
@@ -171,6 +159,7 @@ public class OpenClawGatewayRpcService {
         const accountId = %s;
         const params = { channel };
         if (accountId) params.accountId = accountId;
+        const scopes = channel === "claw-manager-api" ? ["operator.admin"] : undefined;
         const result = await callGateway({
           method,
           params,
@@ -178,6 +167,7 @@ public class OpenClawGatewayRpcService {
           clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
           deviceIdentity: null,
           requireLocalBackendSharedAuth: true,
+          ...(scopes ? { scopes } : {}),
           timeoutMs: 8000
         });
         console.log(JSON.stringify(result));

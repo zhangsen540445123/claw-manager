@@ -57,4 +57,36 @@ describe("API OpenViking handoff", () => {
       await rm(stateDir, { recursive: true, force: true });
     }
   });
+
+  it("preserves all entries when multiple API requests write handoff concurrently", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "api-ov-handoff-"));
+    try {
+      const users = Array.from({ length: 5 }, (_, index) => ({
+        sessionKey: `agent:main:claw-manager-api:global:direct:api:user-${index}:conv`,
+        openVikingUserId: `api_user_${index}`,
+        senderHash: `user_${index}`,
+      }));
+
+      await Promise.all(users.map((user) =>
+        writeApiOpenVikingHandoff({
+          stateDir,
+          secret: "identity-secret",
+          ...user,
+        }),
+      ));
+
+      for (const user of users) {
+        await expect(readApiOpenVikingHandoff({
+          stateDir,
+          sessionKey: user.sessionKey,
+          secret: "identity-secret",
+        })).resolves.toMatchObject({
+          openVikingUserId: user.openVikingUserId,
+          senderHash: user.senderHash,
+        });
+      }
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });

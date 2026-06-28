@@ -42,7 +42,7 @@ const QUESTION_ONLY_RE =
   /^(?:什么是|是什么|区别|解释|讲讲|怎么看|为什么|如何理解|where is|what is|explain|difference between)\b|[?？]$/i;
 const CASUAL_RE = /闲聊|翻译|总结当前对话|天气|笑话|hello|hi\b|你好/i;
 const IDENTITY_PROFILE_QUERY_RE =
-  /我是谁|我叫什[么麼]|我的名字|怎么称呼我|怎麼稱呼我|你认识我吗|你認識我嗎|\bwho am i\b|\bwhat is my name\b|\bmy name\b|\bcall me\b/i;
+  /我是谁|我叫什[么麼]|我的名字|怎么称呼我|怎麼稱呼我|你认识我吗|你認識我嗎|(?:我(?:的)?|本人(?:的)?)?代[号號](?:是(?:什[么麼]|啥|多少)|叫什[么麼]|呢|[?？])|你(?:知道|记得|記得)我(?:的)?代[号號]吗|\bwho am i\b|\bwhat is my name\b|\bmy name\b|\bcall me\b|\bwhat is my (?:code ?name|codename)\b|\bmy (?:code ?name|codename)\b/i;
 
 export type ExperienceRecallTrigger =
   | "task_start"

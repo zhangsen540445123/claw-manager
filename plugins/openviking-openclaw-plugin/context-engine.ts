@@ -354,6 +354,7 @@ export function createMemoryOpenVikingContextEngine(params: {
         sessionId: assembleParams.sessionId,
         sessionKey: resolveSessionKey(assembleParams),
         messages: assembleParams.messages,
+        prompt: assembleParams.prompt,
         tokenBudget,
         runtimeContext: assembleParams.runtimeContext,
         identityHashSecret: cfg.identityHashSecret,

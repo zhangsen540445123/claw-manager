@@ -74,6 +74,7 @@ export type AssembleOpenVikingSessionParams = {
   sessionId: string;
   sessionKey?: string;
   messages: AgentMessage[];
+  prompt?: string;
   tokenBudget: number;
   runtimeContext?: Record<string, unknown>;
   identityHashSecret?: string;
@@ -421,10 +422,11 @@ function assemblePassthrough(
     reason: string;
     liveMessages: AgentMessage[];
     originalTokens: number;
+    systemPromptAddition?: string;
     extra?: Record<string, unknown>;
   },
 ): AssembleOpenVikingSessionResult {
-  const { diag, ovSessionId, reason, liveMessages, originalTokens, extra } = params;
+  const { diag, ovSessionId, reason, liveMessages, originalTokens, systemPromptAddition, extra } = params;
   diag("assemble_result", ovSessionId, {
     passthrough: true,
     reason,
@@ -435,7 +437,19 @@ function assemblePassthrough(
     savingPct: 0,
     ...extra,
   });
-  return { messages: liveMessages, estimatedTokens: originalTokens };
+  return {
+    messages: liveMessages,
+    estimatedTokens: originalTokens,
+    ...(systemPromptAddition?.trim() ? { systemPromptAddition } : {}),
+  };
+}
+
+function joinSystemPromptAdditions(...parts: Array<string | undefined>): string | undefined {
+  const joined = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+  return joined || undefined;
 }
 
 type AutoRecallAttemptResult =
@@ -444,6 +458,7 @@ type AutoRecallAttemptResult =
       block: string;
       memoryCount: number;
       estimatedTokens: number;
+      source: "message" | "prompt";
     }
   | {
       kind: "passthrough";
@@ -457,6 +472,7 @@ async function tryBuildSenderScopedAutoRecall(
     | "sessionId"
     | "sessionKey"
     | "messages"
+    | "prompt"
     | "cfg"
     | "queryConfigStore"
     | "traceRecorder"
@@ -475,6 +491,7 @@ async function tryBuildSenderScopedAutoRecall(
     sessionId,
     sessionKey,
     messages,
+    prompt,
     cfg,
     queryConfigStore,
     traceRecorder,
@@ -488,22 +505,29 @@ async function tryBuildSenderScopedAutoRecall(
     getClient,
   } = params;
   const latestMessage = messages.at(-1);
+  const promptText = typeof prompt === "string" ? prompt.trim() : "";
+  let recallSource: "message" | "prompt" = "message";
+  let recallMessage = latestMessage;
 
-  if (latestMessage?.role !== "user") {
-    return {
-      kind: "passthrough",
-      reason: `${reasonPrefix}_non_user_tail`,
-      extra: { latestRole: latestMessage?.role ?? null },
-    };
+  if (recallMessage?.role !== "user") {
+    if (!promptText) {
+      return {
+        kind: "passthrough",
+        reason: `${reasonPrefix}_non_user_tail`,
+        extra: { latestRole: latestMessage?.role ?? null },
+      };
+    }
+    recallSource = "prompt";
+    recallMessage = { role: "user", content: promptText } as AgentMessage;
   }
   if (!cfg.autoRecall) {
     return { kind: "passthrough", reason: `${reasonPrefix}_auto_recall_disabled` };
   }
-  if (hasAutoRecallBlock(latestMessage)) {
+  if (hasAutoRecallBlock(recallMessage)) {
     return { kind: "passthrough", reason: `${reasonPrefix}_recall_already_injected` };
   }
 
-  const recallQuery = prepareRecallQuery(extractAgentMessageText(latestMessage));
+  const recallQuery = prepareRecallQuery(extractAgentMessageText(recallMessage));
   if (!recallQuery.query || (!isIdentityProfileQuery(recallQuery.query) && recallQuery.query.length < 5)) {
     return { kind: "passthrough", reason: `${reasonPrefix}_empty_recall_query` };
   }
@@ -559,6 +583,7 @@ async function tryBuildSenderScopedAutoRecall(
       block: recall.block,
       memoryCount: recall.memoryCount,
       estimatedTokens: recall.estimatedTokens,
+      source: recallSource,
     };
   } catch (err) {
     logger.warn?.(`openviking: auto-recall failed: ${String(err)}`);
@@ -574,6 +599,7 @@ export async function assembleOpenVikingSession({
   sessionId,
   sessionKey,
   messages,
+  prompt,
   tokenBudget,
   runtimeContext,
   identityHashSecret,
@@ -639,6 +665,7 @@ export async function assembleOpenVikingSession({
       sessionId,
       sessionKey,
       messages,
+      prompt,
       cfg,
       queryConfigStore,
       traceRecorder,
@@ -678,6 +705,8 @@ export async function assembleOpenVikingSession({
       return { messages: withRecall, estimatedTokens };
   }
 
+  let promptRecallBlock: string | undefined;
+
   try {
     const routingRef = sessionId ?? sessionKey ?? ovSessionId;
     const agentId = resolveAgentId(routingRef, sessionKey, ovSessionId);
@@ -685,6 +714,7 @@ export async function assembleOpenVikingSession({
       sessionId,
       sessionKey,
       messages,
+      prompt,
       cfg,
       queryConfigStore,
       traceRecorder,
@@ -697,12 +727,15 @@ export async function assembleOpenVikingSession({
       reasonPrefix: "main_assemble",
       getClient: resolveSenderScopedClient,
     });
-    messagesWithRecall = recall.kind === "injected"
+    promptRecallBlock = recall.kind === "injected" && recall.source === "prompt"
+      ? recall.block
+      : undefined;
+    messagesWithRecall = recall.kind === "injected" && recall.source === "message"
       ? prependRecallToLatestUserMessage(messages, recall.block)
       : messages;
-    tokensWithRecall = recall.kind === "injected"
+    tokensWithRecall = recall.kind === "injected" && recall.source === "message"
       ? roughEstimate(messagesWithRecall)
-      : originalTokens;
+      : originalTokens + (promptRecallBlock ? estimateTextTokens(promptRecallBlock) : 0);
     const client = await resolveSenderScopedClient();
     if (!client) {
       logger.info("openviking.identity_missing.skip_context");
@@ -711,7 +744,8 @@ export async function assembleOpenVikingSession({
         ovSessionId,
         reason: "identity_missing",
         liveMessages: messagesWithRecall,
-        originalTokens,
+        originalTokens: tokensWithRecall,
+        systemPromptAddition: promptRecallBlock,
         extra: { senderIdFound: sender.found },
       });
     }
@@ -728,6 +762,7 @@ export async function assembleOpenVikingSession({
         reason: "no_ov_data",
         liveMessages: messagesWithRecall,
         originalTokens: tokensWithRecall,
+        systemPromptAddition: promptRecallBlock,
         extra: { archiveCount: 0, activeCount: 0 },
       });
     }
@@ -738,6 +773,7 @@ export async function assembleOpenVikingSession({
         reason: "ov_msgs_fewer_than_input",
         liveMessages: messagesWithRecall,
         originalTokens: tokensWithRecall,
+        systemPromptAddition: promptRecallBlock,
         extra: { archiveCount: 0, activeCount },
       });
     }
@@ -759,14 +795,19 @@ export async function assembleOpenVikingSession({
         reason: "sanitized_empty",
         liveMessages: messagesWithRecall,
         originalTokens: tokensWithRecall,
+        systemPromptAddition: promptRecallBlock,
         extra: { archiveCount: preAbstracts.length, activeCount },
       });
     }
 
-    const outputMessages = recall.kind === "injected"
+    const outputMessages = recall.kind === "injected" && recall.source === "message"
       ? prependRecallToLatestUserMessage(sanitized, recall.block)
       : sanitized;
-    const assembledTokens = roughEstimate(outputMessages) + instruction.tokens;
+    const systemPromptAddition = joinSystemPromptAdditions(promptRecallBlock, instruction.text);
+    const assembledTokens =
+      roughEstimate(outputMessages) +
+      instruction.tokens +
+      (promptRecallBlock ? estimateTextTokens(promptRecallBlock) : 0);
     const tokensSaved = originalTokens - assembledTokens;
     const savingPct = originalTokens > 0 ? Math.round((tokensSaved / originalTokens) * 100) : 0;
 
@@ -793,7 +834,7 @@ export async function assembleOpenVikingSession({
     return {
       messages: outputMessages,
       estimatedTokens: assembledTokens,
-      ...(instruction.text ? { systemPromptAddition: instruction.text } : {}),
+      ...(systemPromptAddition ? { systemPromptAddition } : {}),
     };
   } catch (err) {
     const errorMessage = String(err);
@@ -810,6 +851,7 @@ export async function assembleOpenVikingSession({
         reason: "session_not_found",
         liveMessages: messagesWithRecall,
         originalTokens: tokensWithRecall,
+        systemPromptAddition: promptRecallBlock,
         extra: { error: errorMessage, senderIdFound: sender.found },
       });
     }
@@ -874,6 +916,7 @@ async function readLatestTurnMessagesFromSessionFile(sessionFile?: string): Prom
     return [];
   }
   let raw = "";
+
   try {
     raw = await readFile(file, "utf8");
   } catch {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-runtime";
@@ -43,7 +44,9 @@ export type ApiMsgContext = {
 type GatewaySendMessageContext = ApiSendMessageParams & {
   cfg?: OpenClawConfig;
   channelRuntime?: PluginRuntime["channel"];
+  configRuntime?: ApiConfigRuntime;
   log?: ApiLogSink;
+  onDelta?: ApiDeltaSink;
 };
 
 type ApiLogSink = {
@@ -53,12 +56,18 @@ type ApiLogSink = {
   error?: (message: string) => void;
 };
 
-type ApiGatewayStartContext = {
+export type ApiGatewayStartContext = {
   cfg?: OpenClawConfig;
   channelRuntime?: PluginRuntime["channel"];
+  configRuntime?: ApiConfigRuntime;
   abortSignal?: AbortSignal;
   log?: ApiLogSink;
   setStatus?: (next: Record<string, unknown>) => void;
+};
+
+type ApiConfigRuntime = {
+  current?: () => OpenClawConfig | Record<string, unknown>;
+  mutateConfigFile?: (params: Record<string, unknown>) => Promise<{ result?: unknown } | unknown>;
 };
 
 type ApiQueueResponse = {
@@ -70,11 +79,177 @@ type ApiQueueResponse = {
   finishedAt: string;
 };
 
+type ApiDeltaSink = (text: string) => Promise<void> | void;
+
+type ApiQueueStreamEvent = {
+  seq: number;
+  type: "delta" | "done" | "error";
+  text?: string;
+  messageId?: string;
+  error?: string;
+  createdAt: string;
+};
+
 const API_CHANNEL_ID = "claw-manager-api";
 const API_ACCOUNT_ID = "global";
 const API_QUEUE_POLL_MS = 200;
 const API_HEARTBEAT_INTERVAL_MS = 1000;
 const API_STATUS_FILE = "status.json";
+const API_DYNAMIC_AGENT_PREFIX = "api-";
+
+type ApiQueueMonitorState = {
+  activeUsers: Set<string>;
+  activeTasks: Set<Promise<void>>;
+};
+
+export type ApiAssistantAgentEvent = {
+  stream?: unknown;
+  runId?: unknown;
+  sessionKey?: unknown;
+  seq?: unknown;
+  data?: unknown;
+};
+
+type ApiAgentEventStreamState = {
+  requestId: string;
+  runId: string;
+  sessionKey: string;
+  onDelta: ApiDeltaSink;
+  log?: ApiLogSink;
+  startedAtMs: number;
+  emittedText: string;
+  agentEventDeltaCount: number;
+  deliverDeltaCount: number;
+  firstAgentEventDeltaAtMs?: number;
+  seenAgentEventKeys: Set<string>;
+  writeChain: Promise<void>;
+};
+
+const activeApiAgentEventStreams = new Map<string, ApiAgentEventStreamState>();
+const activeApiAgentEventStreamsByRunId = new Map<string, ApiAgentEventStreamState>();
+
+export function registerApiAgentEventStream(params: {
+  requestId?: string;
+  runId?: string;
+  sessionKey?: string;
+  onDelta?: ApiDeltaSink;
+  log?: ApiLogSink;
+}): ApiAgentEventStreamState | undefined {
+  const sessionKey = trim(params.sessionKey);
+  if (!sessionKey || !params.onDelta) {
+    return undefined;
+  }
+  const state: ApiAgentEventStreamState = {
+    requestId: trim(params.requestId) || "auto",
+    runId: trim(params.runId) || trim(params.requestId) || "auto",
+    sessionKey,
+    onDelta: params.onDelta,
+    log: params.log,
+    startedAtMs: Date.now(),
+    emittedText: "",
+    agentEventDeltaCount: 0,
+    deliverDeltaCount: 0,
+    seenAgentEventKeys: new Set(),
+    writeChain: Promise.resolve(),
+  };
+  activeApiAgentEventStreams.set(sessionKey, state);
+  if (state.runId) {
+    activeApiAgentEventStreamsByRunId.set(state.runId, state);
+  }
+  return state;
+}
+
+export function unregisterApiAgentEventStream(sessionKey?: string, state?: ApiAgentEventStreamState): void {
+  const normalized = trim(sessionKey);
+  if (!normalized) {
+    return;
+  }
+  if (state && activeApiAgentEventStreams.get(normalized) !== state) {
+    return;
+  }
+  const current = activeApiAgentEventStreams.get(normalized);
+  activeApiAgentEventStreams.delete(normalized);
+  if (current?.runId) {
+    activeApiAgentEventStreamsByRunId.delete(current.runId);
+  }
+}
+
+export function resetApiAgentEventStreamsForTest(): void {
+  activeApiAgentEventStreams.clear();
+  activeApiAgentEventStreamsByRunId.clear();
+}
+
+export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent): Promise<boolean> {
+  if (event.stream !== "assistant") {
+    return false;
+  }
+  const sessionKey = trim(event.sessionKey);
+  const runId = trim(event.runId);
+  const state = sessionKey
+    ? activeApiAgentEventStreams.get(sessionKey)
+    : (runId ? activeApiAgentEventStreamsByRunId.get(runId) : undefined);
+  if (!state || !isRecord(event.data)) {
+    return false;
+  }
+  const seq = typeof event.seq === "number" && Number.isFinite(event.seq)
+    ? String(event.seq)
+    : (typeof event.seq === "string" && event.seq.trim() ? event.seq.trim() : "");
+  if (seq) {
+    const dedupeKey = `${runId || sessionKey}:${seq}`;
+    if (state.seenAgentEventKeys.has(dedupeKey)) {
+      return false;
+    }
+    state.seenAgentEventKeys.add(dedupeKey);
+  }
+
+  const text = stringValue(event.data.text);
+  const explicitDelta = stringValue(event.data.delta);
+  let delta = "";
+  if (text) {
+    if (text.startsWith(state.emittedText)) {
+      const suffix = collapseAdjacentDuplicatesInCumulativeSuffix(
+        state.emittedText,
+        trimOverlappingDelta(state.emittedText, text.slice(state.emittedText.length)),
+      );
+      const explicit = explicitDelta ? trimOverlappingDelta(state.emittedText, explicitDelta) : "";
+      delta = shouldPreferExplicitAgentDelta(state.emittedText, suffix, explicit) ? explicit : suffix;
+    } else {
+      delta = explicitDelta || text;
+    }
+  } else {
+    delta = explicitDelta;
+  }
+  if (!delta) {
+    return false;
+  }
+  delta = trimOverlappingDelta(state.emittedText, delta);
+  if (!delta) {
+    return false;
+  }
+
+  state.emittedText += delta;
+  state.agentEventDeltaCount += 1;
+  if (!state.firstAgentEventDeltaAtMs) {
+    state.firstAgentEventDeltaAtMs = Date.now();
+    state.log?.info?.(
+      `[${API_ACCOUNT_ID}] api agent-event first delta requestId=${state.requestId} ` +
+        `sessionKey=${state.sessionKey} firstDeltaMs=${state.firstAgentEventDeltaAtMs - state.startedAtMs}`,
+    );
+  }
+
+  try {
+    state.writeChain = state.writeChain
+      .catch(() => undefined)
+      .then(() => Promise.resolve(state.onDelta(delta)));
+    await state.writeChain;
+    return true;
+  } catch (error) {
+    state.log?.warn?.(
+      `[${API_ACCOUNT_ID}] api agent-event delta write failed requestId=${state.requestId}: ${errorMessage(error)}`,
+    );
+    return false;
+  }
+}
 
 async function writeOpenVikingHandoffForTurn(params: {
   sessionKey?: string;
@@ -144,6 +319,138 @@ export function buildApiInboundContext(params: ApiSendMessageParams): ApiMsgCont
   };
 }
 
+export function resolveApiDynamicAgentId(senderHash: string): string {
+  const normalized = trim(senderHash).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (!normalized) {
+    throw new Error("senderHash is required");
+  }
+  return `${API_DYNAMIC_AGENT_PREFIX}${normalized}`;
+}
+
+async function ensureApiDynamicAgentBinding(params: {
+  cfg: OpenClawConfig;
+  channelRuntime: PluginRuntime["channel"];
+  configRuntime?: ApiConfigRuntime;
+  peerId: string;
+  senderHash: string;
+  log?: ApiLogSink;
+}): Promise<OpenClawConfig> {
+  const current = params.configRuntime?.current?.() ?? params.cfg;
+  const mutateConfigFile = params.configRuntime?.mutateConfigFile;
+  if (!mutateConfigFile) {
+    return current;
+  }
+
+  const agentId = resolveApiDynamicAgentId(params.senderHash);
+  const route = params.channelRuntime.routing.resolveAgentRoute({
+    cfg: current,
+    channel: API_CHANNEL_ID,
+    accountId: API_ACCOUNT_ID,
+    peer: { kind: "direct", id: params.peerId },
+  });
+  const matchedBy = trim((route as Record<string, unknown>).matchedBy);
+  if (route.agentId === agentId || (matchedBy && matchedBy !== "default")) {
+    return current;
+  }
+
+  const workspace = resolveHomePath(`~/.openclaw/workspace-${agentId}`);
+  const agentDir = resolveHomePath(`~/.openclaw/agents/${agentId}/agent`);
+  await mutateConfigFile({
+    base: "runtime",
+    afterWrite: { mode: "auto" },
+    mutate: async (draft: Record<string, unknown>) => {
+      const agents = isRecord(draft.agents) ? draft.agents : {};
+      const list = Array.isArray(agents.list) ? [...agents.list] : [];
+      const agentExists = list.some((entry) => isRecord(entry) && entry.id === agentId);
+      if (!agentExists) {
+        await ensureApiAgentWorkspace(workspace);
+        await fs.mkdir(agentDir, { recursive: true });
+        list.push({ id: agentId, workspace, agentDir });
+      }
+      draft.agents = { ...agents, list };
+
+      const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
+      const bindingExists = bindings.some((entry) => {
+        if (!isRecord(entry) || entry.agentId !== agentId || !isRecord(entry.match)) {
+          return false;
+        }
+        const match = entry.match;
+        return match.channel === API_CHANNEL_ID &&
+          match.accountId === API_ACCOUNT_ID &&
+          isRecord(match.peer) &&
+          match.peer.kind === "direct" &&
+          match.peer.id === params.peerId;
+      });
+      if (!bindingExists) {
+        bindings.push({
+          agentId,
+          match: {
+            channel: API_CHANNEL_ID,
+            accountId: API_ACCOUNT_ID,
+            peer: { kind: "direct", id: params.peerId },
+          },
+        });
+        params.log?.info?.(
+          `[${API_ACCOUNT_ID}] api dynamic agent bound agent=${agentId} peer=${params.peerId}`,
+        );
+      }
+      draft.bindings = bindings;
+      return { agentId, created: !agentExists, bound: !bindingExists };
+    },
+  });
+
+  return params.configRuntime?.current?.() ?? current;
+}
+
+async function ensureApiAgentWorkspace(workspace: string): Promise<void> {
+  await fs.mkdir(path.join(workspace, ".openclaw"), { recursive: true });
+  const now = new Date().toISOString();
+  await writeFileIfMissing(path.join(workspace, "AGENTS.md"), [
+    "# Claw Manager API Agent",
+    "",
+    "This workspace is dedicated to one external API openid.",
+    "Do not run first-run onboarding.",
+    "Do not use local workspace profile files as cross-user memory.",
+    "For user facts and preferences, rely on sender-scoped OpenViking memories injected into the current turn.",
+    "Answer the current API request directly.",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "USER.md"), [
+    "# USER.md - API User",
+    "",
+    "No local user profile is stored here.",
+    "Use the sender-scoped OpenViking user memory for this API caller.",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "SOUL.md"), [
+    "# SOUL.md - API Channel",
+    "",
+    "Be concise, useful, and follow the API request.",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "TOOLS.md"), [
+    "# TOOLS.md - API Channel",
+    "",
+    "No local tool notes.",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "IDENTITY.md"), [
+    "# IDENTITY.md - API Channel",
+    "",
+    "Claw Manager API channel assistant.",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "HEARTBEAT.md"), [
+    "<!-- API channel heartbeat disabled. -->",
+    "",
+  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, ".openclaw", "workspace-state.json"), JSON.stringify({
+    version: 1,
+    setupCompletedAt: now,
+  }, null, 2));
+  await safeUnlink(path.join(workspace, "BOOTSTRAP.md"));
+}
+
 export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promise<{ channel: string; messageId: string; text: string }> {
   if (!ctx.channelRuntime) {
     throw new Error("ctx.channelRuntime missing");
@@ -153,8 +460,16 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   }
   const runtime = ctx.channelRuntime;
   const inbound = buildApiInboundContext(ctx);
+  const cfgForRoute = await ensureApiDynamicAgentBinding({
+    cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
+    channelRuntime: runtime,
+    configRuntime: ctx.configRuntime,
+    peerId: inbound.To,
+    senderHash: trim(ctx.senderHash),
+    log: ctx.log,
+  });
   const route = runtime.routing.resolveAgentRoute({
-    cfg: ctx.cfg,
+    cfg: cfgForRoute,
     channel: API_CHANNEL_ID,
     accountId: API_ACCOUNT_ID,
     peer: { kind: "direct", id: inbound.To },
@@ -165,7 +480,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     `[${API_ACCOUNT_ID}] api dispatch route requestId=${trim(ctx.requestId) || "auto"} ` +
       `user=${inbound.openVikingUserId} senderHash=${trim(ctx.senderHash)} sessionKey=${sessionKey}`,
   );
-  const storePath = runtime.session.resolveStorePath(ctx.cfg.session?.store, {
+  const storePath = runtime.session.resolveStorePath(cfgForRoute.session?.store, {
     agentId: route.agentId,
   });
   const finalized = runtime.reply.finalizeInboundContext(
@@ -190,9 +505,18 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     onRecordError: (error: unknown) => ctx.log?.error?.(`recordInboundSession: ${String(error)}`),
   });
 
+  const requestId = trim(ctx.requestId) || randomUUID();
+  const runId = requestId;
   let replyText = "";
+  const streamState = registerApiAgentEventStream({
+    requestId,
+    runId,
+    sessionKey,
+    onDelta: ctx.onDelta,
+    log: ctx.log,
+  });
   const { dispatcher, replyOptions, markDispatchIdle } = runtime.reply.createReplyDispatcherWithTyping({
-    humanDelay: runtime.reply.resolveHumanDelayConfig(ctx.cfg, route.agentId),
+    humanDelay: runtime.reply.resolveHumanDelayConfig(cfgForRoute, route.agentId),
     typingCallbacks: createTypingCallbacks({
       start: async () => {},
       stop: async () => {},
@@ -200,7 +524,13 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
       onStopError: () => {},
     }),
     deliver: async (payload: { text?: string }) => {
-      replyText += payload.text ?? "";
+      const text = payload.text ?? "";
+      replyText += text;
+      if (text) {
+        if (streamState) {
+          streamState.deliverDeltaCount += 1;
+        }
+      }
     },
     onError: (error: unknown) => {
       throw error instanceof Error ? error : new Error(String(error));
@@ -213,24 +543,28 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
       run: () =>
         runtime.reply.dispatchReplyFromConfig({
           ctx: finalized,
-          cfg: ctx.cfg!,
+          cfg: cfgForRoute,
           dispatcher,
           replyOptions: {
             ...replyOptions,
-            disableBlockStreaming: true,
+            runId,
           },
         }),
     });
+    await streamState?.writeChain;
   } finally {
     markDispatchIdle();
+    unregisterApiAgentEventStream(sessionKey, streamState);
   }
   ctx.log?.info?.(
-    `[${API_ACCOUNT_ID}] api dispatch completed requestId=${trim(ctx.requestId) || "auto"} ` +
-      `user=${inbound.openVikingUserId} sessionKey=${sessionKey} textLen=${replyText.length}`,
+    `[${API_ACCOUNT_ID}] api dispatch completed requestId=${requestId} ` +
+      `user=${inbound.openVikingUserId} sessionKey=${sessionKey} textLen=${replyText.length} ` +
+      `agentEventDeltaCount=${streamState?.agentEventDeltaCount ?? 0} ` +
+      `deliverDeltaCount=${streamState?.deliverDeltaCount ?? 0}`,
   );
   return {
     channel: API_CHANNEL_ID,
-    messageId: trim(ctx.requestId) || randomUUID(),
+    messageId: requestId,
     text: replyText,
   };
 }
@@ -240,7 +574,11 @@ export function resolveApiQueueRoot(): string {
   return path.join(home, ".openclaw", API_CHANNEL_ID);
 }
 
-export async function writeApiQueueHeartbeat(root: string, running: boolean): Promise<void> {
+export async function writeApiQueueHeartbeat(
+  root: string,
+  running: boolean,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   await fs.mkdir(root, { recursive: true });
   const now = Date.now();
   const statusPath = path.join(root, API_STATUS_FILE);
@@ -251,6 +589,7 @@ export async function writeApiQueueHeartbeat(root: string, running: boolean): Pr
     updatedAt: new Date(now).toISOString(),
     updatedAtEpochMs: now,
     pid: process.pid,
+    ...extra,
   }), "utf8");
   await fs.rename(tempPath, statusPath);
 }
@@ -268,16 +607,25 @@ export async function monitorApiQueue(ctx: ApiGatewayStartContext): Promise<void
     requests: path.join(root, "requests"),
     processing: path.join(root, "processing"),
     responses: path.join(root, "responses"),
+    streams: path.join(root, "streams"),
     failed: path.join(root, "failed"),
   };
   await Promise.all(Object.values(dirs).map((dir) => fs.mkdir(dir, { recursive: true })));
+  const monitorState: ApiQueueMonitorState = {
+    activeUsers: new Set(),
+    activeTasks: new Set(),
+  };
   let lastHeartbeatAt = 0;
   const writeHeartbeatIfDue = async (force = false) => {
     const now = Date.now();
     if (!force && now - lastHeartbeatAt < API_HEARTBEAT_INTERVAL_MS) {
       return;
     }
-    await writeApiQueueHeartbeat(root, true);
+    await writeApiQueueHeartbeat(root, true, {
+      activeCount: monitorState.activeTasks.size,
+      activeUsers: [...monitorState.activeUsers],
+      queuedCount: await countQueueFiles(dirs.requests),
+    });
     lastHeartbeatAt = now;
   };
   await writeHeartbeatIfDue(true);
@@ -292,15 +640,23 @@ export async function monitorApiQueue(ctx: ApiGatewayStartContext): Promise<void
 
   while (!ctx.abortSignal?.aborted) {
     await writeHeartbeatIfDue();
-    await processPendingApiRequests(ctx, dirs);
+    await processPendingApiRequests(ctx, dirs, monitorState);
     await sleep(API_QUEUE_POLL_MS, ctx.abortSignal);
   }
-  await writeApiQueueHeartbeat(root, false);
+  if (monitorState.activeTasks.size > 0) {
+    await Promise.allSettled([...monitorState.activeTasks]);
+  }
+  await writeApiQueueHeartbeat(root, false, {
+    activeCount: 0,
+    activeUsers: [],
+    queuedCount: await countQueueFiles(dirs.requests),
+  });
 }
 
 async function processPendingApiRequests(
   ctx: ApiGatewayStartContext,
-  dirs: { requests: string; processing: string; responses: string; failed: string },
+  dirs: { requests: string; processing: string; responses: string; streams: string; failed: string },
+  monitorState: ApiQueueMonitorState,
 ): Promise<void> {
   let files: string[] = [];
   try {
@@ -317,13 +673,53 @@ async function processPendingApiRequests(
       return;
     }
     const requestPath = path.join(dirs.requests, file);
+    const request = await readApiRequestForScheduling(requestPath);
+    const userKey = apiRequestUserKey(request, file);
+    if (monitorState.activeUsers.has(userKey)) {
+      continue;
+    }
     const processingPath = path.join(dirs.processing, file);
     try {
       await fs.rename(requestPath, processingPath);
     } catch {
       continue;
     }
-    await processApiRequestFile(ctx, processingPath, path.join(dirs.responses, file), path.join(dirs.failed, file));
+    monitorState.activeUsers.add(userKey);
+    let task!: Promise<void>;
+    task = processApiRequestFile(
+      ctx,
+      processingPath,
+      path.join(dirs.responses, file),
+      path.join(dirs.streams, file.replace(/\.json$/, ".jsonl")),
+      path.join(dirs.failed, file),
+    ).finally(() => {
+      monitorState.activeUsers.delete(userKey);
+      monitorState.activeTasks.delete(task);
+    });
+    monitorState.activeTasks.add(task);
+  }
+}
+
+async function readApiRequestForScheduling(requestPath: string): Promise<ApiSendMessageParams | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(requestPath, "utf8")) as ApiSendMessageParams;
+  } catch {
+    return undefined;
+  }
+}
+
+function apiRequestUserKey(request: ApiSendMessageParams | undefined, fallback: string): string {
+  return trim(request?.openVikingUserId)
+    || trim(request?.openvikingUserId)
+    || trim(request?.senderHash)
+    || `invalid:${fallback}`;
+}
+
+async function countQueueFiles(requestsDir: string): Promise<number> {
+  try {
+    return (await fs.readdir(requestsDir)).filter((file) => file.endsWith(".json")).length;
+  } catch {
+    return 0;
   }
 }
 
@@ -331,11 +727,22 @@ async function processApiRequestFile(
   ctx: ApiGatewayStartContext,
   processingPath: string,
   responsePath: string,
+  streamPath: string,
   failedPath: string,
 ): Promise<void> {
   let request: ApiSendMessageParams = {};
   let requestId = path.basename(processingPath, ".json");
+  let streamSeq = 0;
+  const writeStreamEvent = async (event: Omit<ApiQueueStreamEvent, "seq" | "createdAt">) => {
+    streamSeq += 1;
+    await writeQueueStreamEvent(streamPath, {
+      seq: streamSeq,
+      createdAt: new Date().toISOString(),
+      ...event,
+    });
+  };
   try {
+    await safeUnlink(streamPath);
     request = JSON.parse(await fs.readFile(processingPath, "utf8")) as ApiSendMessageParams;
     requestId = trim(request.requestId) || requestId;
     ctx.log?.info?.(`[${API_ACCOUNT_ID}] api request received requestId=${requestId} user=${trim(request.openVikingUserId) || trim(request.openvikingUserId) || "missing"}`);
@@ -350,8 +757,11 @@ async function processApiRequestFile(
       requestId,
       cfg: ctx.cfg,
       channelRuntime: ctx.channelRuntime,
+      configRuntime: ctx.configRuntime,
       log: ctx.log,
+      onDelta: async (text) => writeStreamEvent({ type: "delta", text }),
     });
+    await writeStreamEvent({ type: "done", messageId: result.messageId });
     await writeQueueResponse(responsePath, {
       ok: true,
       requestId,
@@ -371,6 +781,7 @@ async function processApiRequestFile(
   } catch (error) {
     const message = errorMessage(error);
     ctx.log?.error?.(`[${API_ACCOUNT_ID}] api request failed requestId=${requestId}: ${message}`);
+    await writeStreamEvent({ type: "error", error: message }).catch(() => {});
     await writeQueueResponse(responsePath, {
       ok: false,
       requestId,
@@ -388,6 +799,11 @@ async function processApiRequestFile(
   }
 }
 
+export async function writeQueueStreamEvent(streamPath: string, event: ApiQueueStreamEvent): Promise<void> {
+  await fs.mkdir(path.dirname(streamPath), { recursive: true });
+  await fs.appendFile(streamPath, `${JSON.stringify(event)}\n`, "utf8");
+}
+
 async function writeQueueResponse(responsePath: string, response: ApiQueueResponse): Promise<void> {
   await fs.mkdir(path.dirname(responsePath), { recursive: true });
   const tmpPath = `${responsePath}.tmp-${process.pid}-${Date.now()}`;
@@ -399,6 +815,16 @@ async function safeUnlink(file: string): Promise<void> {
   try {
     await fs.unlink(file);
   } catch {}
+}
+
+async function writeFileIfMissing(file: string, content: string): Promise<void> {
+  try {
+    await fs.writeFile(file, content, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (!isNodeErrorCode(error, "EEXIST")) {
+      throw error;
+    }
+  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -489,6 +915,75 @@ export const apiChannelPlugin: ChannelPlugin<Record<string, never>> = {
 
 function trim(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return isRecord(error) && error.code === code;
+}
+
+function asOpenClawConfig(value: OpenClawConfig | Record<string, unknown>): OpenClawConfig {
+  return value as OpenClawConfig;
+}
+
+function resolveHomePath(value: string): string {
+  if (value.startsWith("~/")) {
+    const openClawHome = trim(process.env.OPENCLAW_HOME);
+    if (openClawHome && value.startsWith("~/.openclaw/")) {
+      return path.join(openClawHome, ".openclaw", value.slice("~/.openclaw/".length));
+    }
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function trimOverlappingDelta(previous: string, delta: string): string {
+  if (!previous || !delta) {
+    return delta;
+  }
+  const max = Math.min(previous.length, delta.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (previous.endsWith(delta.slice(0, size))) {
+      return delta.slice(size);
+    }
+  }
+  return delta;
+}
+
+function shouldPreferExplicitAgentDelta(previous: string, suffix: string, explicit: string): boolean {
+  if (!explicit || !previous) {
+    return false;
+  }
+  if (suffix === explicit) {
+    return true;
+  }
+  if (suffix.length <= explicit.length || !suffix.endsWith(explicit)) {
+    return false;
+  }
+  const extraPrefix = suffix.slice(0, suffix.length - explicit.length);
+  return extraPrefix.length === 1 && explicit.startsWith(extraPrefix);
+}
+
+function collapseAdjacentDuplicatesInCumulativeSuffix(previous: string, suffix: string): string {
+  if (!previous || suffix.length < 2) {
+    return suffix;
+  }
+  const chars = [...suffix];
+  const collapsed: string[] = [];
+  for (const ch of chars) {
+    if (collapsed.length > 0 && collapsed[collapsed.length - 1] === ch) {
+      continue;
+    }
+    collapsed.push(ch);
+  }
+  return collapsed.length === chars.length ? suffix : collapsed.join("");
 }
 
 function errorMessage(error: unknown): string {
