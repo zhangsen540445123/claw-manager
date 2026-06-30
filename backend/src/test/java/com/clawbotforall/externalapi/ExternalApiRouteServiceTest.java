@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -227,6 +228,7 @@ class ExternalApiRouteServiceTest {
   private static class InMemoryRouteMapper implements ExternalApiUserRouteMapper {
     final Map<String, ExternalApiUserRouteEntity> rows = new ConcurrentHashMap<>();
     final Map<String, Integer> counts = new ConcurrentHashMap<>();
+    final ReentrantLock allocationLock = new ReentrantLock();
     long insertDelayMs;
 
     @Override
@@ -250,6 +252,12 @@ class ExternalApiRouteServiceTest {
     }
 
     @Override
+    public String lockAllocationRowForUpdate(String id) {
+      allocationLock.lock();
+      return id;
+    }
+
+    @Override
     public int insert(ExternalApiUserRouteEntity route) {
       if (insertDelayMs > 0) {
         try {
@@ -258,8 +266,14 @@ class ExternalApiRouteServiceTest {
           Thread.currentThread().interrupt();
         }
       }
-      rows.put(route.getOpenidHash(), route);
-      return 1;
+      try {
+        rows.put(route.getOpenidHash(), route);
+        return 1;
+      } finally {
+        if (allocationLock.isHeldByCurrentThread()) {
+          allocationLock.unlock();
+        }
+      }
     }
 
     @Override

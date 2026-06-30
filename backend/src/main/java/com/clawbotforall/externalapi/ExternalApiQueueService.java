@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -24,25 +25,41 @@ import org.springframework.stereotype.Service;
 @Service
 public class ExternalApiQueueService {
   private static final Logger log = LoggerFactory.getLogger(ExternalApiQueueService.class);
-  private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(300);
+  private static final QueueTimeouts DEFAULT_QUEUE_TIMEOUTS = new QueueTimeouts(
+      Duration.ofSeconds(300),
+      Duration.ofSeconds(120),
+      Duration.ofSeconds(900),
+      Duration.ofMillis(200)
+  );
   private static final Duration MONITOR_HEARTBEAT_TTL = Duration.ofSeconds(30);
   private static final Duration MONITOR_START_HEARTBEAT_TIMEOUT = Duration.ofSeconds(10);
-  private static final long POLL_INTERVAL_MS = 200L;
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
   private final InstanceFileService fileService;
   private final ObjectMapper objectMapper;
   private final OpenClawGatewayRpcService gatewayRpcService;
   private final ConcurrentMap<String, Object> startLocks = new ConcurrentHashMap<>();
+  private final QueueTimeouts queueTimeouts;
 
+  @Autowired
   public ExternalApiQueueService(
       InstanceFileService fileService,
       ObjectMapper objectMapper,
       OpenClawGatewayRpcService gatewayRpcService
   ) {
+    this(fileService, objectMapper, gatewayRpcService, DEFAULT_QUEUE_TIMEOUTS);
+  }
+
+  ExternalApiQueueService(
+      InstanceFileService fileService,
+      ObjectMapper objectMapper,
+      OpenClawGatewayRpcService gatewayRpcService,
+      QueueTimeouts queueTimeouts
+  ) {
     this.fileService = fileService;
     this.objectMapper = objectMapper;
     this.gatewayRpcService = gatewayRpcService;
+    this.queueTimeouts = normalizeTimeouts(queueTimeouts);
   }
 
   public Map<String, Object> sendApiChannelMessage(InstanceEntity instance, Map<String, Object> params) {
@@ -72,7 +89,7 @@ public class ExternalApiQueueService {
       Files.deleteIfExists(responsePath);
       Files.deleteIfExists(streamPath);
       writeRequest(requests.resolve(requestId + ".json"), params == null ? Map.of() : params);
-      return waitForResponse(responsePath, streamPath, RESPONSE_TIMEOUT, onDelta == null ? text -> {} : onDelta);
+      return waitForResponse(responsePath, streamPath, queueTimeouts, onDelta == null ? text -> {} : onDelta);
     } catch (IOException error) {
       throw new IllegalStateException("API Channel 队列读写失败：" + message(error), error);
     }
@@ -125,7 +142,7 @@ public class ExternalApiQueueService {
         return true;
       }
       try {
-        Thread.sleep(POLL_INTERVAL_MS);
+        Thread.sleep(DEFAULT_QUEUE_TIMEOUTS.pollInterval().toMillis());
       } catch (InterruptedException error) {
         Thread.currentThread().interrupt();
         return false;
@@ -186,15 +203,27 @@ public class ExternalApiQueueService {
   private Map<String, Object> waitForResponse(
       Path responsePath,
       Path streamPath,
-      Duration timeout,
+      QueueTimeouts timeouts,
       StreamDeltaConsumer onDelta
   ) throws IOException {
-    long deadline = System.nanoTime() + timeout.toNanos();
+    long startedAt = System.nanoTime();
+    long absoluteDeadline = startedAt + timeouts.absoluteTimeout().toNanos();
+    long firstProgressDeadline = startedAt + timeouts.firstDeltaTimeout().toNanos();
+    long idleDeadline = startedAt + timeouts.idleTimeout().toNanos();
+    boolean sawProgress = false;
     StreamReadState streamState = new StreamReadState();
-    while (System.nanoTime() < deadline) {
-      readStreamEvents(streamPath, streamState, onDelta);
+    while (System.nanoTime() < absoluteDeadline) {
+      StreamReadResult streamRead = readStreamEvents(streamPath, streamState, onDelta);
+      if (streamRead.progressed()) {
+        sawProgress = true;
+        idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
+      }
       if (Files.exists(responsePath)) {
-        readStreamEvents(streamPath, streamState, onDelta);
+        streamRead = readStreamEvents(streamPath, streamState, onDelta);
+        if (streamRead.progressed()) {
+          sawProgress = true;
+          idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
+        }
         Map<String, Object> response = objectMapper.readValue(responsePath.toFile(), MAP_TYPE);
         Files.deleteIfExists(responsePath);
         Files.deleteIfExists(streamPath);
@@ -203,14 +232,21 @@ public class ExternalApiQueueService {
         }
         throw new IllegalStateException("API Channel 处理失败：" + stringValue(response.get("error")));
       }
-      sleep();
+      long now = System.nanoTime();
+      if (!sawProgress && now >= firstProgressDeadline) {
+        throw new IllegalStateException("API Channel 首个流式响应超时。");
+      }
+      if (sawProgress && now >= idleDeadline) {
+        throw new IllegalStateException("API Channel 流式响应空闲超时。");
+      }
+      sleep(timeouts);
     }
-    throw new IllegalStateException("API Channel 等待响应超时。");
+    throw new IllegalStateException("API Channel 等待响应超过最大总时长。");
   }
 
-  private void readStreamEvents(Path streamPath, StreamReadState state, StreamDeltaConsumer onDelta) throws IOException {
+  private StreamReadResult readStreamEvents(Path streamPath, StreamReadState state, StreamDeltaConsumer onDelta) throws IOException {
     if (!Files.exists(streamPath)) {
-      return;
+      return new StreamReadResult(false);
     }
     long size = Files.size(streamPath);
     if (size < state.offset) {
@@ -218,7 +254,7 @@ public class ExternalApiQueueService {
       state.pending.setLength(0);
     }
     if (size <= state.offset) {
-      return;
+      return new StreamReadResult(false);
     }
     byte[] bytes;
     try (var input = Files.newInputStream(streamPath)) {
@@ -227,6 +263,7 @@ public class ExternalApiQueueService {
     }
     state.offset = size;
     state.pending.append(new String(bytes, StandardCharsets.UTF_8));
+    boolean progressed = bytes.length > 0;
     int newlineIndex;
     while ((newlineIndex = indexOfNewline(state.pending)) >= 0) {
       String line = state.pending.substring(0, newlineIndex).trim();
@@ -253,6 +290,7 @@ public class ExternalApiQueueService {
         throw new IllegalStateException("API Channel 处理失败：" + valueString(event.get("error")));
       }
     }
+    return new StreamReadResult(progressed);
   }
 
   private static boolean isDuplicateSingleCharacterTailDelta(StringBuilder emitted, String text) {
@@ -284,13 +322,27 @@ public class ExternalApiQueueService {
     }
   }
 
-  private static void sleep() {
+  private static void sleep(QueueTimeouts timeouts) {
     try {
-      Thread.sleep(POLL_INTERVAL_MS);
+      Thread.sleep(timeouts.pollInterval().toMillis());
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("API Channel 等待响应被中断。", error);
     }
+  }
+
+  private static QueueTimeouts normalizeTimeouts(QueueTimeouts raw) {
+    QueueTimeouts value = raw == null ? DEFAULT_QUEUE_TIMEOUTS : raw;
+    return new QueueTimeouts(
+        positiveDuration(value.firstDeltaTimeout(), DEFAULT_QUEUE_TIMEOUTS.firstDeltaTimeout()),
+        positiveDuration(value.idleTimeout(), DEFAULT_QUEUE_TIMEOUTS.idleTimeout()),
+        positiveDuration(value.absoluteTimeout(), DEFAULT_QUEUE_TIMEOUTS.absoluteTimeout()),
+        positiveDuration(value.pollInterval(), DEFAULT_QUEUE_TIMEOUTS.pollInterval())
+    );
+  }
+
+  private static Duration positiveDuration(Duration value, Duration fallback) {
+    return value == null || value.isZero() || value.isNegative() ? fallback : value;
   }
 
   private static String stringValue(Object value) {
@@ -316,4 +368,13 @@ public class ExternalApiQueueService {
     private final StringBuilder pending = new StringBuilder();
     private final StringBuilder emitted = new StringBuilder();
   }
+
+  record QueueTimeouts(
+      Duration firstDeltaTimeout,
+      Duration idleTimeout,
+      Duration absoluteTimeout,
+      Duration pollInterval
+  ) {}
+
+  private record StreamReadResult(boolean progressed) {}
 }

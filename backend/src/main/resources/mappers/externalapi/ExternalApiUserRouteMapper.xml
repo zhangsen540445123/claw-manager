@@ -46,6 +46,13 @@
     WHERE instance_id = #{instanceId}
   </select>
 
+  <select id="lockAllocationRowForUpdate" resultType="string">
+    SELECT id
+    FROM external_api_route_allocation_locks
+    WHERE id = #{id}
+    FOR UPDATE
+  </select>
+
   <insert id="insert" parameterType="com.clawbotforall.externalapi.ExternalApiUserRouteEntity">
     INSERT INTO external_api_user_routes
       (openid, openid_hash, openviking_user_id, instance_id, created_at, updated_at, last_used_at)

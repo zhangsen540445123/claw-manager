@@ -15,6 +15,7 @@ import com.clawbotforall.wechat.OpenClawGatewayRpcService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -276,6 +277,142 @@ class ExternalApiQueueServiceTest {
 
     assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("半");
     assertThat(deltas).containsExactly("半");
+  }
+
+  @Test
+  void streamProgressRefreshesIdleTimeoutUntilFinalResponseArrives() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    Path homeDir = tempDir.resolve("home");
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir,
+        homeDir,
+        tempDir.resolve("workspace"),
+        tempDir.resolve("logs")
+    ));
+    Path root = homeDir.resolve(".openclaw").resolve("claw-manager-api");
+    writeRecentHeartbeat(root);
+    ExternalApiQueueService service = new ExternalApiQueueService(
+        fileService,
+        objectMapper,
+        gatewayRpcService,
+        new ExternalApiQueueService.QueueTimeouts(
+            Duration.ofMillis(150),
+            Duration.ofMillis(300),
+            Duration.ofSeconds(2),
+            Duration.ofMillis(10)
+        )
+    );
+
+    Map<String, Object> params = new LinkedHashMap<>();
+    params.put("requestId", "req_idle_refresh");
+    params.put("message", "hello");
+    List<String> deltas = new ArrayList<>();
+
+    CompletableFuture<Map<String, Object>> result = CompletableFuture.supplyAsync(
+        () -> service.streamApiChannelMessage(instance, params, deltas::add)
+    );
+
+    waitUntilExists(root.resolve("requests").resolve("req_idle_refresh.json"));
+    Path streamPath = root.resolve("streams").resolve("req_idle_refresh.jsonl");
+    Files.createDirectories(streamPath.getParent());
+    Files.writeString(streamPath, """
+        {"seq":1,"type":"delta","text":"甲","createdAt":"2026-06-28T00:00:00Z"}
+        """);
+    waitUntil(() -> deltas.size() == 1);
+    Thread.sleep(70);
+    Files.writeString(streamPath, """
+        {"seq":2,"type":"delta","text":"乙","createdAt":"2026-06-28T00:00:01Z"}
+        """, java.nio.file.StandardOpenOption.APPEND);
+    waitUntil(() -> deltas.size() == 2);
+    Thread.sleep(70);
+    objectMapper.writeValue(root.resolve("responses").resolve("req_idle_refresh.json").toFile(), Map.of(
+        "ok", true,
+        "requestId", "req_idle_refresh",
+        "messageId", "msg_idle_refresh",
+        "text", "甲乙"
+    ));
+
+    assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("甲乙");
+    assertThat(deltas).containsExactly("甲", "乙");
+  }
+
+  @Test
+  void timesOutQuicklyWhenNoInitialStreamProgressArrives() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    Path homeDir = tempDir.resolve("home");
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir,
+        homeDir,
+        tempDir.resolve("workspace"),
+        tempDir.resolve("logs")
+    ));
+    Path root = homeDir.resolve(".openclaw").resolve("claw-manager-api");
+    writeRecentHeartbeat(root);
+    ExternalApiQueueService service = new ExternalApiQueueService(
+        fileService,
+        objectMapper,
+        gatewayRpcService,
+        new ExternalApiQueueService.QueueTimeouts(
+            Duration.ofMillis(80),
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(2),
+            Duration.ofMillis(10)
+        )
+    );
+
+    CompletableFuture<Map<String, Object>> result = CompletableFuture.supplyAsync(
+        () -> service.streamApiChannelMessage(instance, Map.of("requestId", "req_first_timeout"), text -> {})
+    );
+
+    waitUntilExists(root.resolve("requests").resolve("req_first_timeout.json"));
+    assertThatThrownBy(() -> result.get(2, TimeUnit.SECONDS))
+        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+        .hasRootCauseMessage("API Channel 首个流式响应超时。");
+  }
+
+  @Test
+  void timesOutWhenStreamIsIdleAfterProgress() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    Path homeDir = tempDir.resolve("home");
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir,
+        homeDir,
+        tempDir.resolve("workspace"),
+        tempDir.resolve("logs")
+    ));
+    Path root = homeDir.resolve(".openclaw").resolve("claw-manager-api");
+    writeRecentHeartbeat(root);
+    ExternalApiQueueService service = new ExternalApiQueueService(
+        fileService,
+        objectMapper,
+        gatewayRpcService,
+        new ExternalApiQueueService.QueueTimeouts(
+            Duration.ofMillis(150),
+            Duration.ofMillis(80),
+            Duration.ofSeconds(2),
+            Duration.ofMillis(10)
+        )
+    );
+
+    List<String> deltas = new ArrayList<>();
+    CompletableFuture<Map<String, Object>> result = CompletableFuture.supplyAsync(
+        () -> service.streamApiChannelMessage(instance, Map.of("requestId", "req_idle_timeout"), deltas::add)
+    );
+
+    waitUntilExists(root.resolve("requests").resolve("req_idle_timeout.json"));
+    Path streamPath = root.resolve("streams").resolve("req_idle_timeout.jsonl");
+    Files.createDirectories(streamPath.getParent());
+    Files.writeString(streamPath, """
+        {"seq":1,"type":"delta","text":"甲","createdAt":"2026-06-28T00:00:00Z"}
+        """);
+    waitUntil(() -> deltas.size() == 1);
+
+    assertThatThrownBy(() -> result.get(2, TimeUnit.SECONDS))
+        .isInstanceOf(java.util.concurrent.ExecutionException.class)
+        .hasRootCauseMessage("API Channel 流式响应空闲超时。");
   }
 
   @Test

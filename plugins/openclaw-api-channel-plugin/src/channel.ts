@@ -127,6 +127,7 @@ type ApiAgentEventStreamState = {
 
 const activeApiAgentEventStreams = new Map<string, ApiAgentEventStreamState>();
 const activeApiAgentEventStreamsByRunId = new Map<string, ApiAgentEventStreamState>();
+let apiDynamicAgentBindingMutationChain: Promise<unknown> = Promise.resolve();
 
 export function registerApiAgentEventStream(params: {
   requestId?: string;
@@ -214,7 +215,21 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
       const explicit = explicitDelta ? trimOverlappingDelta(state.emittedText, explicitDelta) : "";
       delta = shouldPreferExplicitAgentDelta(state.emittedText, suffix, explicit) ? explicit : suffix;
     } else {
-      delta = explicitDelta || text;
+      const explicit = explicitDelta ? trimOverlappingDelta(state.emittedText, explicitDelta) : "";
+      if (explicit) {
+        delta = explicit;
+      } else {
+        const overlapTrimmed = trimOverlappingDelta(state.emittedText, text);
+        if (overlapTrimmed && overlapTrimmed.length < text.length) {
+          delta = overlapTrimmed;
+        } else {
+          state.log?.warn?.(
+            `[${API_ACCOUNT_ID}] api agent-event ignored non-monotonic cumulative text ` +
+              `requestId=${state.requestId} sessionKey=${state.sessionKey}`,
+          );
+          return false;
+        }
+      }
     }
   } else {
     delta = explicitDelta;
@@ -355,7 +370,7 @@ async function ensureApiDynamicAgentBinding(params: {
 
   const workspace = resolveHomePath(`~/.openclaw/workspace-${agentId}`);
   const agentDir = resolveHomePath(`~/.openclaw/agents/${agentId}/agent`);
-  await mutateConfigFile({
+  await serializeApiDynamicAgentBindingMutation(() => mutateConfigFile({
     base: "runtime",
     afterWrite: { mode: "auto" },
     mutate: async (draft: Record<string, unknown>) => {
@@ -397,9 +412,17 @@ async function ensureApiDynamicAgentBinding(params: {
       draft.bindings = bindings;
       return { agentId, created: !agentExists, bound: !bindingExists };
     },
-  });
+  }));
 
   return params.configRuntime?.current?.() ?? current;
+}
+
+function serializeApiDynamicAgentBindingMutation<T>(work: () => Promise<T>): Promise<T> {
+  const run = apiDynamicAgentBindingMutationChain
+    .catch(() => undefined)
+    .then(work);
+  apiDynamicAgentBindingMutationChain = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 async function ensureApiAgentWorkspace(workspace: string): Promise<void> {

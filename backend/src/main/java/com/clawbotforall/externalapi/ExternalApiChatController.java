@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 public class ExternalApiChatController {
+  private static final long SSE_TIMEOUT_MS = 960_000L;
 
   private final ExternalApiSettingsService settingsService;
   private final ExternalApiRouteService routeService;
@@ -54,7 +55,7 @@ public class ExternalApiChatController {
     String conversationId = trim(payload.conversationId()).isBlank() ? "default" : trim(payload.conversationId());
     String conversationHash = routeService.conversationHash(conversationId);
 
-    SseEmitter emitter = new SseEmitter(300_000L);
+    SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
     executor.execute(() -> {
       try {
         send(emitter, "start", Map.of(

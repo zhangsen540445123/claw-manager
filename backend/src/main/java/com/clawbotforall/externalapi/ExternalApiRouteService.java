@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -29,7 +30,6 @@ public class ExternalApiRouteService {
   private final ExternalApiIdentityService identityService;
   private final ApiChannelPluginService apiPluginService;
   private final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
-  private final Object routeAllocationLock = new Object();
 
   public ExternalApiRouteService(
       ExternalApiUserRouteMapper routeMapper,
@@ -47,7 +47,7 @@ public class ExternalApiRouteService {
     this.apiPluginService = apiPluginService;
   }
 
-  @Transactional
+  @Transactional(isolation = Isolation.READ_COMMITTED)
   public ExternalApiResolvedRoute resolveOrCreateRoute(String openid) {
     OpenVikingEffectiveSettings settings = openVikingSettingsService.effectiveSettings();
     ExternalApiIdentity identity = identityService.resolve(openid, settings.identityHashSecret());
@@ -59,27 +59,30 @@ public class ExternalApiRouteService {
         InstanceEntity instance = requireUsableInstance(existing.getInstanceId());
         return new ExternalApiResolvedRoute(instance, identity.openidHash(), existing.getOpenvikingUserId(), identity.senderId());
       }
-      synchronized (routeAllocationLock) {
-        existing = routeMapper.findByOpenidHash(identity.openidHash());
-        if (existing != null) {
-          routeMapper.updateLastUsed(identity.openidHash(), Instant.now().toString());
-          InstanceEntity instance = requireUsableInstance(existing.getInstanceId());
-          return new ExternalApiResolvedRoute(instance, identity.openidHash(), existing.getOpenvikingUserId(), identity.senderId());
-        }
-        InstanceEntity selected = selectLeastLoadedInstance();
-        String now = Instant.now().toString();
-        ExternalApiUserRouteEntity route = new ExternalApiUserRouteEntity();
-        route.setOpenid(identity.openid());
-        route.setOpenidHash(identity.openidHash());
-        route.setOpenvikingUserId(identity.openvikingUserId());
-        route.setInstanceId(selected.getId());
-        route.setCreatedAt(now);
-        route.setUpdatedAt(now);
-        route.setLastUsedAt(now);
-        routeMapper.insert(route);
-        return new ExternalApiResolvedRoute(selected, identity.openidHash(), identity.openvikingUserId(), identity.senderId());
+      lockGlobalRouteAllocation();
+      existing = routeMapper.findByOpenidHash(identity.openidHash());
+      if (existing != null) {
+        routeMapper.updateLastUsed(identity.openidHash(), Instant.now().toString());
+        InstanceEntity instance = requireUsableInstance(existing.getInstanceId());
+        return new ExternalApiResolvedRoute(instance, identity.openidHash(), existing.getOpenvikingUserId(), identity.senderId());
       }
+      InstanceEntity selected = selectLeastLoadedInstance();
+      String now = Instant.now().toString();
+      ExternalApiUserRouteEntity route = new ExternalApiUserRouteEntity();
+      route.setOpenid(identity.openid());
+      route.setOpenidHash(identity.openidHash());
+      route.setOpenvikingUserId(identity.openvikingUserId());
+      route.setInstanceId(selected.getId());
+      route.setCreatedAt(now);
+      route.setUpdatedAt(now);
+      route.setLastUsedAt(now);
+      routeMapper.insert(route);
+      return new ExternalApiResolvedRoute(selected, identity.openidHash(), identity.openvikingUserId(), identity.senderId());
     }
+  }
+
+  private void lockGlobalRouteAllocation() {
+    routeMapper.lockAllocationRowForUpdate("global");
   }
 
   public String conversationHash(String conversationId) {

@@ -338,6 +338,30 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual(["甲乙丙丁戊己", "庚辛壬癸"]);
   });
 
+  it("does not emit non-monotonic cumulative assistant text without an explicit delta", async () => {
+    const chunks: string[] = [];
+    resetApiAgentEventStreamsForTest();
+    registerApiAgentEventStream({
+      requestId: "req-agent-non-monotonic-text",
+      runId: "run-agent-non-monotonic-text",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      onDelta: async (text) => chunks.push(text),
+    });
+
+    await handleApiAssistantAgentEvent({
+      stream: "assistant",
+      runId: "run-agent-non-monotonic-text",
+      data: { text: "甲乙丙丁戊" },
+    });
+    await handleApiAssistantAgentEvent({
+      stream: "assistant",
+      runId: "run-agent-non-monotonic-text",
+      data: { text: "庚辛壬癸" },
+    });
+
+    expect(chunks).toEqual(["甲乙丙丁戊"]);
+  });
+
   it("ignores assistant agent events without matching sessionKey or runId", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();
@@ -783,6 +807,86 @@ describe("buildApiInboundContext", () => {
         cfg: currentCfg,
       }),
     );
+  });
+
+  it("keeps dynamic agent bindings when two API users are created concurrently", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-agent-concurrent-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const senderA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const senderB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const initialCfg = {
+      session: {},
+      channels: { "claw-manager-api": { enabled: true } },
+      agents: { list: [] },
+      bindings: [],
+    } as any;
+    let currentCfg = initialCfg;
+    const runtime = makeRuntime();
+    runtime.routing.resolveAgentRoute = vi.fn(({ cfg, peer }) => {
+      const binding = (cfg.bindings ?? []).find((entry: any) =>
+        entry.match?.channel === "claw-manager-api" &&
+        entry.match?.accountId === "global" &&
+        entry.match?.peer?.kind === "direct" &&
+        entry.match?.peer?.id === peer.id
+      );
+      if (binding) {
+        return {
+          agentId: binding.agentId,
+          sessionKey: `agent:${binding.agentId}:claw-manager-api:global:direct:${peer.id}`,
+          mainSessionKey: `agent:${binding.agentId}:main`,
+          matchedBy: "binding",
+        };
+      }
+      return {
+        agentId: "main",
+        sessionKey: `agent:main:claw-manager-api:global:direct:${peer.id}`,
+        mainSessionKey: "agent:main:main",
+        matchedBy: "default",
+      };
+    });
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result };
+    });
+    const configRuntime = {
+      current: () => currentCfg,
+      mutateConfigFile,
+    };
+
+    await Promise.all([
+      dispatchApiMessage({
+        requestId: "req-dynamic-agent-a",
+        message: "hello a",
+        openVikingUserId: `api_${senderA}`,
+        senderHash: senderA,
+        conversationHash: "convhash",
+        cfg: initialCfg,
+        channelRuntime: runtime as any,
+        configRuntime,
+      }),
+      dispatchApiMessage({
+        requestId: "req-dynamic-agent-b",
+        message: "hello b",
+        openVikingUserId: `api_${senderB}`,
+        senderHash: senderB,
+        conversationHash: "convhash",
+        cfg: initialCfg,
+        channelRuntime: runtime as any,
+        configRuntime,
+      }),
+    ]);
+
+    expect(currentCfg.agents.list.map((entry: any) => entry.id).sort()).toEqual([
+      resolveApiDynamicAgentId(senderA),
+      resolveApiDynamicAgentId(senderB),
+    ].sort());
+    expect(currentCfg.bindings.map((entry: any) => entry.agentId).sort()).toEqual([
+      resolveApiDynamicAgentId(senderA),
+      resolveApiDynamicAgentId(senderB),
+    ].sort());
   });
 
   it("keeps delivered reply chunks out of the token stream and only records final text", async () => {

@@ -187,6 +187,14 @@ CREATE TABLE IF NOT EXISTS external_api_settings (
   updated_at VARCHAR(40) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS external_api_route_allocation_locks (
+  id VARCHAR(64) PRIMARY KEY,
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO external_api_route_allocation_locks (id, updated_at)
+VALUES ('global', '1970-01-01T00:00:00Z');
+
 CREATE TABLE IF NOT EXISTS external_api_user_routes (
   openid_hash VARCHAR(64) PRIMARY KEY,
   openid VARCHAR(255) NOT NULL,

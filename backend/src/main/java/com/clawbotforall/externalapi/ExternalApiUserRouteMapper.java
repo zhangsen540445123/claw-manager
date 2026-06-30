@@ -19,6 +19,8 @@ public interface ExternalApiUserRouteMapper {
 
   int countByInstanceId(@Param("instanceId") String instanceId);
 
+  String lockAllocationRowForUpdate(@Param("id") String id);
+
   int insert(ExternalApiUserRouteEntity route);
 
   int updateLastUsed(@Param("openidHash") String openidHash, @Param("lastUsedAt") String lastUsedAt);
