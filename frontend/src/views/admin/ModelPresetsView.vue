@@ -20,6 +20,8 @@ const presetForm = reactive({
   apiMode: "openai-completions",
   baseUrl: "",
   apiKey: "",
+  contextWindow: undefined as number | undefined,
+  maxTokens: undefined as number | undefined,
   isDefault: false
 });
 
@@ -54,6 +56,8 @@ function openCreatePreset() {
     apiMode: "openai-completions",
     baseUrl: "",
     apiKey: "",
+    contextWindow: undefined,
+    maxTokens: undefined,
     isDefault: admin.presets.length === 0
   });
   applyProviderDefaults(false);
@@ -71,6 +75,8 @@ function openEditPreset(preset: PublicModelPreset) {
     apiMode: preset.apiMode,
     baseUrl: preset.baseUrl,
     apiKey: "",
+    contextWindow: preset.contextWindow,
+    maxTokens: preset.maxTokens,
     isDefault: preset.isDefault
   });
   presetDialogOpen.value = true;
@@ -86,11 +92,11 @@ function applyProviderDefaults(overwrite = true) {
 }
 
 function presetFieldValue(field: ModelProviderField) {
-  return String((presetForm as unknown as Record<string, string | boolean>)[field.name] ?? "");
+  return String((presetForm as unknown as Record<string, string | number | boolean | undefined>)[field.name] ?? "");
 }
 
 function setPresetFieldValue(field: ModelProviderField, value: string | number | boolean) {
-  (presetForm as unknown as Record<string, string | boolean>)[field.name] = String(value);
+  (presetForm as unknown as Record<string, string | number | boolean | undefined>)[field.name] = String(value);
 }
 
 function presetFieldPlaceholder(field: ModelProviderField) {
@@ -128,6 +134,10 @@ async function confirmPresetSyncIfNeeded() {
 }
 
 async function savePreset() {
+  if (!isPositiveInteger(presetForm.contextWindow) || !isPositiveInteger(presetForm.maxTokens)) {
+    ElMessage.warning("请填写正整数 Context Window 和 Max Tokens。");
+    return;
+  }
   const shouldSync = await confirmPresetSyncIfNeeded();
   if (shouldSync === null) {
     return;
@@ -140,6 +150,8 @@ async function savePreset() {
     apiMode: presetForm.apiMode,
     baseUrl: presetForm.baseUrl,
     apiKey: presetForm.apiKey,
+    contextWindow: presetForm.contextWindow,
+    maxTokens: presetForm.maxTokens,
     isDefault: presetForm.isDefault,
     syncReferencedInstances: shouldSync
   };
@@ -157,6 +169,10 @@ async function savePreset() {
     }
     presetDialogOpen.value = false;
   });
+}
+
+function isPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 </script>
 
@@ -180,6 +196,12 @@ async function savePreset() {
           <template #default="{ row }">{{ row.providerId }}/{{ row.modelId }}</template>
         </el-table-column>
         <el-table-column prop="apiMode" label="API Mode" min-width="150" />
+        <el-table-column label="Context Window" width="150" align="right">
+          <template #default="{ row }">{{ row.contextWindow }}</template>
+        </el-table-column>
+        <el-table-column label="Max Tokens" width="130" align="right">
+          <template #default="{ row }">{{ row.maxTokens }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="160">
           <template #default="{ row }">
             <div class="tag-row">
@@ -248,6 +270,14 @@ async function savePreset() {
             @update:model-value="setPresetFieldValue(field, $event)"
           />
         </el-form-item>
+        <div class="token-grid">
+          <el-form-item label="Context Window" required>
+            <el-input-number v-model="presetForm.contextWindow" :min="1" :controls="false" placeholder="请输入上下文窗口" />
+          </el-form-item>
+          <el-form-item label="Max Tokens" required>
+            <el-input-number v-model="presetForm.maxTokens" :min="1" :controls="false" placeholder="请输入最大输出 tokens" />
+          </el-form-item>
+        </div>
         <el-checkbox v-model="presetForm.isDefault">设为默认预设</el-checkbox>
       </el-form>
       <template #footer>
@@ -257,3 +287,15 @@ async function savePreset() {
     </el-dialog>
   </section>
 </template>
+
+<style scoped>
+.token-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.token-grid :deep(.el-input-number) {
+  width: 100%;
+}
+</style>

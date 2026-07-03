@@ -82,6 +82,10 @@ class InstanceModelServiceTest {
         .containsExactly(0, 1);
     assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getModelId)
         .containsExactly("gpt-5.5", "claude-test");
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getContextWindow)
+        .containsExactly(100_000, 200_000);
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getMaxTokens)
+        .containsExactly(10_000, 20_000);
   }
 
   @Test
@@ -148,6 +152,8 @@ class InstanceModelServiceTest {
     ArgumentCaptor<InstanceModelEntity> captor = ArgumentCaptor.forClass(InstanceModelEntity.class);
     verify(mutationMapper).insertModel(captor.capture());
     assertThat(captor.getValue().getPresetId()).isEqualTo("preset_1");
+    assertThat(captor.getValue().getContextWindow()).isEqualTo(200_000);
+    assertThat(captor.getValue().getMaxTokens()).isEqualTo(20_000);
   }
 
   @Test
@@ -169,6 +175,8 @@ class InstanceModelServiceTest {
     ArgumentCaptor<InstanceModelEntity> captor = ArgumentCaptor.forClass(InstanceModelEntity.class);
     verify(mutationMapper).insertModel(captor.capture());
     assertThat(captor.getValue().getPresetId()).isNull();
+    assertThat(captor.getValue().getContextWindow()).isEqualTo(200_000);
+    assertThat(captor.getValue().getMaxTokens()).isEqualTo(20_000);
   }
 
   private static InstanceEntity instance(String status) {
@@ -193,6 +201,8 @@ class InstanceModelServiceTest {
     model.setBaseUrl("https://example.test/v1");
     model.setApiKey("sk-test");
     model.setExtra("{}");
+    model.setContextWindow(100_000);
+    model.setMaxTokens(10_000);
     return model;
   }
 
@@ -208,7 +218,9 @@ class InstanceModelServiceTest {
         "https://example.test/v1",
         "sk-test",
         null,
-        "{}"
+        "{}",
+        200_000,
+        20_000
     );
   }
 
@@ -216,6 +228,8 @@ class InstanceModelServiceTest {
     ModelPresetEntity preset = new ModelPresetEntity();
     preset.setId(id);
     preset.setName(id);
+    preset.setContextWindow(200_000);
+    preset.setMaxTokens(20_000);
     return preset;
   }
 }

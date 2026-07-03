@@ -23,10 +23,11 @@
   <insert id="insertModel" parameterType="com.clawbotforall.instance.InstanceModelEntity">
     INSERT INTO instance_models
       (instance_id, sort_order, preset_id, provider_key, provider_id, model_id, api_mode, auth_type,
-       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra)
+       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra, context_window, max_tokens)
     VALUES
       (#{instanceId}, #{sortOrder}, #{presetId}, #{providerKey}, #{providerId}, #{modelId}, #{apiMode}, #{authType},
-       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra})
+       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra},
+       #{contextWindow}, #{maxTokens})
   </insert>
 
   <delete id="deleteModelsForInstance">

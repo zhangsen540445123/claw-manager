@@ -83,6 +83,8 @@ public class PublicInstanceFactory {
         defaultString(model.getAuthMethodId()),
         defaultString(model.getBaseUrl()),
         maskSecret(model.getApiKey()),
+        model.getContextWindow(),
+        model.getMaxTokens(),
         readJsonMap(model.getExtra())
     );
   }

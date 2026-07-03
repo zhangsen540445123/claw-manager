@@ -21,6 +21,8 @@ export interface PublicModelPreset {
   authProviderId: string;
   authMethodId: string;
   baseUrl: string;
+  contextWindow: number;
+  maxTokens: number;
   hasBaseUrl: boolean;
   hasApiKey: boolean;
   createdAt: string;
@@ -76,6 +78,8 @@ export interface PublicInstanceModel {
   baseUrl: string;
   apiKey: string;
   extra: Record<string, unknown>;
+  contextWindow: number;
+  maxTokens: number;
 }
 
 export interface PublicInstanceModelAuth {

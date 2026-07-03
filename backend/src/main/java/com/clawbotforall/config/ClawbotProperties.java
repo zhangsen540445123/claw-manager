@@ -36,8 +36,6 @@ public record ClawbotProperties(
           1_800_000,
           10_000,
           5_000,
-          1_000_000,
-          128_000,
           List.of(
               "http://localhost:4300",
               "http://127.0.0.1:4300",
@@ -64,17 +62,9 @@ public record ClawbotProperties(
       long gatewayReadyTimeoutMs,
       long gatewayReadyCheckIntervalMs,
       long gatewayReadyProbeTimeoutMs,
-      int modelContextWindow,
-      int modelMaxTokens,
       List<String> controlUiAllowedOrigins
   ) {
     public Runtime {
-      if (modelContextWindow <= 0) {
-        modelContextWindow = 1_000_000;
-      }
-      if (modelMaxTokens <= 0) {
-        modelMaxTokens = 128_000;
-      }
       if (controlUiAllowedOrigins == null) {
         controlUiAllowedOrigins = List.of();
       }

@@ -23,7 +23,9 @@ class InstanceRecordFactoryTest {
         "https://example.com/v1",
         "sk-test",
         null,
-        "{}"
+        "{}",
+        200_000,
+        20_000
     );
 
     InstanceCreationDraft draft = factory.create(" 战神 实例 ", model, "preset_1", 19001);
@@ -35,6 +37,8 @@ class InstanceRecordFactoryTest {
     assertThat(draft.instance().getPluginsAllow()).isEqualTo("[]");
     assertThat(draft.model().getPresetId()).isEqualTo("preset_1");
     assertThat(draft.model().getProviderId()).isEqualTo("openai");
+    assertThat(draft.model().getContextWindow()).isEqualTo(200_000);
+    assertThat(draft.model().getMaxTokens()).isEqualTo(20_000);
     assertThat(draft.provisioning().getStatus()).isEqualTo("running");
     assertThat(draft.provisioning().getPercent()).isEqualTo(5);
     assertThat(draft.provisioning().getStage()).isEqualTo("queued");

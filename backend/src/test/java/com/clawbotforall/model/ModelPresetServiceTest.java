@@ -85,7 +85,11 @@ class ModelPresetServiceTest {
     verify(mapper).insert(captor.capture());
     assertThat(result.name()).isEqualTo("GPT-5.5");
     assertThat(result.isDefault()).isTrue();
+    assertThat(result.contextWindow()).isEqualTo(200_000);
+    assertThat(result.maxTokens()).isEqualTo(20_000);
     assertThat(captor.getValue().getModelId()).isEqualTo("gpt-5.5");
+    assertThat(captor.getValue().getContextWindow()).isEqualTo(200_000);
+    assertThat(captor.getValue().getMaxTokens()).isEqualTo(20_000);
   }
 
   @Test
@@ -186,6 +190,10 @@ class ModelPresetServiceTest {
         .containsOnly("gpt-6");
     assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getPresetId)
         .containsOnly("preset_1");
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getContextWindow)
+        .containsOnly(200_000);
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getMaxTokens)
+        .containsOnly(20_000);
     assertThat(result.sync().requested()).isTrue();
     assertThat(result.sync().affectedInstances()).isEqualTo(2);
     assertThat(result.sync().updatedInstanceIds()).containsExactly("inst_stopped", "inst_running");
@@ -204,7 +212,9 @@ class ModelPresetServiceTest {
         "https://example.test/v1",
         "sk-test",
         null,
-        "{}"
+        "{}",
+        200_000,
+        20_000
     );
   }
 
@@ -221,6 +231,8 @@ class ModelPresetServiceTest {
     preset.setAuthProviderId("openai");
     preset.setBaseUrl("https://example.test/v1");
     preset.setApiKey("sk-test");
+    preset.setContextWindow(200_000);
+    preset.setMaxTokens(20_000);
     preset.setCreatedAt("2026-06-01T00:00:00Z");
     return preset;
   }
@@ -252,6 +264,8 @@ class ModelPresetServiceTest {
     model.setBaseUrl("https://example.test/v1");
     model.setApiKey("sk-test");
     model.setExtra("{}");
+    model.setContextWindow(100_000);
+    model.setMaxTokens(10_000);
     return model;
   }
 }

@@ -242,7 +242,9 @@ public class InstanceModelService {
         model.getBaseUrl(),
         model.getApiKey(),
         model.getProviderConfig(),
-        model.getExtra()
+        model.getExtra(),
+        model.getContextWindow(),
+        model.getMaxTokens()
     );
   }
 
@@ -278,6 +280,8 @@ public class InstanceModelService {
     entity.setApiKey(model.apiKey());
     entity.setProviderConfig(model.providerConfigJson());
     entity.setExtra(model.extraJson());
+    entity.setContextWindow(model.contextWindow());
+    entity.setMaxTokens(model.maxTokens());
     return entity;
   }
 
@@ -308,6 +312,8 @@ public class InstanceModelService {
     copy.setApiKey(source.getApiKey());
     copy.setProviderConfig(source.getProviderConfig());
     copy.setExtra(source.getExtra());
+    copy.setContextWindow(source.getContextWindow());
+    copy.setMaxTokens(source.getMaxTokens());
     return copy;
   }
 

@@ -175,8 +175,6 @@ class OpenVikingSettingsServiceTest {
             1_800_000,
             10_000,
             5_000,
-            1_000_000,
-            128_000,
             List.of()
         )
     );

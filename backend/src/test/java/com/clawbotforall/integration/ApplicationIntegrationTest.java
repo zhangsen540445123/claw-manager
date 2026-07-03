@@ -272,6 +272,8 @@ class ApplicationIntegrationTest {
                   "apiMode":"openai-responses",
                   "baseUrl":"https://example.test/v1",
                   "apiKey":"sk-test",
+                  "contextWindow":1000000,
+                  "maxTokens":128000,
                   "isDefault":true
                 }
                 """))
@@ -303,7 +305,11 @@ class ApplicationIntegrationTest {
         .andExpect(jsonPath("$.instance.provisioning.percent").value(5))
         .andExpect(jsonPath("$.instance.models[0].presetId").value(presetId))
         .andExpect(jsonPath("$.instance.models[0].modelId").value("gpt-5.5"))
+        .andExpect(jsonPath("$.instance.models[0].contextWindow").value(1_000_000))
+        .andExpect(jsonPath("$.instance.models[0].maxTokens").value(128_000))
         .andExpect(jsonPath("$.instance.modelChain[0].modelId").value("gpt-5.5"))
+        .andExpect(jsonPath("$.instance.modelChain[0].contextWindow").value(1_000_000))
+        .andExpect(jsonPath("$.instance.modelChain[0].maxTokens").value(128_000))
         .andReturn();
     String instanceId = objectMapper.readTree(instanceResponse.getResponse().getContentAsString())
         .at("/instance/id").asText();
@@ -338,11 +344,15 @@ class ApplicationIntegrationTest {
                   "providerId":"anthropic",
                   "modelId":"claude-test",
                   "apiMode":"anthropic-messages",
-                  "apiKey":"sk-ant-test"
+                  "apiKey":"sk-ant-test",
+                  "contextWindow":200000,
+                  "maxTokens":20000
                 }
                 """))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.instance.models.length()").value(2))
+        .andExpect(jsonPath("$.instance.models[1].contextWindow").value(200_000))
+        .andExpect(jsonPath("$.instance.models[1].maxTokens").value(20_000))
         .andExpect(jsonPath("$.instance.modelChain.length()").value(2));
 
     mockMvc.perform(post("/api/admin/instances/" + instanceId + "/models/reorder")
@@ -370,25 +380,7 @@ class ApplicationIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.instance.wechatBinding.status").value("idle"));
 
-    jdbcTemplate.update(
-        """
-            UPDATE instances
-            SET status = 'running'
-            WHERE id = ?
-            """,
-        instanceId
-    );
-    jdbcTemplate.update(
-        """
-            UPDATE instance_provisioning
-            SET status = 'ready',
-                percent = 100,
-                stage = 'ready',
-                message = 'Gateway 已就绪。'
-            WHERE instance_id = ?
-            """,
-        instanceId
-    );
+    forceInstanceBindable(instanceId);
 
     mockMvc.perform(get("/api/admin/instances").cookie(adminCookie))
         .andExpect(status().isOk())
@@ -554,6 +546,54 @@ class ApplicationIntegrationTest {
       Thread.sleep(100);
     }
     throw lastError == null ? new AssertionError("Timed out waiting for link status " + expectedStatus) : lastError;
+  }
+
+  private void forceInstanceBindable(String instanceId) throws Exception {
+    waitUntilProvisioningSettled(instanceId);
+    jdbcTemplate.update(
+        """
+            UPDATE instances
+            SET status = 'running'
+            WHERE id = ?
+            """,
+        instanceId
+    );
+    jdbcTemplate.update(
+        """
+            UPDATE instance_provisioning
+            SET status = 'ready',
+                percent = 100,
+                stage = 'ready',
+                message = 'Gateway 已就绪。'
+            WHERE instance_id = ?
+            """,
+        instanceId
+    );
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT status FROM instances WHERE id = ?",
+        String.class,
+        instanceId
+    )).isEqualTo("running");
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT status FROM instance_provisioning WHERE instance_id = ?",
+        String.class,
+        instanceId
+    )).isEqualTo("ready");
+  }
+
+  private void waitUntilProvisioningSettled(String instanceId) throws Exception {
+    long deadline = System.currentTimeMillis() + 2_000;
+    while (System.currentTimeMillis() < deadline) {
+      String status = jdbcTemplate.queryForObject(
+          "SELECT status FROM instance_provisioning WHERE instance_id = ?",
+          String.class,
+          instanceId
+      );
+      if (!"running".equals(status)) {
+        return;
+      }
+      Thread.sleep(50);
+    }
   }
 
   private Cookie loginAdmin() throws Exception {

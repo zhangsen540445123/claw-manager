@@ -14,5 +14,7 @@ public record NormalizedModelSelection(
     String baseUrl,
     String apiKey,
     String providerConfigJson,
-    String extraJson
+    String extraJson,
+    int contextWindow,
+    int maxTokens
 ) {}

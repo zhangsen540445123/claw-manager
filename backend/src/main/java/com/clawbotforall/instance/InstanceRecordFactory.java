@@ -68,6 +68,8 @@ public class InstanceRecordFactory {
     instanceModel.setApiKey(model.apiKey());
     instanceModel.setProviderConfig(model.providerConfigJson());
     instanceModel.setExtra(model.extraJson());
+    instanceModel.setContextWindow(model.contextWindow());
+    instanceModel.setMaxTokens(model.maxTokens());
 
     InstanceProvisioningEntity provisioning = new InstanceProvisioningEntity();
     provisioning.setInstanceId(id);

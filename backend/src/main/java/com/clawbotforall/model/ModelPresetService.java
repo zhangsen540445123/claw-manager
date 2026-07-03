@@ -356,6 +356,8 @@ public class ModelPresetService {
     entity.setApiKey(model.apiKey());
     entity.setProviderConfig(model.providerConfigJson());
     entity.setExtra(model.extraJson());
+    entity.setContextWindow(model.contextWindow());
+    entity.setMaxTokens(model.maxTokens());
     return entity;
   }
 
@@ -384,6 +386,8 @@ public class ModelPresetService {
     preset.setApiKey(model.apiKey());
     preset.setProviderConfig(model.providerConfigJson());
     preset.setExtra(model.extraJson());
+    preset.setContextWindow(model.contextWindow());
+    preset.setMaxTokens(model.maxTokens());
   }
 
   private static String defaultString(String value) {

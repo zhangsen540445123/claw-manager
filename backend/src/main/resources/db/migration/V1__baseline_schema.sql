@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS model_presets (
   api_key TEXT NULL,
   provider_config JSON NULL,
   extra JSON NULL,
+  context_window INT NOT NULL,
+  max_tokens INT NOT NULL,
   created_at VARCHAR(40) NOT NULL,
   INDEX idx_model_presets_default (is_default),
   INDEX idx_model_presets_created_at (created_at)
@@ -70,6 +72,8 @@ CREATE TABLE IF NOT EXISTS instance_models (
   api_key TEXT NULL,
   provider_config JSON NULL,
   extra JSON NULL,
+  context_window INT NOT NULL,
+  max_tokens INT NOT NULL,
   PRIMARY KEY (instance_id, sort_order),
   INDEX idx_instance_models_preset_id (preset_id),
   INDEX idx_instance_models_provider (provider_id),

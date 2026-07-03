@@ -16,6 +16,8 @@
     <result property="apiKey" column="api_key"/>
     <result property="providerConfig" column="provider_config"/>
     <result property="extra" column="extra"/>
+    <result property="contextWindow" column="context_window"/>
+    <result property="maxTokens" column="max_tokens"/>
     <result property="createdAt" column="created_at"/>
   </resultMap>
 
@@ -60,10 +62,11 @@
   <insert id="insert" parameterType="com.clawbotforall.model.ModelPresetEntity">
     INSERT INTO model_presets
       (id, name, is_default, provider_key, provider_id, model_id, api_mode, auth_type,
-       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra, created_at)
+       auth_provider_id, auth_method_id, base_url, api_key, provider_config, extra, context_window, max_tokens, created_at)
     VALUES
       (#{id}, #{name}, #{isDefault}, #{providerKey}, #{providerId}, #{modelId}, #{apiMode}, #{authType},
-       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra}, #{createdAt})
+       #{authProviderId}, #{authMethodId}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{extra},
+       #{contextWindow}, #{maxTokens}, #{createdAt})
   </insert>
 
   <update id="update" parameterType="com.clawbotforall.model.ModelPresetEntity">
@@ -80,7 +83,9 @@
         base_url = #{baseUrl},
         api_key = #{apiKey},
         provider_config = #{providerConfig},
-        extra = #{extra}
+        extra = #{extra},
+        context_window = #{contextWindow},
+        max_tokens = #{maxTokens}
     WHERE id = #{id}
   </update>
 

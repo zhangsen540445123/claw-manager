@@ -19,6 +19,8 @@ public class ModelPresetEntity {
   private String apiKey;
   private String providerConfig;
   private String extra;
+  private int contextWindow;
+  private int maxTokens;
   private String createdAt;
 
   public String getId() {
@@ -139,6 +141,22 @@ public class ModelPresetEntity {
 
   public void setExtra(String extra) {
     this.extra = extra;
+  }
+
+  public int getContextWindow() {
+    return contextWindow;
+  }
+
+  public void setContextWindow(int contextWindow) {
+    this.contextWindow = contextWindow;
+  }
+
+  public int getMaxTokens() {
+    return maxTokens;
+  }
+
+  public void setMaxTokens(int maxTokens) {
+    this.maxTokens = maxTokens;
   }
 
   public String getCreatedAt() {

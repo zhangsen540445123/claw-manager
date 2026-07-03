@@ -162,7 +162,9 @@ public class ModelPresetNormalizer {
         baseUrl,
         apiKey,
         preset.getProviderConfig(),
-        preset.getExtra()
+        preset.getExtra(),
+        requireStoredPositiveInt(preset.getContextWindow(), "Context Window"),
+        requireStoredPositiveInt(preset.getMaxTokens(), "Max Tokens")
     );
   }
 
@@ -212,6 +214,16 @@ public class ModelPresetNormalizer {
     String extraJson = patch.containsKey("extra")
         ? normalizeExtraJson(patch.get("extra"))
         : (existing == null ? "{}" : normalizeExistingExtra(existing.extraJson()));
+    int contextWindow = normalizePositiveInt(
+        patch,
+        "contextWindow",
+        existing == null ? null : existing.contextWindow()
+    );
+    int maxTokens = normalizePositiveInt(
+        patch,
+        "maxTokens",
+        existing == null ? null : existing.maxTokens()
+    );
 
     return new NormalizedModelSelection(
         definition.key(),
@@ -224,8 +236,59 @@ public class ModelPresetNormalizer {
         baseUrl,
         apiKey,
         providerConfigJson,
-        extraJson
+        extraJson,
+        contextWindow,
+        maxTokens
     );
+  }
+
+  private int normalizePositiveInt(
+      Map<String, Object> patch,
+      String key,
+      Integer existing
+  ) {
+    if (patch.containsKey(key)) {
+      Object raw = patch.get(key);
+      if (raw == null || trimString(raw).isBlank()) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "模型预设必须填写 Context Window 和 Max Tokens。");
+      }
+      return parsePositiveInt(raw);
+    }
+    if (existing != null && existing > 0) {
+      return existing;
+    }
+    throw new ApiException(HttpStatus.BAD_REQUEST, "模型预设必须填写 Context Window 和 Max Tokens。");
+  }
+
+  private int parsePositiveInt(Object raw) {
+    int value;
+    if (raw instanceof Number number) {
+      value = number.intValue();
+      if (number.doubleValue() != value) {
+        throw invalidModelLimits();
+      }
+    } else {
+      try {
+        value = Integer.parseInt(trimString(raw));
+      } catch (NumberFormatException error) {
+        throw invalidModelLimits();
+      }
+    }
+    if (value <= 0) {
+      throw invalidModelLimits();
+    }
+    return value;
+  }
+
+  private int requireStoredPositiveInt(int value, String label) {
+    if (value <= 0) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, label + " 配置无效。");
+    }
+    return value;
+  }
+
+  private ApiException invalidModelLimits() {
+    return new ApiException(HttpStatus.BAD_REQUEST, "Context Window 和 Max Tokens 必须是正整数。");
   }
 
   private ModelProviderDefinition providerDefinition(String key) {

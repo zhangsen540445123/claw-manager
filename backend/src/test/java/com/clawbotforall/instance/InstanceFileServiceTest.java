@@ -59,8 +59,8 @@ class InstanceFileServiceTest {
     assertThat(openai.get("models")).asList()
         .first()
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("contextWindow", 1_000_000)
-        .containsEntry("maxTokens", 128_000);
+        .containsEntry("contextWindow", 200_000)
+        .containsEntry("maxTokens", 20_000);
 
     Map<String, Object> agentModels = objectMapper.readValue(
         instanceDir.resolve("home").resolve(".openclaw").resolve("agents").resolve("main").resolve("agent").resolve("models.json").toFile(),
@@ -211,8 +211,6 @@ class InstanceFileServiceTest {
             1_800_000,
             10_000,
             5_000,
-            1_000_000,
-            128_000,
             List.of("http://127.0.0.1:14300")
         )
     );
@@ -231,7 +229,9 @@ class InstanceFileServiceTest {
         "https://example.com/v1",
         "sk-test",
         null,
-        "{}"
+        "{}",
+        200_000,
+        20_000
     ), "preset_1", 19001);
   }
 }

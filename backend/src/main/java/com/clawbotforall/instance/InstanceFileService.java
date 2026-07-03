@@ -208,7 +208,7 @@ public class InstanceFileService {
     if (!defaultString(model.getApiKey()).isBlank()) {
       config.put("apiKey", model.getApiKey());
     }
-    config.put("models", List.of(modelDefinition(model.getModelId())));
+    config.put("models", List.of(modelDefinition(model)));
     return config;
   }
 
@@ -237,8 +237,9 @@ public class InstanceFileService {
     target.put("models", targetModels);
   }
 
-  private Map<String, Object> modelDefinition(String modelId) {
+  private Map<String, Object> modelDefinition(InstanceModelEntity model) {
     Map<String, Object> definition = new LinkedHashMap<>();
+    String modelId = defaultString(model.getModelId());
     definition.put("id", defaultString(modelId));
     definition.put("name", defaultString(modelId));
     definition.put("reasoning", true);
@@ -249,8 +250,8 @@ public class InstanceFileService {
         "cacheRead", 0,
         "cacheWrite", 0
     ));
-    definition.put("contextWindow", properties.runtime().modelContextWindow());
-    definition.put("maxTokens", properties.runtime().modelMaxTokens());
+    definition.put("contextWindow", model.getContextWindow());
+    definition.put("maxTokens", model.getMaxTokens());
     return definition;
   }
 

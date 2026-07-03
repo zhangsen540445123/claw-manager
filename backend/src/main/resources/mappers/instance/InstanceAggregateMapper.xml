@@ -31,6 +31,8 @@
     <result property="apiKey" column="api_key"/>
     <result property="providerConfig" column="provider_config"/>
     <result property="extra" column="extra"/>
+    <result property="contextWindow" column="context_window"/>
+    <result property="maxTokens" column="max_tokens"/>
   </resultMap>
 
   <resultMap id="ProvisioningMap" type="com.clawbotforall.instance.InstanceProvisioningEntity">

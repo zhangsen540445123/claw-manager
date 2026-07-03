@@ -52,8 +52,6 @@ class PublicInstanceFactoryTest {
               1_800_000,
               10_000,
               5_000,
-              1_000_000,
-              128_000,
               List.of()
           )
     );
@@ -88,6 +86,8 @@ class PublicInstanceFactoryTest {
     model.setBaseUrl("https://example.com/v1");
     model.setApiKey("sk-1234567890");
     model.setExtra("{\"note\":\"demo\"}");
+    model.setContextWindow(200_000);
+    model.setMaxTokens(20_000);
 
     WechatPairedAccountEntity account = new WechatPairedAccountEntity();
     account.setInstanceId("inst_1");
@@ -120,6 +120,8 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.model().presetId()).isEqualTo("preset_1");
     assertThat(publicInstance.model().apiKeyMasked()).isEqualTo("sk-1••••7890");
     assertThat(publicInstance.model().extra()).containsEntry("note", "demo");
+    assertThat(publicInstance.model().contextWindow()).isEqualTo(200_000);
+    assertThat(publicInstance.model().maxTokens()).isEqualTo(20_000);
     assertThat(publicInstance.models()).hasSize(1);
     assertThat(publicInstance.modelChain()).hasSize(1);
     assertThat(publicInstance.plugins().get("allow")).asList().isEmpty();

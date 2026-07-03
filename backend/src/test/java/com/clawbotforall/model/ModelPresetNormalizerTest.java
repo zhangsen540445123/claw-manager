@@ -23,7 +23,9 @@ class ModelPresetNormalizerTest {
         "modelId", " gpt-5.5 ",
         "apiMode", " openai-responses ",
         "baseUrl", " https://api.example.test/v1/// ",
-        "apiKey", " sk-test "
+        "apiKey", " sk-test ",
+        "contextWindow", 1_000_000,
+        "maxTokens", 128_000
     ), null);
 
     assertThat(model.providerKey()).isEqualTo("custom-provider");
@@ -32,6 +34,38 @@ class ModelPresetNormalizerTest {
     assertThat(model.apiMode()).isEqualTo("openai-responses");
     assertThat(model.baseUrl()).isEqualTo("https://api.example.test/v1");
     assertThat(model.apiKey()).isEqualTo("sk-test");
+    assertThat(model.contextWindow()).isEqualTo(1_000_000);
+    assertThat(model.maxTokens()).isEqualTo(128_000);
+  }
+
+  @Test
+  void requiresTokenLimitsWhenCreatingPreset() {
+    assertThatThrownBy(() -> normalizer.normalizePayload(Map.of(
+        "providerKey", "custom-provider",
+        "providerId", "openai",
+        "modelId", "gpt-5.5",
+        "apiMode", "openai-responses",
+        "baseUrl", "https://api.example.test/v1",
+        "apiKey", "sk-test"
+    ), null))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("模型预设必须填写 Context Window 和 Max Tokens。");
+  }
+
+  @Test
+  void rejectsInvalidTokenLimits() {
+    assertThatThrownBy(() -> normalizer.normalizePayload(Map.of(
+        "providerKey", "custom-provider",
+        "providerId", "openai",
+        "modelId", "gpt-5.5",
+        "apiMode", "openai-responses",
+        "baseUrl", "https://api.example.test/v1",
+        "apiKey", "sk-test",
+        "contextWindow", 0,
+        "maxTokens", "abc"
+    ), null))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("Context Window 和 Max Tokens 必须是正整数。");
   }
 
   @Test
@@ -42,6 +76,8 @@ class ModelPresetNormalizerTest {
     existing.setModelId("gpt-5.5");
     existing.setApiMode("openai-responses");
     existing.setApiKey("sk-existing");
+    existing.setContextWindow(200_000);
+    existing.setMaxTokens(20_000);
 
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("providerKey", "custom-provider");
@@ -53,13 +89,17 @@ class ModelPresetNormalizerTest {
     NormalizedModelSelection model = normalizer.normalizePayload(payload, existing);
 
     assertThat(model.apiKey()).isEqualTo("sk-existing");
+    assertThat(model.contextWindow()).isEqualTo(200_000);
+    assertThat(model.maxTokens()).isEqualTo(20_000);
   }
 
   @Test
   void rejectsIncompleteCustomProviderPayload() {
     assertThatThrownBy(() -> normalizer.normalizePayload(Map.of(
         "providerKey", "custom-provider",
-        "apiMode", "openai-responses"
+        "apiMode", "openai-responses",
+        "contextWindow", 1_000_000,
+        "maxTokens", 128_000
     ), null))
         .isInstanceOf(ApiException.class)
         .hasMessage("模型配置不完整，请至少填写 provider、model 和 API 模式。");
@@ -89,6 +129,8 @@ class ModelPresetNormalizerTest {
     preset.setProviderId(providerId);
     preset.setModelId(modelId);
     preset.setApiMode(apiMode);
+    preset.setContextWindow(1_000_000);
+    preset.setMaxTokens(128_000);
     return preset;
   }
 }

@@ -18,6 +18,8 @@ public record PublicModelPreset(
     String baseUrl,
     boolean hasBaseUrl,
     boolean hasApiKey,
+    int contextWindow,
+    int maxTokens,
     String createdAt
 ) {
 
@@ -39,6 +41,8 @@ public record PublicModelPreset(
         baseUrl,
         !baseUrl.trim().isEmpty(),
         !apiKey.trim().isEmpty(),
+        preset.getContextWindow(),
+        preset.getMaxTokens(),
         preset.getCreatedAt()
     );
   }

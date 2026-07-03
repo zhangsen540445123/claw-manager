@@ -16,5 +16,7 @@ public record PublicInstanceModel(
     String authMethodId,
     String baseUrl,
     String apiKeyMasked,
+    int contextWindow,
+    int maxTokens,
     Map<String, Object> extra
 ) {}
