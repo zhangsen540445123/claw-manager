@@ -7,8 +7,8 @@ Claw Manager 是 OpenClaw 的管理台，不替代 OpenClaw Gateway，也不直�
 | 组件 | 职责 |
 | --- | --- |
 | Web | Vue 管理后台，承载登录、模型预设、OpenViking预设、创建实例、插件管理、用户中心和日志查看 |
-| API | Spring Boot 后端，负责鉴权、实例管理、插件安装、Docker runtime、OpenViking broker 和 WebSocket 状态推送 |
-| MySQL | 业务状态事实源，包括管理员、实例、模型预设、微信绑定、OpenViking 设置和 user key 缓存 |
+| API | Spring Boot 后端，负责鉴权、实例管理、插件安装、Docker runtime、小程序接入、OpenViking broker 和 WebSocket 状态推送 |
+| MySQL | 业务状态事实源，包括管理员、实例、模型预设、微信绑定、小程序绑定、用户聊天 key、OpenViking 设置和 user key 缓存 |
 | Redis | 随编排提供，用于运行时能力，不作为持久业务状态事实源 |
 | Runner | 每个 OpenClaw 实例对应的运行容器，运行 OpenClaw Gateway 和已安装插件 |
 | OpenClaw Gateway | OpenClaw 的实际会话、Control UI、插件执行和上下文生命周期入口 |
@@ -22,7 +22,9 @@ Claw Manager 是 OpenClaw 的管理台，不替代 OpenClaw Gateway，也不直�
 | `model` | 模型 Provider、模型预设、默认预设、实例模型链 |
 | `instance` | OpenClaw 实例创建、启动、停止、Gateway provisioning、运行统计 |
 | `wechat` | 微信扫码绑定、多账号读取、备注、解绑 |
+| `miniapp` | 小程序 HMAC 调用方、openid 绑定、用户 key 和小程序聊天身份路由 |
 | `openviking` | OpenViking预设、身份盐值、root key、user key broker、插件安装管理 |
+| `externalapi` | 外部聊天 SSE 入口、API Channel 插件管理和队列转发 |
 | `runtime` | docker-java 封装镜像、容器、exec、logs、stats |
 | `proxy` | OpenClaw Control UI HTTP/WebSocket 代理 |
 | `ws` | STOMP Endpoint、管理员 topic、入站鉴权 |
@@ -41,4 +43,6 @@ STOMP CONNECT、SUBSCRIBE、SEND 都需要已登录管理员主体。前端断�
 
 ## 数据事实源
 
-MySQL 是业务状态事实源。Runner 容器内的 OpenClaw 数据、微信账号状态和 workspace 文件保存在挂载目录 `./data` 下；OpenViking 记忆保存在外部 OpenViking Server。
+MySQL 是业务状态事实源。小程序接入相关的 `miniapp_clients`、`miniapp_user_bindings`、`miniapp_user_keys` 记录了调用方、`openid -> instance_id -> wx_<hash>` 绑定和用户聊天 key；旧纯 API openid 路由仍在 `external_api_user_routes` 中。
+
+Runner 容器内的 OpenClaw 数据、微信账号状态和 workspace 文件保存在挂载目录 `./data` 下；OpenViking 记忆保存在外部 OpenViking Server。API/微信共享记忆时，MySQL 中保存的 `wx_<hash>` 是跨通道身份事实源，插件只消费后端传入的显式身份或 handoff。

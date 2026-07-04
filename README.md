@@ -50,6 +50,7 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 | Docker 部署 | [docs/deployment.md](docs/deployment.md) |
 | 本地开发 | [docs/development.md](docs/development.md) |
 | OpenViking 集成 | [docs/openviking.md](docs/openviking.md) |
+| 小程序接入 | [docs/miniapp-integration.md](docs/miniapp-integration.md) |
 | 插件体系 | [docs/plugins.md](docs/plugins.md) |
 | 发布与 CI/CD | [docs/ci-release.md](docs/ci-release.md) |
 | 常见问题 | [docs/troubleshooting.md](docs/troubleshooting.md) |
@@ -61,7 +62,7 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 - 前端：Vue 3、Vite、TypeScript、Pinia、Element Plus、STOMP WebSocket。
 - 编排：Docker Compose 管理 MySQL、Redis、API、Web。
 - Runner：由 API 通过 Docker socket 创建和管理 OpenClaw 实例容器。
-- OpenViking：由后台“OpenViking预设”统一配置，插件按微信发送者派生稳定用户 ID 并隔离记忆。
+- OpenViking：由后台“OpenViking预设”统一配置，后端基于数据库盐值生成并保存 `wx_<hash>` 身份；微信和小程序 API 聊天可共享同一个 OpenViking 用户记忆。
 
 ## 验证
 
