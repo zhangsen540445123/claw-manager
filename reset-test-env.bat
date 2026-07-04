@@ -4,14 +4,22 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 
 call :load_env_if_missing WEB_HOST_PORT
+call :load_env_if_missing API_HOST_PORT
 call :load_env_if_missing ADMIN_EMAIL
 call :load_env_if_missing ADMIN_PASSWORD
 call :load_env_if_missing OPENCLAW_RUNNER_IMAGE
+call :load_env_if_missing RESET_ADMIN_PASSWORD
+call :load_env_if_missing RESET_INSTANCE_1_NAME
+call :load_env_if_missing RESET_INSTANCE_2_NAME
 
 if not defined WEB_HOST_PORT set "WEB_HOST_PORT=4300"
+if not defined API_HOST_PORT set "API_HOST_PORT=8080"
 if not defined ADMIN_EMAIL set "ADMIN_EMAIL=admin@example.com"
 if not defined ADMIN_PASSWORD set "ADMIN_PASSWORD=ChangeMe123!"
 if not defined OPENCLAW_RUNNER_IMAGE set "OPENCLAW_RUNNER_IMAGE=ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest"
+if not defined RESET_ADMIN_PASSWORD set "RESET_ADMIN_PASSWORD=cxf123..."
+if not defined RESET_INSTANCE_1_NAME set "RESET_INSTANCE_1_NAME=OpenClaw Test 1"
+if not defined RESET_INSTANCE_2_NAME set "RESET_INSTANCE_2_NAME=OpenClaw Test 2"
 
 set "COMPOSE=docker compose -f compose.yaml"
 if exist "compose.local.yaml" set "COMPOSE=docker compose -f compose.yaml -f compose.local.yaml"
@@ -21,35 +29,45 @@ echo  Claw Manager full reset
 echo ========================================
 echo.
 echo This will stop project containers, delete Docker volumes, delete .\data,
-echo rebuild runner/API/Web images, then start services.
+echo rebuild runner/API/Web images, start services, seed presets, create instances,
+echo install plugins, and restart gateways.
 
 call :check_docker || goto fail
 
 echo.
-echo [Step 1/6] Stopping compose services and deleting volumes...
+echo [Step 1/7] Stopping compose services and deleting volumes...
 %COMPOSE% down -v
 if errorlevel 1 goto fail
 
 echo.
-echo [Step 2/6] Removing OpenClaw instance containers...
+echo [Step 2/7] Removing OpenClaw instance containers...
 call :remove_openclaw_containers || goto fail
 
 echo.
-echo [Step 3/6] Deleting local data directory...
+echo [Step 3/7] Deleting local data directory...
 call :delete_data_dir || goto fail
 
 echo.
-echo [Step 4/6] Building OpenClaw runner image...
+echo [Step 4/7] Building OpenClaw runner image...
 call :build_runner_image || goto fail
 
 echo.
-echo [Step 5/6] Building API/Web images...
+echo [Step 5/7] Building API/Web images...
 %COMPOSE% build api web
 if errorlevel 1 goto fail
 
 echo.
-echo [Step 6/6] Starting services...
+echo [Step 6/7] Starting services...
 %COMPOSE% up -d
+if errorlevel 1 goto fail
+
+echo.
+echo [Step 7/7] Seeding and provisioning test workspace...
+if not exist "scripts\reset-test-env-bootstrap.ps1" (
+  echo [ERROR] Missing scripts\reset-test-env-bootstrap.ps1.
+  goto fail
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\reset-test-env-bootstrap.ps1" -ApiHostPort "%API_HOST_PORT%" -WebHostPort "%WEB_HOST_PORT%" -AdminEmail "%ADMIN_EMAIL%" -AdminPassword "%ADMIN_PASSWORD%" -ResetAdminPassword "%RESET_ADMIN_PASSWORD%" -Instance1Name "%RESET_INSTANCE_1_NAME%" -Instance2Name "%RESET_INSTANCE_2_NAME%"
 if errorlevel 1 goto fail
 
 call :print_summary
@@ -107,12 +125,16 @@ echo.
 echo Admin URL:
 echo   http://127.0.0.1:%WEB_HOST_PORT%
 echo.
-echo Admin login defaults:
+echo Admin login after reset:
 echo   Email:    %ADMIN_EMAIL%
-echo   Password: %ADMIN_PASSWORD%
+echo   Password: %RESET_ADMIN_PASSWORD%
+echo.
+echo Test instances:
+echo   %RESET_INSTANCE_1_NAME%
+echo   %RESET_INSTANCE_2_NAME%
 echo.
 echo Note:
-echo   Values above come from .env or compose defaults.
+echo   Seeded model/OpenViking secrets are not printed here.
 echo.
 exit /b 0
 

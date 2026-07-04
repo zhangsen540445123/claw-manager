@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
 import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
 
 import { apiChannelPlugin, handleApiAssistantAgentEvent, monitorApiQueue } from "./src/channel.js";
@@ -159,11 +158,10 @@ function resolveOpenClawAgentEventModuleUrls(api: { logger?: ApiLogSink }): stri
   return [...new Set(urls)];
 }
 
-export default defineChannelPluginEntry({
+const pluginEntry = {
   id: "claw-manager-api",
   name: "Claw Manager API",
   description: "External API channel for Claw Manager",
-  plugin: apiChannelPlugin,
   configSchema: buildJsonChannelConfigSchema({
     "$schema": "http://json-schema.org/draft-07/schema#",
     type: "object",
@@ -172,20 +170,18 @@ export default defineChannelPluginEntry({
     },
     additionalProperties: false,
   }),
-  registerFull(api: OpenClawPluginApi) {
+  register(api: OpenClawPluginApi) {
+    api.registerChannel({ plugin: apiChannelPlugin });
     void installOpenClawInternalAgentEventBridge(api);
     registerApiGatewayStartMethod(api as GatewayMethodApi);
-    try {
-      startApiQueueMonitor(api);
-    } catch (error) {
-      api.logger?.warn?.(`claw-manager-api: queue monitor auto-start skipped: ${errorMessage(error)}`);
-    }
     api.logger?.info?.(
       `claw-manager-api: register channel mode=${String(api.registrationMode ?? "unknown")} ` +
-        `hasGatewayMethod=${String(typeof api.registerGatewayMethod === "function")}`,
+      `hasGatewayMethod=${String(typeof api.registerGatewayMethod === "function")}`,
     );
   },
-});
+};
+
+export default pluginEntry;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {

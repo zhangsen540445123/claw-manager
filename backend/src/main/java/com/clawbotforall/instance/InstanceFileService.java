@@ -291,7 +291,10 @@ public class InstanceFileService {
       channels.put(WECHAT_CHANNEL_ID, wechatChannel);
     }
     if (allow.contains(API_CHANNEL_ID)) {
-      channels.put(API_CHANNEL_ID, Map.of("enabled", true));
+      channels.put(API_CHANNEL_ID, Map.of(
+          "enabled", true,
+          "queueMonitor", true
+      ));
     }
     return channels;
   }

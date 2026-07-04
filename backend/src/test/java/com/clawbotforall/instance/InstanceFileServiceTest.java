@@ -171,7 +171,8 @@ class InstanceFileServiceTest {
     Map<String, Object> channels = (Map<String, Object>) config.get("channels");
     assertThat(channels.get("claw-manager-api"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("enabled", true);
+        .containsEntry("enabled", true)
+        .containsEntry("queueMonitor", true);
   }
 
   @Test

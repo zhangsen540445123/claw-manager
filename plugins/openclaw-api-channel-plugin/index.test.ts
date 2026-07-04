@@ -45,7 +45,7 @@ describe("claw-manager-api plugin entry", () => {
     expect(logs.some((line) => line.includes("hasGatewayMethod=true"))).toBe(true);
   });
 
-  it("starts the resident queue monitor when the channel plugin is fully registered", async () => {
+  it("does not auto-start the resident queue monitor during plugin registration", async () => {
     const gatewayMethods = new Map<string, (input: { respond: (success: boolean, data: unknown) => void }) => void>();
     const starts: unknown[] = [];
     resetApiGatewayStartForTest((ctx) => {
@@ -66,7 +66,7 @@ describe("claw-manager-api plugin entry", () => {
     plugin.register(api as never);
     const handler = gatewayMethods.get(API_CHANNEL_START_RPC);
     expect(handler).toBeTypeOf("function");
-    expect(starts).toHaveLength(1);
+    expect(starts).toHaveLength(0);
 
     const responses: unknown[] = [];
 
@@ -75,7 +75,7 @@ describe("claw-manager-api plugin entry", () => {
 
     expect(starts).toHaveLength(1);
     expect(responses).toEqual([
-      { success: true, data: { started: true, alreadyRunning: true } },
+      { success: true, data: { started: true, alreadyRunning: false } },
       { success: true, data: { started: true, alreadyRunning: true } },
     ]);
   });
