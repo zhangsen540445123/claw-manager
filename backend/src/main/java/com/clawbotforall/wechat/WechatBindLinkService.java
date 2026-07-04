@@ -162,6 +162,44 @@ public class WechatBindLinkService {
     return publicLink(link, origin);
   }
 
+  @Transactional
+  public PublicWechatBindLink createMiniappLink(
+      String miniappOpenidHash,
+      String syntheticPhone,
+      String instanceId,
+      String targetAccountId,
+      String origin
+  ) {
+    String normalizedHash = defaultString(miniappOpenidHash).trim();
+    if (normalizedHash.isBlank()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "小程序 openid hash 不能为空。");
+    }
+    String phone = defaultString(syntheticPhone).trim();
+    if (phone.isBlank()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "小程序内部绑定标识不能为空。");
+    }
+    InstanceEntity instance = requireBindableInstance(
+        instanceId,
+        "该小程序用户绑定的 OpenClaw 实例暂不可用，请先启动并等待实例就绪。"
+    );
+    String now = Instant.now().toString();
+    WechatBindLinkEntity link = new WechatBindLinkEntity();
+    link.setToken(randomToken());
+    link.setMode(hasText(targetAccountId) ? "existing" : "new");
+    link.setPhone(phone);
+    link.setInstanceId(instance.getId());
+    link.setTargetAccountId(hasText(targetAccountId) ? targetAccountId : targetAccountIdFromToken(link.getToken()));
+    link.setMiniappOpenidHash(normalizedHash);
+    link.setStatus("created");
+    link.setCreatedAt(now);
+    link.setExpiresAt(Instant.parse(now).plus(LINK_TTL).toString());
+    link.setUpdatedAt(now);
+    linkMapper.insert(link);
+    log.info("小程序创建微信扫码链接：instanceId={}, openidHash={}", instance.getId(), normalizedHash);
+    scheduleQrAfterCommit(link.getToken(), false, origin);
+    return publicLink(link, origin);
+  }
+
   /**
    * 管理员按手机号查询已绑定关系。
    */

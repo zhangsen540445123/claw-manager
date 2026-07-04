@@ -21,7 +21,7 @@ class PublicInstanceFactoryTest {
       new ObjectMapper(),
       properties(),
       openVikingSettingsService,
-      new OpenVikingIdentityService(properties())
+      new OpenVikingIdentityService()
   );
 
   PublicInstanceFactoryTest() {

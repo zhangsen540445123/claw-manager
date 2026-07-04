@@ -7,7 +7,6 @@ import { buildAutoRecallContext, isIdentityProfileQuery, prepareRecallQuery } fr
 import { toJsonLog } from "../memory-ranking.js";
 import { openClawSessionToOvStorageId } from "../routing/identity-routing.js";
 import { readOpenVikingSenderHandoff } from "../sender-handoff.js";
-import { resolveApiSenderIdentity } from "../identity.js";
 import { extractNewTurnMessages } from "../text-utils.js";
 import { estimateAgentMessageTokens, estimateTextTokens } from "../token-estimator.js";
 import {
@@ -366,7 +365,6 @@ export async function commitOpenVikingSession({
   rememberSessionAgentId,
   isBypassedSession,
 }: CommitOpenVikingSessionParams): Promise<boolean> {
-  const ovId = openClawSessionToOvStorageId(sessionId, sessionKey);
   if (isBypassedSession({ sessionId, sessionKey })) {
     logger.warn?.(
       `openviking: commit skipped because session is bypassed (sessionId=${sessionId}, sessionKey=${sessionKey ?? "none"})`,
@@ -375,6 +373,7 @@ export async function commitOpenVikingSession({
   }
   try {
     const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
+    const ovId = openClawSessionToOvStorageId(sessionId, sessionKey);
     const client = getClientForSender
       ? sender.scope
         ? await getClientForSender(sender.scope)
@@ -620,8 +619,8 @@ export async function assembleOpenVikingSession({
   hasAutoRecallBlock,
   prependRecallToLatestUserMessage,
 }: AssembleOpenVikingSessionParams): Promise<AssembleOpenVikingSessionResult> {
-  const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
   const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
+  const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
   const isTransformContextAssemble = !isMainAssemble;
   const originalTokens = roughEstimate(messages);
   let messagesWithRecall = messages;
@@ -967,6 +966,7 @@ type LifecycleSenderIdentity = {
   senderHash?: string;
   openVikingUserId?: string;
   scope?: unknown;
+  source?: "explicit" | "handoff";
 };
 
 function extractRuntimeSenderId(runtimeContext: Record<string, unknown> | undefined): LifecycleSenderIdentity {
@@ -989,30 +989,8 @@ function extractRuntimeSenderId(runtimeContext: Record<string, unknown> | undefi
             senderId,
             openVikingUserId: trimmed,
             scope: trimmed,
+            source: "explicit",
           };
-        }
-      }
-    }
-    for (const key of ["SenderId", "requesterSenderId", "senderId"]) {
-      const senderId = runtimeContext[key];
-      if (typeof senderId === "string") {
-        const trimmed = senderId.trim();
-        if (trimmed) {
-          const apiIdentity = resolveApiSenderIdentity(trimmed);
-          if (apiIdentity) {
-            return {
-              found: true,
-              senderId: apiIdentity.senderId,
-              senderHash: apiIdentity.senderHash,
-              openVikingUserId: apiIdentity.openVikingUserId,
-              scope: {
-                senderId: apiIdentity.senderId,
-                senderHash: apiIdentity.senderHash,
-                openVikingUserId: apiIdentity.openVikingUserId,
-              },
-            };
-          }
-          return { found: true, senderId: trimmed, scope: trimmed };
         }
       }
     }
@@ -1026,7 +1004,7 @@ async function resolveLifecycleSenderIdentity(params: {
   identityHashSecret?: string;
 }): Promise<LifecycleSenderIdentity> {
   const runtimeSender = extractRuntimeSenderId(params.runtimeContext);
-  if (runtimeSender.found) {
+  if (runtimeSender.source === "explicit") {
     return runtimeSender;
   }
 
@@ -1035,18 +1013,24 @@ async function resolveLifecycleSenderIdentity(params: {
     sessionKey: params.sessionKey,
     secret,
   }).catch(() => undefined);
-  if (!handoff?.openVikingUserId) {
-    return { found: false };
-  }
-  return {
-    found: true,
-    senderHash: handoff.senderHash,
-    openVikingUserId: handoff.openVikingUserId,
-    scope: {
-      openVikingUserId: handoff.openVikingUserId,
+  if (handoff?.openVikingUserId) {
+    return {
+      found: true,
       senderHash: handoff.senderHash,
-    },
-  };
+      openVikingUserId: handoff.openVikingUserId,
+      source: "handoff",
+      scope: {
+        openVikingUserId: handoff.openVikingUserId,
+        senderHash: handoff.senderHash,
+      },
+    };
+  }
+
+  if (runtimeSender.found) {
+    return runtimeSender;
+  }
+
+  return { found: false };
 }
 
 function extractRuntimeAgentId(runtimeContext: Record<string, unknown> | undefined): string | undefined {
@@ -1299,11 +1283,15 @@ export async function afterTurnOpenVikingSession({
           `(session=${ovSessionId}, pendingTokens=${pendingTokens}, threshold=${cfg.commitTokenThreshold})`,
       );
     }
+    const commitKeepRecentCount =
+      forceCommitForMemoryIntent && pendingTokens < cfg.commitTokenThreshold
+        ? 0
+        : cfg.commitKeepRecentCount;
 
     const commitResult = await client.commitSession(ovSessionId, {
       wait: false,
       agentId,
-      keepRecentCount: cfg.commitKeepRecentCount,
+      keepRecentCount: commitKeepRecentCount,
     });
     logger.info(
       `openviking: committed session=${ovSessionId}, ` +
@@ -1380,6 +1368,7 @@ export async function compactOpenVikingSession({
   isBypassedSession,
   diag,
 }: CompactOpenVikingSessionParams): Promise<CompactOpenVikingSessionResult> {
+  const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
   const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
   diag("compact_entry", ovSessionId, {
     tokenBudget,
@@ -1403,7 +1392,6 @@ export async function compactOpenVikingSession({
     };
   }
 
-  const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
   const client = getClientForSender
     ? sender.scope
       ? await getClientForSender(sender.scope)

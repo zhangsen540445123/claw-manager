@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.miniapp.MiniappUserKeyMapper">
+  <resultMap id="MiniappUserKeyMap" type="com.clawbotforall.miniapp.MiniappUserKeyEntity">
+    <id property="openidHash" column="openid_hash"/>
+    <result property="openid" column="openid"/>
+    <result property="userKey" column="user_key"/>
+    <result property="keyPreview" column="key_preview"/>
+    <result property="enabled" column="enabled"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <result property="lastUsedAt" column="last_used_at"/>
+  </resultMap>
+
+  <select id="findByOpenidHash" resultMap="MiniappUserKeyMap">
+    SELECT *
+    FROM miniapp_user_keys
+    WHERE openid_hash = #{openidHash}
+    LIMIT 1
+  </select>
+
+  <select id="findByUserKey" resultMap="MiniappUserKeyMap">
+    SELECT *
+    FROM miniapp_user_keys
+    WHERE user_key = #{userKey}
+      AND enabled = 1
+    LIMIT 1
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.miniapp.MiniappUserKeyEntity">
+    INSERT INTO miniapp_user_keys
+      (openid_hash, openid, user_key, key_preview, enabled, created_at, updated_at, last_used_at)
+    VALUES
+      (#{openidHash}, #{openid}, #{userKey}, #{keyPreview}, #{enabled}, #{createdAt}, #{updatedAt}, #{lastUsedAt})
+  </insert>
+
+  <update id="replaceKey" parameterType="com.clawbotforall.miniapp.MiniappUserKeyEntity">
+    UPDATE miniapp_user_keys
+    SET user_key = #{userKey},
+        key_preview = #{keyPreview},
+        enabled = #{enabled},
+        updated_at = #{updatedAt},
+        last_used_at = #{lastUsedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+
+  <update id="updateLastUsed">
+    UPDATE miniapp_user_keys
+    SET last_used_at = #{lastUsedAt},
+        updated_at = #{lastUsedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+</mapper>

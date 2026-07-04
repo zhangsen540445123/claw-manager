@@ -38,19 +38,6 @@ function handoffPath(stateDir?: string): string {
   return path.join(resolveOpenVikingHandoffStateDir(stateDir), "openviking", "sender-handoff.json");
 }
 
-function deriveSenderHandoff(senderId: string, secret: string): Pick<OpenVikingSenderHandoff, "openVikingUserId" | "senderHash"> | undefined {
-  const normalizedSender = trimString(senderId);
-  const normalizedSecret = trimString(secret);
-  if (!normalizedSender || !normalizedSecret) {
-    return undefined;
-  }
-  const senderHash = hmacSha256Hex(normalizedSecret, normalizedSender).slice(0, 32);
-  return {
-    senderHash,
-    openVikingUserId: `wx_${senderHash}`,
-  };
-}
-
 function sessionKeyHash(sessionKey: string, secret: string): string | undefined {
   const normalizedSessionKey = trimString(sessionKey);
   const normalizedSecret = trimString(secret);
@@ -80,11 +67,14 @@ export async function writeOpenVikingSenderHandoff(params: {
   stateDir?: string;
   sessionKey?: string;
   senderId?: string;
+  openVikingUserId?: string;
+  senderHash?: string;
   secret?: string;
 }): Promise<boolean> {
-  const derived = deriveSenderHandoff(params.senderId ?? "", params.secret ?? "");
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
-  if (!derived || !key) {
+  const openVikingUserId = trimString(params.openVikingUserId);
+  const senderHash = trimString(params.senderHash);
+  if (!key || !openVikingUserId || !senderHash) {
     return false;
   }
 
@@ -92,7 +82,8 @@ export async function writeOpenVikingSenderHandoff(params: {
   await mkdir(path.dirname(filePath), { recursive: true });
   const file = await readHandoffFile(filePath);
   file.entries[key] = {
-    ...derived,
+    openVikingUserId,
+    senderHash,
     updatedAt: new Date().toISOString(),
   };
   const tempPath = `${filePath}.${process.pid}.tmp`;

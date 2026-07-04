@@ -1,6 +1,8 @@
 package com.clawbotforall.externalapi;
 
 import com.clawbotforall.web.ApiException;
+import com.clawbotforall.miniapp.MiniappChatRoute;
+import com.clawbotforall.miniapp.MiniappUserAccessService;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -20,8 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class ExternalApiChatController {
   private static final long SSE_TIMEOUT_MS = 960_000L;
 
-  private final ExternalApiSettingsService settingsService;
-  private final ExternalApiRouteService routeService;
+  private final MiniappUserAccessService userAccessService;
   private final ExternalApiQueueService queueService;
   private final Executor executor = Executors.newCachedThreadPool(task -> {
     Thread thread = new Thread(task, "external-api-chat-" + System.nanoTime());
@@ -30,12 +31,10 @@ public class ExternalApiChatController {
   });
 
   public ExternalApiChatController(
-      ExternalApiSettingsService settingsService,
-      ExternalApiRouteService routeService,
+      MiniappUserAccessService userAccessService,
       ExternalApiQueueService queueService
   ) {
-    this.settingsService = settingsService;
-    this.routeService = routeService;
+    this.userAccessService = userAccessService;
     this.queueService = queueService;
   }
 
@@ -44,16 +43,15 @@ public class ExternalApiChatController {
       @RequestBody(required = false) ExternalApiChatRequest request,
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization
   ) {
-    settingsService.requireAuthorized(authorization);
     ExternalApiChatRequest payload = request == null ? new ExternalApiChatRequest("", "", "", Map.of()) : request;
     String message = trim(payload.message());
     if (message.isBlank()) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "message 不能为空。");
     }
     String requestId = UUID.randomUUID().toString();
-    ExternalApiResolvedRoute route = routeService.resolveOrCreateRoute(payload.openid());
+    MiniappChatRoute route = userAccessService.resolveChatRoute(authorization, payload.openid());
     String conversationId = trim(payload.conversationId()).isBlank() ? "default" : trim(payload.conversationId());
-    String conversationHash = routeService.conversationHash(conversationId);
+    String conversationHash = userAccessService.conversationHash(conversationId);
 
     SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
     executor.execute(() -> {
@@ -107,7 +105,7 @@ public class ExternalApiChatController {
 
   private Map<String, Object> gatewayParams(
       String requestId,
-      ExternalApiResolvedRoute route,
+      MiniappChatRoute route,
       String conversationId,
       String conversationHash,
       String message,

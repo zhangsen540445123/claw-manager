@@ -11,8 +11,14 @@ if not defined WEB_HOST_PORT set "WEB_HOST_PORT=4300"
 if not defined ADMIN_EMAIL set "ADMIN_EMAIL=admin@example.com"
 if not defined ADMIN_PASSWORD set "ADMIN_PASSWORD=ChangeMe123!"
 
-set "COMPOSE=docker compose -f compose.yaml"
-if exist "compose.local.yaml" set "COMPOSE=docker compose -f compose.yaml -f compose.local.yaml"
+if not exist "compose.local.yaml" (
+  echo [ERROR] compose.local.yaml is required because it contains the local API/Web build definitions.
+  echo [ERROR] This script is intended to rebuild local images, not pull remote images from compose.yaml.
+  call :pause_exit
+  exit /b 1
+)
+
+set "COMPOSE=docker compose -f compose.yaml -f compose.local.yaml"
 
 echo ========================================
 echo  Claw Manager rebuild API/Web
@@ -26,8 +32,8 @@ echo [Step 1/2] Building API/Web images...
 if errorlevel 1 goto fail
 
 echo.
-echo [Step 2/2] Restarting API/Web services...
-%COMPOSE% up -d --force-recreate api web
+echo [Step 2/2] Recreating API/Web containers with the freshly built images...
+%COMPOSE% up -d --no-deps --force-recreate api web
 if errorlevel 1 goto fail
 
 call :print_summary

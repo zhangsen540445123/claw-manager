@@ -21,16 +21,13 @@ public class OpenVikingSettingsService {
   private static final String DEFAULT_INTERNAL_BASE_URL = "http://claw-manager-api:8080";
 
   private final OpenVikingSettingsMapper mapper;
-  private final OpenVikingIdentityService identityService;
   private final OpenVikingBrokerTokenService brokerTokenService;
 
   public OpenVikingSettingsService(
       OpenVikingSettingsMapper mapper,
-      OpenVikingIdentityService identityService,
       OpenVikingBrokerTokenService brokerTokenService
   ) {
     this.mapper = mapper;
-    this.identityService = identityService;
     this.brokerTokenService = brokerTokenService;
   }
 
@@ -82,7 +79,7 @@ public class OpenVikingSettingsService {
         hasText(entity.getRootApiKey()),
         fingerprint(entity.getRootApiKey()),
         !salt.isBlank(),
-        hasText(entity.getIdentitySalt()) ? "configured" : "generated",
+        hasText(entity.getIdentitySalt()) ? "configured" : "missing",
         fingerprint(salt),
         entity.getUpdatedAt()
     );
@@ -116,19 +113,16 @@ public class OpenVikingSettingsService {
   }
 
   private String effectiveIdentitySalt(OpenVikingSettingsEntity entity) {
-    String configured = defaultString(entity.getIdentitySalt());
-    return configured.isBlank() ? identityService.identityHashSecret() : configured;
+    return defaultString(entity.getIdentitySalt());
   }
 
   private String resolveIdentitySalt(Map<String, Object> payload, String currentIdentitySalt) {
     if (payload == null || !payload.containsKey("identitySalt")) {
-      return defaultIfBlank(currentIdentitySalt, identityService.identityHashSecret());
+      return defaultString(currentIdentitySalt);
     }
     Object value = payload.get("identitySalt");
     String normalized = value == null ? "" : String.valueOf(value).trim();
-    return normalized.isBlank()
-        ? defaultIfBlank(currentIdentitySalt, identityService.identityHashSecret())
-        : normalized;
+    return normalized.isBlank() ? defaultString(currentIdentitySalt) : normalized;
   }
 
   private static String resolveRootApiKey(Map<String, Object> payload, String currentRootApiKey) {

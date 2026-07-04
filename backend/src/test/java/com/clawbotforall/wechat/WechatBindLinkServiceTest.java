@@ -118,6 +118,32 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void createsMiniappLinkForFixedInstanceAndStoresOpenidHash() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink link = service.createMiniappLink(
+        "openid_hash_1",
+        "miniapp_openid_hash_1",
+        "inst_1",
+        "",
+        "https://miniapp.example.test"
+    );
+
+    ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
+    verify(linkMapper).insert(captor.capture());
+    WechatBindLinkEntity stored = captor.getValue();
+    assertThat(stored.getMode()).isEqualTo("new");
+    assertThat(stored.getPhone()).isEqualTo("miniapp_openid_hash_1");
+    assertThat(stored.getInstanceId()).isEqualTo("inst_1");
+    assertThat(stored.getMiniappOpenidHash()).isEqualTo("openid_hash_1");
+    assertThat(stored.getCreatedByAdminId()).isNull();
+    assertThat(link.status()).isEqualTo("created");
+    assertThat(executor.size()).isEqualTo(1);
+  }
+
+  @Test
   void rejectsNewUserLinkWhenNoReadyRunningInstanceExists() {
     when(aggregateMapper.listAll()).thenReturn(List.of(instance("inst_1", "实例一", "stopped")));
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.miniapp.MiniappUserBindingMapper">
+  <resultMap id="MiniappUserBindingMap" type="com.clawbotforall.miniapp.MiniappUserBindingEntity">
+    <id property="openidHash" column="openid_hash"/>
+    <result property="openid" column="openid"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="wechatUserId" column="wechat_user_id"/>
+    <result property="openvikingUserId" column="openviking_user_id"/>
+    <result property="bindStatus" column="bind_status"/>
+    <result property="currentBindToken" column="current_bind_token"/>
+    <result property="boundAt" column="bound_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="findByOpenidHash" resultMap="MiniappUserBindingMap">
+    SELECT *
+    FROM miniapp_user_bindings
+    WHERE openid_hash = #{openidHash}
+    LIMIT 1
+  </select>
+
+  <select id="countByInstanceId" resultType="int">
+    SELECT COUNT(*)
+    FROM miniapp_user_bindings
+    WHERE instance_id = #{instanceId}
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.miniapp.MiniappUserBindingEntity">
+    INSERT INTO miniapp_user_bindings
+      (openid_hash, openid, instance_id, wechat_user_id, openviking_user_id, bind_status,
+       current_bind_token, bound_at, created_at, updated_at)
+    VALUES
+      (#{openidHash}, #{openid}, #{instanceId}, #{wechatUserId}, #{openvikingUserId}, #{bindStatus},
+       #{currentBindToken}, #{boundAt}, #{createdAt}, #{updatedAt})
+  </insert>
+
+  <update id="updateBindToken">
+    UPDATE miniapp_user_bindings
+    SET current_bind_token = #{currentBindToken},
+        bind_status = 'waiting_scan',
+        updated_at = #{updatedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+
+  <update id="markConnected">
+    UPDATE miniapp_user_bindings
+    SET wechat_user_id = #{wechatUserId},
+        openviking_user_id = #{openvikingUserId},
+        bind_status = 'connected',
+        bound_at = #{boundAt},
+        updated_at = #{updatedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+
+  <update id="updateStatus">
+    UPDATE miniapp_user_bindings
+    SET bind_status = #{bindStatus},
+        updated_at = #{updatedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+</mapper>

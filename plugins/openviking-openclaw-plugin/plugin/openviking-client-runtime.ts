@@ -1,6 +1,5 @@
 import { OpenVikingClient } from "../client.js";
 import type { HttpTransport } from "../adapters/http-transport.js";
-import { resolveApiSenderIdentity, resolveSenderIdentity } from "../identity.js";
 
 type Logger = {
   info: (message: string) => void;
@@ -34,7 +33,7 @@ function isExplicitOpenVikingUserId(value: string): boolean {
   return /^(?:wx|api)_[0-9a-f]{32}$/.test(value);
 }
 
-function resolveClientSenderIdentity(input: unknown, secret: string): ClientSenderIdentity | undefined {
+function resolveClientSenderIdentity(input: unknown): ClientSenderIdentity | undefined {
   if (input && typeof input === "object") {
     const record = input as Record<string, unknown>;
     const explicitUserId = trimString(record.openVikingUserId) || trimString(record.openvikingUserId);
@@ -45,17 +44,6 @@ function resolveClientSenderIdentity(input: unknown, secret: string): ClientSend
         openVikingUserId: explicitUserId,
       };
     }
-    const objectSenderId = trimString(record.SenderId) || trimString(record.requesterSenderId) || trimString(record.senderId);
-    if (objectSenderId) {
-      const identity = resolveApiSenderIdentity(objectSenderId) ?? resolveSenderIdentity(objectSenderId, secret);
-      return identity
-        ? {
-            senderId: identity.senderId,
-            senderHash: identity.senderHash,
-            openVikingUserId: identity.openVikingUserId,
-          }
-        : undefined;
-    }
   }
 
   const stringInput = trimString(input);
@@ -64,14 +52,7 @@ function resolveClientSenderIdentity(input: unknown, secret: string): ClientSend
       openVikingUserId: stringInput,
     };
   }
-  const identity = resolveApiSenderIdentity(input) ?? resolveSenderIdentity(input, secret);
-  return identity
-    ? {
-        senderId: identity.senderId,
-        senderHash: identity.senderHash,
-        openVikingUserId: identity.openVikingUserId,
-      }
-    : undefined;
+  return undefined;
 }
 
 export function createOpenVikingClientRuntime(options: {
@@ -169,7 +150,7 @@ export function createOpenVikingClientRuntime(options: {
 
   const getClientForSender = trimmedIdentitySecret
     ? async (senderId: unknown): Promise<OpenVikingClient | undefined> => {
-        const identity = resolveClientSenderIdentity(senderId, trimmedIdentitySecret);
+        const identity = resolveClientSenderIdentity(senderId);
         if (!identity) {
           return undefined;
         }

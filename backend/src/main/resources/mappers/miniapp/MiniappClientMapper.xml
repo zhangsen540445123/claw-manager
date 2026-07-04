@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.miniapp.MiniappClientMapper">
+  <resultMap id="MiniappClientMap" type="com.clawbotforall.miniapp.MiniappClientEntity">
+    <id property="appId" column="app_id"/>
+    <result property="appSecret" column="app_secret"/>
+    <result property="enabled" column="enabled"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="findByAppId" resultMap="MiniappClientMap">
+    SELECT *
+    FROM miniapp_clients
+    WHERE app_id = #{appId}
+    LIMIT 1
+  </select>
+</mapper>

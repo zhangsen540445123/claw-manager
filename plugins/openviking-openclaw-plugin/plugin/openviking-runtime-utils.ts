@@ -47,24 +47,6 @@ export function extractToolSenderId(ctx: unknown): string | undefined {
       }
     }
   }
-  if (typeof toolCtx.requesterSenderId === "string") {
-    const trimmed = toolCtx.requesterSenderId.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  if (typeof toolCtx.SenderId === "string") {
-    const trimmed = toolCtx.SenderId.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  if (typeof toolCtx.senderId === "string") {
-    const trimmed = toolCtx.senderId.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
   return undefined;
 }
 

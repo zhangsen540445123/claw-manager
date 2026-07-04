@@ -147,7 +147,8 @@ CREATE TABLE IF NOT EXISTS wechat_bind_links (
   qr_link TEXT NULL,
   qr_expires_at VARCHAR(40) NULL,
   error_message TEXT NULL,
-  created_by_admin_id VARCHAR(64) NOT NULL,
+  created_by_admin_id VARCHAR(64) NULL,
+  miniapp_openid_hash VARCHAR(64) NULL,
   created_at VARCHAR(40) NOT NULL,
   started_at VARCHAR(40) NULL,
   expires_at VARCHAR(40) NULL,
@@ -157,9 +158,59 @@ CREATE TABLE IF NOT EXISTS wechat_bind_links (
   INDEX idx_wechat_bind_links_instance_id (instance_id),
   INDEX idx_wechat_bind_links_target_account_id (target_account_id),
   INDEX idx_wechat_bind_links_scanned_wechat_user_id (scanned_wechat_user_id),
+  INDEX idx_wechat_bind_links_miniapp_openid_hash (miniapp_openid_hash),
   INDEX idx_wechat_bind_links_status (status),
   CONSTRAINT fk_wechat_bind_links_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE SET NULL,
   CONSTRAINT fk_wechat_bind_links_admin FOREIGN KEY (created_by_admin_id) REFERENCES admins(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS miniapp_clients (
+  app_id VARCHAR(80) PRIMARY KEY,
+  app_secret TEXT NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS miniapp_request_nonces (
+  app_id VARCHAR(80) NOT NULL,
+  nonce VARCHAR(120) NOT NULL,
+  created_at VARCHAR(40) NOT NULL,
+  expires_at VARCHAR(40) NOT NULL,
+  PRIMARY KEY (app_id, nonce),
+  INDEX idx_miniapp_request_nonces_expires_at (expires_at),
+  CONSTRAINT fk_miniapp_request_nonces_client FOREIGN KEY (app_id) REFERENCES miniapp_clients(app_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS miniapp_user_bindings (
+  openid_hash VARCHAR(64) PRIMARY KEY,
+  openid VARCHAR(255) NOT NULL,
+  instance_id VARCHAR(64) NOT NULL,
+  wechat_user_id VARCHAR(255) NULL,
+  openviking_user_id VARCHAR(128) NULL,
+  bind_status VARCHAR(40) NOT NULL,
+  current_bind_token VARCHAR(96) NULL,
+  bound_at VARCHAR(40) NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  INDEX idx_miniapp_user_bindings_openid (openid),
+  INDEX idx_miniapp_user_bindings_instance_id (instance_id),
+  INDEX idx_miniapp_user_bindings_wechat_user_id (wechat_user_id),
+  INDEX idx_miniapp_user_bindings_openviking_user_id (openviking_user_id),
+  CONSTRAINT fk_miniapp_user_bindings_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS miniapp_user_keys (
+  openid_hash VARCHAR(64) PRIMARY KEY,
+  openid VARCHAR(255) NOT NULL,
+  user_key VARCHAR(128) NOT NULL UNIQUE,
+  key_preview VARCHAR(80) NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  last_used_at VARCHAR(40) NULL,
+  INDEX idx_miniapp_user_keys_openid (openid),
+  CONSTRAINT fk_miniapp_user_keys_binding FOREIGN KEY (openid_hash) REFERENCES miniapp_user_bindings(openid_hash) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS openviking_settings (

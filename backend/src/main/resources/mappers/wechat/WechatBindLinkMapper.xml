@@ -15,6 +15,7 @@
     <result property="qrExpiresAt" column="qr_expires_at"/>
     <result property="errorMessage" column="error_message"/>
     <result property="createdByAdminId" column="created_by_admin_id"/>
+    <result property="miniappOpenidHash" column="miniapp_openid_hash"/>
     <result property="createdAt" column="created_at"/>
     <result property="startedAt" column="started_at"/>
     <result property="expiresAt" column="expires_at"/>
@@ -80,11 +81,11 @@
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
     INSERT INTO wechat_bind_links
       (token, mode, phone, instance_id, target_account_id, scanned_wechat_user_id, status,
-       qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id,
+       qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id, miniapp_openid_hash,
        created_at, started_at, expires_at, completed_at, updated_at)
     VALUES
       (#{token}, #{mode}, #{phone}, #{instanceId}, #{targetAccountId}, #{scannedWechatUserId}, #{status},
-       #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{createdByAdminId},
+       #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{createdByAdminId}, #{miniappOpenidHash},
        #{createdAt}, #{startedAt}, #{expiresAt}, #{completedAt}, #{updatedAt})
   </insert>
 
@@ -101,6 +102,7 @@
         qr_link = #{qrLink},
         qr_expires_at = #{qrExpiresAt},
         error_message = #{errorMessage},
+        miniapp_openid_hash = #{miniappOpenidHash},
         started_at = #{startedAt},
         expires_at = #{expiresAt},
         completed_at = #{completedAt},

@@ -1,5 +1,3 @@
-import { createHmac } from "node:crypto";
-
 import { describe, expect, it, vi } from "vitest";
 
 import contextEnginePlugin from "../../index.js";
@@ -22,11 +20,7 @@ type ToolResult = {
 
 const SECRET = "sender-scoped-test-secret";
 const ACCOUNT_ID = "claw-manager";
-
-function expectedOpenVikingUserId(senderId: string): string {
-  const hash = createHmac("sha256", SECRET).update(senderId.trim()).digest("hex").slice(0, 32);
-  return `wx_${hash}`;
-}
+const EXPLICIT_USER_ID = "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 function okResponse(result: unknown): Response {
   return new Response(JSON.stringify({ status: "ok", result }), {
@@ -81,14 +75,14 @@ function setupPlugin(
   return { api, factoryTools, commands, openVikingTransport };
 }
 
-function expectTenantHeaders(init: RequestInit | undefined, senderId: string): void {
+function expectTenantHeaders(init: RequestInit | undefined, openVikingUserId: string): void {
   const headers = new Headers(init?.headers);
   expect(headers.get("X-OpenViking-Account")).toBe(ACCOUNT_ID);
-  expect(headers.get("X-OpenViking-User")).toBe(expectedOpenVikingUserId(senderId));
+  expect(headers.get("X-OpenViking-User")).toBe(openVikingUserId);
 }
 
 describe("sender-scoped OpenViking tools", () => {
-  it("uses requesterSenderId before senderId for ov_search tenant headers", async () => {
+  it("uses explicit OpenViking user id for ov_search tenant headers", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/search/find")) {
         return okResponse({ memories: [], resources: [], skills: [], total: 0 });
@@ -102,16 +96,33 @@ describe("sender-scoped OpenViking tools", () => {
       agentId: "main",
       senderId: "sender-b",
       requesterSenderId: "sender-a",
+      openVikingUserId: EXPLICIT_USER_ID,
     });
     await tool.execute("tc-search", { query: "preference", uri: "viking://resources" });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).endsWith("/api/v1/search/find"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "sender-a");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 
-  it("falls back to senderId for memory_store writes", async () => {
+  it("rejects raw requesterSenderId/senderId instead of deriving tenant headers", async () => {
+    const openVikingTransport = vi.fn(async () => okResponse({}));
+    const { factoryTools } = setupPlugin(openVikingTransport);
+
+    const tool = factoryTools.get("ov_search")!({
+      sessionId: "session-1",
+      agentId: "main",
+      senderId: "sender-b",
+      requesterSenderId: "sender-a",
+    });
+    const result = await tool.execute("tc-search", { query: "preference", uri: "viking://resources" }) as ToolResult;
+
+    expect(result.content[0]?.text).toBe(OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE);
+    expect(openVikingTransport).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit OpenViking user id for memory_store writes", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.includes("/messages")) {
         return okResponse({ session_id: "stored-session" });
@@ -127,13 +138,14 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "sender-fallback",
+      openVikingUserId: EXPLICIT_USER_ID,
     });
     await tool.execute("tc-store", { text: "remember blue" });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).includes("/api/v1/sessions/") && String(url).includes("/messages"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "sender-fallback");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 
   it("rejects user memory tools without sender identity and sends no OpenViking request", async () => {
@@ -150,7 +162,7 @@ describe("sender-scoped OpenViking tools", () => {
     expect(openVikingTransport).not.toHaveBeenCalled();
   });
 
-  it("uses sender-scoped headers for archive reads", async () => {
+  it("uses explicit OpenViking user id for archive reads", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.includes("/archives/archive_001")) {
         return okResponse({ archive_id: "archive_001", abstract: "summary", overview: "", messages: [] });
@@ -163,16 +175,17 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "archive-sender",
+      openVikingUserId: EXPLICIT_USER_ID,
     });
     await tool.execute("tc-archive", { archiveId: "archive_001" });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).includes("/api/v1/sessions/") && String(url).includes("/archives/archive_001"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "archive-sender");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 
-  it("uses sender-scoped headers for add_skill imports", async () => {
+  it("uses explicit OpenViking user id for add_skill imports", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/skills")) {
         return okResponse({ uri: "viking://user/skills/demo", name: "demo" });
@@ -185,13 +198,14 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       requesterSenderId: "skill-sender",
+      openVikingUserId: EXPLICIT_USER_ID,
     });
     await tool.execute("tc-add-skill", { data: "name: demo\n" });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).endsWith("/api/v1/skills"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "skill-sender");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 
   it("rejects add_resource without sender identity and sends no OpenViking request", async () => {
@@ -211,7 +225,7 @@ describe("sender-scoped OpenViking tools", () => {
     expect(openVikingTransport).not.toHaveBeenCalled();
   });
 
-  it("uses sender-scoped headers for recall trace content reads", async () => {
+  it("uses explicit OpenViking user id for recall trace content reads", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       const requestUrl = new URL(url);
       if (requestUrl.pathname === "/api/v1/search/find") {
@@ -237,6 +251,7 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "trace-sender",
+      openVikingUserId: EXPLICIT_USER_ID,
     };
     await factoryTools.get("ov_search")!(ctx).execute("tc-search", {
       query: "spec",
@@ -251,10 +266,10 @@ describe("sender-scoped OpenViking tools", () => {
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).includes("/api/v1/content/read"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "trace-sender");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 
-  it("uses requesterSenderId for ov-search slash command tenant headers", async () => {
+  it("uses explicit OpenViking user id for ov-search slash command tenant headers", async () => {
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/search/find")) {
         return okResponse({ memories: [], resources: [], skills: [], total: 0 });
@@ -269,11 +284,12 @@ describe("sender-scoped OpenViking tools", () => {
       agentId: "main",
       senderId: "command-sender-b",
       requesterSenderId: "command-sender-a",
+      openVikingUserId: EXPLICIT_USER_ID,
     });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).endsWith("/api/v1/search/find"),
     ) as [string, RequestInit];
-    expectTenantHeaders(init, "command-sender-a");
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
   });
 });

@@ -94,7 +94,7 @@ class OpenVikingUserKeyServiceTest {
     return new OpenVikingUserKeyService(
         userKeys,
         new StaticSettingsService(rootKey),
-        new OpenVikingIdentityService(properties()),
+        new OpenVikingIdentityService(),
         adminClient
     );
   }
@@ -162,7 +162,7 @@ class OpenVikingUserKeyServiceTest {
     private final String rootKey;
 
     StaticSettingsService(String rootKey) {
-      super(null, null, null);
+      super(null, null);
       this.rootKey = rootKey;
     }
 
@@ -181,3 +181,4 @@ class OpenVikingUserKeyServiceTest {
     }
   }
 }
+

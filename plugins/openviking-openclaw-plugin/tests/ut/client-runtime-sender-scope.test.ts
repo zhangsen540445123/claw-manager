@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createOpenVikingClientRuntime } from "../../plugin/openviking-client-runtime.js";
-import { resolveSenderIdentity } from "../../identity.js";
 
 function okResponse(result: unknown): Response {
   return new Response(JSON.stringify({ status: "ok", result }), {
@@ -11,7 +10,7 @@ function okResponse(result: unknown): Response {
 }
 
 describe("createOpenVikingClientRuntime sender scoping", () => {
-  it("resolves a sender-scoped user key from Claw Manager broker and uses only X-API-Key for data APIs", async () => {
+  it("resolves an explicit sender-scoped user key from Claw Manager broker and uses only X-API-Key for data APIs", async () => {
     const transport = vi.fn().mockImplementation(async (url: string) => {
       if (url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve") {
         return okResponse({
@@ -42,16 +41,17 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
       transport,
     });
 
-    const client = await runtime.getClientForSender("wxid_Alpha");
+    const client = await runtime.getClientForSender({
+      openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
     await client?.find("hello", { limit: 1 });
 
-    const expectedIdentity = resolveSenderIdentity("wxid_Alpha", "secret");
     const [brokerUrl, brokerInit] = transport.mock.calls[0] as [string, RequestInit];
     expect(brokerUrl).toBe("http://claw-manager-api:8080/api/internal/openviking/users/resolve");
     expect((brokerInit.headers as Headers).get("Authorization")).toBe("Bearer broker-token");
     expect(JSON.parse(String(brokerInit.body))).toEqual({
-      senderId: "wxid_Alpha",
-      openvikingUserId: expectedIdentity?.openVikingUserId,
+      openvikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     });
 
     const [, dataInit] = transport.mock.calls[1] as [string, RequestInit];
@@ -61,7 +61,7 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
     expect(headers.get("X-OpenViking-User")).toBeNull();
   });
 
-  it("caches broker-resolved user keys by derived OpenViking user id", async () => {
+  it("caches broker-resolved user keys by explicit OpenViking user id", async () => {
     const transport = vi.fn().mockImplementation(async (url: string) => {
       if (url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve") {
         return okResponse({ openvikingUserId: "wx_cached", userKey: "user-key-a" });
@@ -87,8 +87,8 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
       transport,
     });
 
-    await (await runtime.getClientForSender("wxid_Alpha"))?.find("hello", { limit: 1 });
-    await (await runtime.getClientForSender("wxid_Alpha"))?.find("again", { limit: 1 });
+    await (await runtime.getClientForSender("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))?.find("hello", { limit: 1 });
+    await (await runtime.getClientForSender("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))?.find("again", { limit: 1 });
 
     expect(transport.mock.calls.filter(([url]) => url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve")).toHaveLength(1);
   });
@@ -170,14 +170,9 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
     expect((dataInit.headers as Headers).get("X-API-Key")).toBe("user-key-api");
   });
 
-  it("maps API channel sender ids to api OpenViking user ids without rehashing", async () => {
+  it("does not derive OpenViking user ids from API channel sender ids", async () => {
     const apiHash = "0123456789abcdef0123456789abcdef";
-    const transport = vi.fn().mockImplementation(async (url: string) => {
-      if (url === "http://claw-manager-api:8080/api/internal/openviking/users/resolve") {
-        return okResponse({ openvikingUserId: `api_${apiHash}`, userKey: "user-key-api" });
-      }
-      return okResponse({ items: [] });
-    });
+    const transport = vi.fn();
     const runtime = createOpenVikingClientRuntime({
       cfg: {
         baseUrl: "http://127.0.0.1:1933",
@@ -198,15 +193,34 @@ describe("createOpenVikingClientRuntime sender scoping", () => {
     });
 
     const client = await runtime.getClientForSender(`api:${apiHash}`);
-    await client?.find("hello", { limit: 1 });
+    expect(client).toBeUndefined();
+    expect(transport).not.toHaveBeenCalled();
+  });
 
-    const [, brokerInit] = transport.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(brokerInit.body))).toEqual({
-      senderId: `api:${apiHash}`,
-      openvikingUserId: `api_${apiHash}`,
+  it("does not derive OpenViking user ids from raw channel sender ids", async () => {
+    const transport = vi.fn();
+    const runtime = createOpenVikingClientRuntime({
+      cfg: {
+        baseUrl: "http://127.0.0.1:1933",
+        apiKey: "",
+        peer_role: "assistant",
+        peer_prefix: "agent",
+        timeoutMs: 5000,
+        accountId: "claw-manager",
+        userId: "",
+        identityHashSecret: "secret",
+        clawManagerInternalBaseUrl: "http://claw-manager-api:8080",
+        openVikingBrokerToken: "broker-token",
+        logFindRequests: false,
+      },
+      rawPeerPrefix: "",
+      logger: { info: vi.fn() },
+      transport,
     });
-    const [, dataInit] = transport.mock.calls[1] as [string, RequestInit];
-    expect((dataInit.headers as Headers).get("X-API-Key")).toBe("user-key-api");
+
+    const client = await runtime.getClientForSender("wxid_Alpha");
+    expect(client).toBeUndefined();
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it("does not return a client when sender identity is unavailable", async () => {

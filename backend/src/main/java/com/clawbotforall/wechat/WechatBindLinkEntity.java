@@ -18,6 +18,7 @@ public class WechatBindLinkEntity {
   private String qrExpiresAt;
   private String errorMessage;
   private String createdByAdminId;
+  private String miniappOpenidHash;
   private String createdAt;
   private String startedAt;
   private String expiresAt;
@@ -126,6 +127,14 @@ public class WechatBindLinkEntity {
 
   public void setCreatedByAdminId(String createdByAdminId) {
     this.createdByAdminId = createdByAdminId;
+  }
+
+  public String getMiniappOpenidHash() {
+    return miniappOpenidHash;
+  }
+
+  public void setMiniappOpenidHash(String miniappOpenidHash) {
+    this.miniappOpenidHash = miniappOpenidHash;
   }
 
   public String getCreatedAt() {

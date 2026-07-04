@@ -3,7 +3,6 @@ package com.clawbotforall.openviking;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.clawbotforall.config.ClawbotProperties;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +19,6 @@ class OpenVikingSettingsServiceTest {
     FakeOpenVikingSettingsMapper mapper = new FakeOpenVikingSettingsMapper();
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 
@@ -32,9 +30,9 @@ class OpenVikingSettingsServiceTest {
     assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.37");
     assertThat(settings.rootApiKeyConfigured()).isFalse();
     assertThat(settings.rootApiKeyFingerprint()).isBlank();
-    assertThat(settings.saltConfigured()).isTrue();
-    assertThat(settings.saltSource()).isEqualTo("generated");
-    assertThat(settings.saltFingerprint()).hasSize(16);
+    assertThat(settings.saltConfigured()).isFalse();
+    assertThat(settings.saltSource()).isEqualTo("missing");
+    assertThat(settings.saltFingerprint()).isBlank();
   }
 
   @Test
@@ -42,7 +40,6 @@ class OpenVikingSettingsServiceTest {
     FakeOpenVikingSettingsMapper mapper = new FakeOpenVikingSettingsMapper();
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 
@@ -77,7 +74,6 @@ class OpenVikingSettingsServiceTest {
     mapper.saved = entity;
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 
@@ -101,7 +97,6 @@ class OpenVikingSettingsServiceTest {
     mapper.saved = entity;
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 
@@ -122,7 +117,6 @@ class OpenVikingSettingsServiceTest {
     mapper.saved = entity;
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 
@@ -147,7 +141,6 @@ class OpenVikingSettingsServiceTest {
     mapper.saved = entity;
     OpenVikingSettingsService service = new OpenVikingSettingsService(
         mapper,
-        new OpenVikingIdentityService(properties()),
         new OpenVikingBrokerTokenService(properties())
     );
 

@@ -63,9 +63,12 @@ function makeEngine(
     read: vi.fn().mockResolvedValue(""),
   } as unknown as OpenVikingClient;
   const getClient = vi.fn().mockResolvedValue(client);
-  const getClientForSender = vi.fn().mockResolvedValue(
-    opts?.senderScopedClientAvailable === false ? undefined : client,
-  );
+  const getClientForSender = vi.fn().mockImplementation(async (sender: unknown) => {
+    if (opts?.senderScopedClientAvailable === false || sender === undefined) {
+      return undefined;
+    }
+    return client;
+  });
   const resolveAgentId = vi.fn((sessionId: string) => `agent:${sessionId}`);
   const localCfg = opts?.cfgOverrides
     ? memoryOpenVikingConfigSchema.parse({
@@ -111,7 +114,8 @@ describe("context-engine assemble()", () => {
       await writeOpenVikingSenderHandoff({
         stateDir,
         sessionKey: "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
-        senderId: "wx_sender_ABC",
+        openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         secret: "identity-secret",
       });
       const { engine, getClient, getClientForSender } = makeEngine(
@@ -139,8 +143,8 @@ describe("context-engine assemble()", () => {
 
       expect(getClientForSender).toHaveBeenCalledWith(
         expect.objectContaining({
-          openVikingUserId: expect.stringMatching(/^wx_[a-f0-9]{32}$/),
-          senderHash: expect.stringMatching(/^[a-f0-9]{32}$/),
+          openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         }),
       );
       expect(getClient).not.toHaveBeenCalled();
@@ -246,10 +250,10 @@ describe("context-engine assemble()", () => {
       const result = await engine.assemble({
         sessionId: "session-transform-sender",
         messages: [{ role: "user", content: "what should be remembered?" }],
-        runtimeContext: { senderId: "wxid_Alpha" },
+        runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
       });
 
-      expect(getClientForSender).toHaveBeenCalledWith("wxid_Alpha");
+      expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(getClient).not.toHaveBeenCalled();
       expect(result.messages[0]?.content).toContain("Sender scoped memory.");
   });
@@ -712,10 +716,10 @@ describe("context-engine assemble()", () => {
       sessionId: "session-new-recall",
       messages: liveMessages,
       tokenBudget: 4096,
-      runtimeContext: { senderId: "wx_sender" },
+      runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
 
-    expect(getClientForSender).toHaveBeenCalledWith("wx_sender");
+    expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(getClient).not.toHaveBeenCalled();
     expect(client.find).toHaveBeenCalled();
     expect(client.getSessionContext).toHaveBeenCalledWith("session-new-recall", 4096, "agent:session-new-recall");
@@ -759,10 +763,10 @@ describe("context-engine assemble()", () => {
       sessionId: "session-profile-recall",
       messages: liveMessages,
       tokenBudget: 4096,
-      runtimeContext: { senderId: "wx_sender" },
+      runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
 
-    expect(getClientForSender).toHaveBeenCalledWith("wx_sender");
+    expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(getClient).not.toHaveBeenCalled();
     expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-profile-recall");
     expect(client.find).not.toHaveBeenCalled();
@@ -803,10 +807,10 @@ describe("context-engine assemble()", () => {
       sessionId: "session-codename-prompt",
       messages: [],
       tokenBudget: 4096,
-      runtimeContext: { senderId: "api_sender" },
+      runtimeContext: { openVikingUserId: "api_0123456789abcdef0123456789abcdef" },
     });
 
-    expect(getClientForSender).toHaveBeenCalledWith("api_sender");
+    expect(getClientForSender).toHaveBeenCalledWith("api_0123456789abcdef0123456789abcdef");
     expect(getClient).not.toHaveBeenCalled();
     expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-codename-prompt");
     expect(client.find).not.toHaveBeenCalled();
@@ -862,7 +866,7 @@ describe("context-engine assemble()", () => {
       sessionId: "session-profile-fallback",
       messages: liveMessages,
       tokenBudget: 4096,
-      runtimeContext: { senderId: "wx_sender" },
+      runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
 
     expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-profile-fallback");
@@ -911,7 +915,7 @@ describe("context-engine assemble()", () => {
       sessionId: "session-low-score",
       messages: liveMessages,
       tokenBudget: 4096,
-      runtimeContext: { senderId: "wx_sender" },
+      runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
 
     expect(client.read).not.toHaveBeenCalledWith("viking://user/memories/profile.md", expect.anything());
@@ -948,7 +952,7 @@ describe("context-engine assemble()", () => {
       sessionId: "session-new-empty",
       messages: liveMessages,
       tokenBudget: 4096,
-      runtimeContext: { senderId: "wx_sender" },
+      runtimeContext: { openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     });
 
     expect(client.find).toHaveBeenCalled();
