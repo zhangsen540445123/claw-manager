@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.miniapp.MiniappWechatBindingSummary;
 import com.clawbotforall.openviking.OpenVikingEffectiveSettings;
 import com.clawbotforall.openviking.OpenVikingIdentityService;
 import com.clawbotforall.openviking.OpenVikingSettingsService;
@@ -111,6 +112,16 @@ class PublicInstanceFactoryTest {
         null,
         List.of(account),
         List.of(channel),
+        List.of(new MiniappWechatBindingSummary(
+            "inst_1",
+            "wx_user",
+            "",
+            "miniapp-openid-001",
+            "connected",
+            "cm_user_abcd...wxyz",
+            true,
+            "2026-07-04T10:00:00Z"
+        )),
         new MockHttpServletRequest()
     );
 
@@ -128,6 +139,11 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.wechatBinding().pairedAccounts()).hasSize(1);
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().remark()).isEqualTo("战神");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().openVikingUserId()).startsWith("wx_");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappOpenid()).isEqualTo("miniapp-openid-001");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappBindStatus()).isEqualTo("connected");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappKeyPreview()).isEqualTo("cm_user_abcd...wxyz");
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappKeyEnabled()).isTrue();
+    assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappLastUsedAt()).isEqualTo("2026-07-04T10:00:00Z");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().channelStatus()).isEqualTo("ready");
     assertThat(publicInstance.wechatBinding().status()).isEqualTo("ready");
   }
@@ -145,6 +161,7 @@ class PublicInstanceFactoryTest {
         null,
         List.of(),
         List.of(),
+        List.of(),
         request
     );
 
@@ -159,6 +176,7 @@ class PublicInstanceFactoryTest {
         List.of(),
         null,
         null,
+        List.of(),
         List.of(),
         List.of(),
         null
@@ -204,6 +222,7 @@ class PublicInstanceFactoryTest {
         null,
         List.of(account),
         List.of(channel),
+        List.of(),
         new MockHttpServletRequest()
     );
 
@@ -234,6 +253,7 @@ class PublicInstanceFactoryTest {
         List.of(),
         null,
         null,
+        List.of(),
         List.of(),
         List.of(),
         new MockHttpServletRequest()

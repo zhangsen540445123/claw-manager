@@ -1,11 +1,14 @@
 package com.clawbotforall.miniapp;
 
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 @Mapper
 public interface MiniappUserBindingMapper {
   MiniappUserBindingEntity findByOpenidHash(@Param("openidHash") String openidHash);
+
+  List<MiniappWechatBindingSummary> listWechatSummariesByInstanceIds(@Param("instanceIds") List<String> instanceIds);
 
   int countByInstanceId(@Param("instanceId") String instanceId);
 

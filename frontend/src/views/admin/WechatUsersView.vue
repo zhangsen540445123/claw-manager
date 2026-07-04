@@ -25,6 +25,11 @@ interface WechatUserRow {
   channelUpdatedAt?: string | null;
   lastStartedAt?: string | null;
   lastErrorAt?: string | null;
+  miniappOpenid: string;
+  miniappBindStatus: string;
+  miniappKeyPreview: string;
+  miniappKeyEnabled: boolean;
+  miniappLastUsedAt?: string | null;
 }
 
 const admin = useAdminStore();
@@ -33,6 +38,7 @@ const actionLoading = ref("");
 const error = ref("");
 const selectedUsers = ref<WechatUserRow[]>([]);
 const remarkDrafts = ref<Record<string, string>>({});
+const phoneDrafts = ref<Record<string, string>>({});
 const filters = reactive({
   keyword: "",
   instanceId: "",
@@ -78,7 +84,10 @@ const filteredUsers = computed(() => {
       user.wechatUserId,
       user.openVikingUserId,
       user.remark,
-      user.instanceName
+      user.instanceName,
+      user.miniappOpenid,
+      user.miniappBindStatus,
+      user.miniappKeyPreview
     ].some((value) => value.toLowerCase().includes(keyword));
   });
 });
@@ -122,7 +131,12 @@ function toUserRow(instance: PublicInstance, account: PublicWechatPairedAccount)
     channelMessage: account.channelMessage,
     channelUpdatedAt: account.channelUpdatedAt,
     lastStartedAt: account.lastStartedAt,
-    lastErrorAt: account.lastErrorAt
+    lastErrorAt: account.lastErrorAt,
+    miniappOpenid: account.miniappOpenid || "",
+    miniappBindStatus: account.miniappBindStatus || "",
+    miniappKeyPreview: account.miniappKeyPreview || "",
+    miniappKeyEnabled: Boolean(account.miniappKeyEnabled),
+    miniappLastUsedAt: account.miniappLastUsedAt
   };
 }
 
@@ -172,11 +186,48 @@ function draftRemark(user: WechatUserRow) {
   return remarkDrafts.value[user.key] ?? user.remark;
 }
 
+function draftPhone(user: WechatUserRow) {
+  return phoneDrafts.value[user.key] ?? user.phone;
+}
+
 function setDraftRemark(user: WechatUserRow, value: string) {
   remarkDrafts.value = {
     ...remarkDrafts.value,
     [user.key]: value
   };
+}
+
+function setDraftPhone(user: WechatUserRow, value: string) {
+  phoneDrafts.value = {
+    ...phoneDrafts.value,
+    [user.key]: value
+  };
+}
+
+function miniappStatusLabel(status: string) {
+  switch (status) {
+    case "connected":
+      return "已绑定";
+    case "waiting_scan":
+      return "待扫码";
+    case "rejected":
+      return "已拒绝";
+    default:
+      return status || "未接入";
+  }
+}
+
+function miniappStatusType(status: string): "success" | "warning" | "danger" | "info" {
+  switch (status) {
+    case "connected":
+      return "success";
+    case "waiting_scan":
+      return "warning";
+    case "rejected":
+      return "danger";
+    default:
+      return "info";
+  }
 }
 
 async function runAction(name: string, action: () => Promise<unknown>) {
@@ -226,13 +277,19 @@ async function batchRestartWechatChannels() {
   });
 }
 
-async function saveRemark(user: WechatUserRow) {
-  await runAction(`remark:${user.key}`, async () => {
-    await admin.saveWechatRemark(user.instanceId, user.accountId, draftRemark(user));
+async function saveProfile(user: WechatUserRow) {
+  await runAction(`profile:${user.key}`, async () => {
+    await admin.saveWechatProfile(user.instanceId, user.accountId, {
+      phone: draftPhone(user),
+      remark: draftRemark(user)
+    });
     const next = { ...remarkDrafts.value };
     delete next[user.key];
     remarkDrafts.value = next;
-    ElMessage.success("备注已保存");
+    const nextPhones = { ...phoneDrafts.value };
+    delete nextPhones[user.key];
+    phoneDrafts.value = nextPhones;
+    ElMessage.success("用户资料已保存");
   });
 }
 
@@ -255,7 +312,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
 
 <template>
   <section class="workspace">
-    <PageHeader title="用户中心" description="查看全系统微信用户，维护备注并重启指定用户的微信通道。">
+    <PageHeader title="用户中心" description="查看全系统微信用户、小程序绑定与 API Key 状态。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="tableLoading" @click="loadUsers">刷新</el-button>
       </template>
@@ -280,7 +337,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
 
       <el-form class="management-form history-filter-form" label-position="top" @submit.prevent>
         <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="手机号 / OpenClaw账号 / 微信 userId / OpenViking 用户ID / 备注" clearable />
+          <el-input v-model="filters.keyword" placeholder="手机号 / 微信插件账号ID / 微信 userId / OpenViking 用户ID / 小程序 openid / 备注" clearable />
         </el-form-item>
         <el-form-item label="实例">
           <el-select v-model="filters.instanceId" clearable placeholder="全部实例">
@@ -307,8 +364,17 @@ async function deleteWechatAccount(user: WechatUserRow) {
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="48" :selectable="canRestartWechatChannel" />
-        <el-table-column prop="phone" label="手机号" min-width="130" />
-        <el-table-column label="实例" min-width="170">
+        <el-table-column label="手机号" min-width="210">
+          <template #default="{ row }">
+            <el-input
+              :model-value="draftPhone(row)"
+              placeholder="可为空"
+              clearable
+              @update:model-value="(value: string) => setDraftPhone(row, value)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="绑定实例名称" min-width="170">
           <template #default="{ row }">
             <div class="model-stack">
               <strong>{{ row.instanceName }}</strong>
@@ -316,9 +382,34 @@ async function deleteWechatAccount(user: WechatUserRow) {
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="accountId" label="OpenClaw账号" min-width="230" />
-        <el-table-column prop="wechatUserId" label="微信 userId" min-width="180" />
+        <el-table-column prop="accountId" label="微信插件账号ID" min-width="230" />
+        <el-table-column min-width="180">
+          <template #header>
+            <span>微信 userId</span>
+            <el-tooltip content="微信插件登录完成后返回的真实微信用户标识。">
+              <span class="help-dot">?</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">{{ row.wechatUserId || "-" }}</template>
+        </el-table-column>
         <el-table-column prop="openVikingUserId" label="OpenViking 用户ID" min-width="230" />
+        <el-table-column label="小程序/API" min-width="260">
+          <template #default="{ row }">
+            <div class="model-stack">
+              <strong>{{ row.miniappOpenid || "-" }}</strong>
+              <span>
+                <el-tag size="small" :type="miniappStatusType(row.miniappBindStatus)">
+                  {{ miniappStatusLabel(row.miniappBindStatus) }}
+                </el-tag>
+                <el-tag v-if="row.miniappKeyPreview" size="small" :type="row.miniappKeyEnabled ? 'success' : 'info'" effect="plain">
+                  {{ row.miniappKeyEnabled ? "Key启用" : "Key停用" }}
+                </el-tag>
+              </span>
+              <span>{{ row.miniappKeyPreview || "未生成 Key" }}</span>
+              <span v-if="row.miniappLastUsedAt">最近 API：{{ formatDateTime(row.miniappLastUsedAt) }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="通道状态" min-width="190">
           <template #default="{ row }">
             <div class="channel-status-cell">
@@ -334,8 +425,8 @@ async function deleteWechatAccount(user: WechatUserRow) {
             <div class="remark-row">
               <el-input :model-value="draftRemark(row)" @update:model-value="(value: string) => setDraftRemark(row, value)" />
               <el-button
-                :loading="actionLoading === `remark:${row.key}`"
-                @click="saveRemark(row)"
+                :loading="actionLoading === `profile:${row.key}`"
+                @click="saveProfile(row)"
               >
                 保存
               </el-button>

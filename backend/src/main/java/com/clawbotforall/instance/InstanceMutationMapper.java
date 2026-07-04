@@ -41,6 +41,14 @@ public interface InstanceMutationMapper {
       @Param("updatedAt") String updatedAt
   );
 
+  int updateWechatAccountProfile(
+      @Param("instanceId") String instanceId,
+      @Param("accountId") String accountId,
+      @Param("phone") String phone,
+      @Param("remark") String remark,
+      @Param("updatedAt") String updatedAt
+  );
+
   int updateWechatAccountMetadata(WechatPairedAccountEntity account);
 
   int deleteWechatAccount(

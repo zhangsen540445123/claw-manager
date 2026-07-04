@@ -27,7 +27,7 @@ type ShellNavKey =
   | "wechat"
   | "wechatPlugins"
   | "wechatUsers"
-  | "externalApi"
+  | "miniappClients"
   | "ops"
   | "account";
 
@@ -55,7 +55,7 @@ const navItems = computed(() => {
     { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
     { key: "wechat" as const, label: "扫码链接", icon: QrCode },
     { key: "wechatUsers" as const, label: "用户中心", icon: UsersRound },
-    { key: "externalApi" as const, label: "API接入", icon: KeyRound },
+    { key: "miniappClients" as const, label: "小程序接入", icon: KeyRound },
     { key: "ops" as const, label: "系统运维", icon: Server }
   ];
 });
@@ -69,7 +69,7 @@ const routeTitles: Record<string, string> = {
   wechat: "扫码链接",
   wechatPlugins: "插件管理",
   wechatUsers: "用户中心",
-  externalApi: "API接入",
+  miniappClients: "小程序接入",
   ops: "系统运维",
   account: "账号设置"
 };

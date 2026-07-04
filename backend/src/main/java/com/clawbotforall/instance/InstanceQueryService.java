@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import com.clawbotforall.miniapp.MiniappUserBindingMapper;
+import com.clawbotforall.miniapp.MiniappWechatBindingSummary;
 import com.clawbotforall.wechat.WechatAccountSyncService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,15 +20,18 @@ public class InstanceQueryService {
   private final InstanceAggregateMapper instanceAggregateMapper;
   private final PublicInstanceFactory publicInstanceFactory;
   private final WechatAccountSyncService wechatAccountSyncService;
+  private final MiniappUserBindingMapper miniappUserBindingMapper;
 
   public InstanceQueryService(
       InstanceAggregateMapper instanceAggregateMapper,
       PublicInstanceFactory publicInstanceFactory,
-      WechatAccountSyncService wechatAccountSyncService
+      WechatAccountSyncService wechatAccountSyncService,
+      MiniappUserBindingMapper miniappUserBindingMapper
   ) {
     this.instanceAggregateMapper = instanceAggregateMapper;
     this.publicInstanceFactory = publicInstanceFactory;
     this.wechatAccountSyncService = wechatAccountSyncService;
+    this.miniappUserBindingMapper = miniappUserBindingMapper;
   }
 
   /**
@@ -84,6 +89,10 @@ public class InstanceQueryService {
         .listWechatAccountChannelsByInstanceIds(instanceIds)
         .stream()
         .collect(Collectors.groupingBy(WechatAccountChannelEntity::getInstanceId));
+    Map<String, List<MiniappWechatBindingSummary>> miniappBindingsByInstance = miniappUserBindingMapper
+        .listWechatSummariesByInstanceIds(instanceIds)
+        .stream()
+        .collect(Collectors.groupingBy(MiniappWechatBindingSummary::instanceId));
 
     return instances.stream()
         .map(instance -> publicInstanceFactory.from(
@@ -93,6 +102,7 @@ public class InstanceQueryService {
             modelAuthByInstance.get(instance.getId()),
             pairedAccountsByInstance.getOrDefault(instance.getId(), List.of()),
             accountChannelsByInstance.getOrDefault(instance.getId(), List.of()),
+            miniappBindingsByInstance.getOrDefault(instance.getId(), List.of()),
             request
         ))
         .toList();

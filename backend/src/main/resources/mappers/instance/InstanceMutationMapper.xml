@@ -107,6 +107,15 @@
     WHERE account_id = #{accountId}
   </update>
 
+  <update id="updateWechatAccountProfile">
+    UPDATE wechat_paired_accounts
+    SET phone = #{phone},
+        remark = #{remark},
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+      AND account_id = #{accountId}
+  </update>
+
   <update id="updateWechatAccountMetadata" parameterType="com.clawbotforall.instance.WechatPairedAccountEntity">
     UPDATE wechat_paired_accounts
     SET wechat_user_id = #{wechatUserId},

@@ -288,7 +288,7 @@ public class InstanceController {
    * 更新已绑定微信账号的备注。
    */
   @PutMapping("/{instanceId}/wechat-accounts/{accountId}")
-  public Map<String, Object> updateWechatAccountRemark(
+  public Map<String, Object> updateWechatAccountProfile(
       @PathVariable String instanceId,
       @PathVariable String accountId,
       @RequestBody(required = false) Map<String, Object> payload,
@@ -297,8 +297,9 @@ public class InstanceController {
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = instanceCommandService.requireInstance(instanceId);
-    String remark = sanitizeName(payload == null ? "" : payload.get("remark"));
-    wechatAccountSyncService.updateRemark(instance, accountId, remark);
+    String phone = stringValue(payload == null ? "" : payload.get("phone"));
+    String remark = stringValue(payload == null ? "" : payload.get("remark"));
+    wechatAccountSyncService.updateProfile(instance, accountId, phone, remark);
     PublicInstance publicInstance = publicInstance(instanceId, request);
     eventPublisher.publishInstanceUpdated(publicInstance);
     return Map.of("instance", publicInstance);
@@ -422,14 +423,13 @@ public class InstanceController {
     return admin;
   }
 
-  private static String sanitizeName(Object value) {
-    String normalized = value == null ? "" : String.valueOf(value).trim().replaceAll("\\s+", " ");
-    return normalized.substring(0, Math.min(60, normalized.length()));
-  }
-
   private static String message(Throwable error) {
     String message = error.getMessage();
     return message == null || message.isBlank() ? "实例操作失败。" : message;
+  }
+
+  private static String stringValue(Object value) {
+    return value == null ? "" : String.valueOf(value);
   }
 
   private static int parseModelIndex(String value) {

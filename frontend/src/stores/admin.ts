@@ -2,15 +2,13 @@ import { defineStore } from "pinia";
 import { api, jsonBody } from "../api/http";
 import type {
   AppEvent,
-  ExternalApiUserRoutePage,
   InstanceStats,
   ModelPresetSyncResult,
   ModelPresetUsage,
   ModelProviderDefinition,
   PublicApiChannelPluginStatus,
   PublicApiChannelPluginVersions,
-  PublicExternalApiSettings,
-  PublicExternalApiUserRoute,
+  PublicMiniappClient,
   PublicOpenVikingPluginStatus,
   PublicOpenVikingPluginVersions,
   PublicOpenVikingSettings,
@@ -87,7 +85,7 @@ export const useAdminStore = defineStore("admin", {
     openVikingSettings: null as PublicOpenVikingSettings | null,
     openVikingPluginStatusByInstanceId: {} as Record<string, PublicOpenVikingPluginStatus>,
     openVikingPluginVersions: { latest: "", versions: [] } as PublicOpenVikingPluginVersions,
-    externalApiSettings: null as PublicExternalApiSettings | null,
+    miniappClients: [] as PublicMiniappClient[],
     apiChannelPluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
     apiChannelPluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
@@ -179,9 +177,12 @@ export const useAdminStore = defineStore("admin", {
       return response;
     },
     async saveWechatRemark(instanceId: string, accountId: string, remark: string) {
+      await this.saveWechatProfile(instanceId, accountId, { remark });
+    },
+    async saveWechatProfile(instanceId: string, accountId: string, payload: { phone?: string; remark?: string }) {
       const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/wechat-accounts/${encodeURIComponent(accountId)}`, {
         method: "PUT",
-        ...jsonBody({ remark })
+        ...jsonBody(payload)
       });
       this.upsert(response.instance);
     },
@@ -357,33 +358,38 @@ export const useAdminStore = defineStore("admin", {
       }
       this.openVikingPluginStatusByInstanceId = next;
     },
-    async loadExternalApiSettings() {
-      const response = await api<{ settings: PublicExternalApiSettings }>("/api/admin/external-api/settings");
-      this.externalApiSettings = response.settings;
-      return response.settings;
+    async loadMiniappClients() {
+      const response = await api<{ clients: PublicMiniappClient[] }>("/api/admin/miniapp-clients");
+      this.miniappClients = response.clients;
+      return response.clients;
     },
-    async saveExternalApiSettings(payload: { enabled: boolean; apiKey?: string; regenerateApiKey?: boolean }) {
-      const response = await api<{ settings: PublicExternalApiSettings }>("/api/admin/external-api/settings", {
-        method: "PUT",
+    async createMiniappClient(payload: { appId: string; enabled: boolean }) {
+      const response = await api<{ client: PublicMiniappClient }>("/api/admin/miniapp-clients", {
+        method: "POST",
         ...jsonBody(payload)
       });
-      this.externalApiSettings = response.settings;
-      return response.settings;
+      await this.loadMiniappClients();
+      return response.client;
     },
-    async loadExternalApiUsers(params: { keyword?: string; instanceId?: string; page?: number; pageSize?: number } = {}) {
-      const search = new URLSearchParams();
-      if (params.keyword) search.set("keyword", params.keyword);
-      if (params.instanceId) search.set("instanceId", params.instanceId);
-      search.set("page", String(params.page || 1));
-      search.set("pageSize", String(params.pageSize || 20));
-      return api<ExternalApiUserRoutePage>(`/api/admin/external-api/users?${search.toString()}`);
-    },
-    async migrateExternalApiUser(openidHash: string, instanceId: string) {
-      const response = await api<{ route: PublicExternalApiUserRoute }>("/api/admin/external-api/users/route", {
+    async updateMiniappClient(appId: string, enabled: boolean) {
+      const response = await api<{ client: PublicMiniappClient }>(`/api/admin/miniapp-clients/${encodeURIComponent(appId)}`, {
         method: "PUT",
-        ...jsonBody({ openidHash, instanceId })
+        ...jsonBody({ enabled })
       });
-      return response.route;
+      await this.loadMiniappClients();
+      return response.client;
+    },
+    async resetMiniappClientSecret(appId: string) {
+      const response = await api<{ client: PublicMiniappClient }>(
+        `/api/admin/miniapp-clients/${encodeURIComponent(appId)}/secret/reset`,
+        { method: "POST" }
+      );
+      await this.loadMiniappClients();
+      return response.client;
+    },
+    async deleteMiniappClient(appId: string) {
+      await api<{ ok: boolean }>(`/api/admin/miniapp-clients/${encodeURIComponent(appId)}`, { method: "DELETE" });
+      await this.loadMiniappClients();
     },
     async loadApiChannelPluginStatus(instanceId: string, checkLatest = false) {
       const response = await api<{ plugin: PublicApiChannelPluginStatus }>(

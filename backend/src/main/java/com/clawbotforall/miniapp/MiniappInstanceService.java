@@ -1,7 +1,6 @@
 package com.clawbotforall.miniapp;
 
 import com.clawbotforall.externalapi.ApiChannelPluginService;
-import com.clawbotforall.externalapi.ExternalApiUserRouteMapper;
 import com.clawbotforall.instance.InstanceAggregateMapper;
 import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceProvisioningEntity;
@@ -18,20 +17,17 @@ import org.springframework.stereotype.Service;
 @Service
 public class MiniappInstanceService {
   private final InstanceAggregateMapper instanceMapper;
-  private final ExternalApiUserRouteMapper apiRouteMapper;
   private final MiniappUserBindingMapper bindingMapper;
   private final OpenClawRuntime openClawRuntime;
   private final ApiChannelPluginService apiPluginService;
 
   public MiniappInstanceService(
       InstanceAggregateMapper instanceMapper,
-      ExternalApiUserRouteMapper apiRouteMapper,
       MiniappUserBindingMapper bindingMapper,
       OpenClawRuntime openClawRuntime,
       ApiChannelPluginService apiPluginService
   ) {
     this.instanceMapper = instanceMapper;
-    this.apiRouteMapper = apiRouteMapper;
     this.bindingMapper = bindingMapper;
     this.openClawRuntime = openClawRuntime;
     this.apiPluginService = apiPluginService;
@@ -88,7 +84,6 @@ public class MiniappInstanceService {
 
   private int totalBoundUsers(InstanceEntity instance) {
     return instanceMapper.countWechatAccountsByInstanceId(instance.getId())
-        + apiRouteMapper.countByInstanceId(instance.getId())
         + bindingMapper.countByInstanceId(instance.getId());
   }
 

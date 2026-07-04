@@ -110,7 +110,7 @@ OpenClaw API Channel 已请求启动，但未检测到队列 monitor heartbeat
 3. `miniapp_user_bindings.openviking_user_id` 是否和微信绑定对应的 `wx_<hash>` 一致。
 4. API 日志和 Runner 日志中的 `openVikingUserId` 是否为同一个 `wx_<hash>`。
 5. API Channel handoff 文件中当前 `sessionKey` 对应的 `openVikingUserId` 是否正确。
-6. `external_api_user_routes` 不应出现本次小程序用户的新路由；这张表只用于旧纯 API openid 路由。
+6. `miniapp_user_bindings` 中该 openid 必须指向同一个 `wx_<hash>`；系统不再创建旧纯 API `api_<hash>` 路由。
 
 ## OpenViking 没有生成 task 或记忆文件
 

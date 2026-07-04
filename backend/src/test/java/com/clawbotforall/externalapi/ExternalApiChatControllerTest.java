@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -69,6 +70,7 @@ class ExternalApiChatControllerTest {
                 }
                 """))
         .andExpect(request().asyncStarted())
+        .andExpect(header().exists("X-CM-Request-Id"))
         .andReturn();
 
     String body = mockMvc.perform(asyncDispatch(result))
@@ -121,6 +123,7 @@ class ExternalApiChatControllerTest {
                 }
                 """))
         .andExpect(request().asyncStarted())
+        .andExpect(header().exists("X-CM-Request-Id"))
         .andReturn();
 
     String body = mockMvc.perform(asyncDispatch(result))

@@ -1,7 +1,11 @@
 package com.clawbotforall.wechat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +17,7 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.WechatAccountChannelEntity;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.runtime.InstancePaths;
+import com.clawbotforall.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -114,6 +119,82 @@ class WechatAccountSyncServiceTest {
 
     verify(mutationMapper).deleteWechatAccount("inst_1", "wx_1");
     verify(bindLinkMapper).deleteByPhoneOrAccountId("13572873189", "wx_1");
+  }
+
+  @Test
+  void updatesPhoneAndRemarkForWechatAccount() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    WechatPairedAccountEntity existing = new WechatPairedAccountEntity();
+    existing.setAccountId("wx_1");
+    existing.setPhone("");
+    existing.setInstanceId("inst_1");
+    when(aggregateMapper.findWechatAccountByAccountId("wx_1")).thenReturn(existing);
+    when(aggregateMapper.findWechatAccountByPhone("13572873189")).thenReturn(null);
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(existing), List.of(existing));
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir,
+        tempDir.resolve("home"),
+        tempDir.resolve("workspace"),
+        tempDir.resolve("logs")
+    ));
+
+    service.updateProfile(instance, "wx_1", "135 7287 3189", " 新备注 ");
+
+    verify(mutationMapper).updateWechatAccountProfile(
+        eq("inst_1"),
+        eq("wx_1"),
+        eq("13572873189"),
+        eq("新备注"),
+        anyString()
+    );
+  }
+
+  @Test
+  void clearsPhoneWhenUpdatingWechatAccountProfile() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    WechatPairedAccountEntity existing = new WechatPairedAccountEntity();
+    existing.setAccountId("wx_1");
+    existing.setPhone("13572873189");
+    existing.setInstanceId("inst_1");
+    when(aggregateMapper.findWechatAccountByAccountId("wx_1")).thenReturn(existing);
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(existing), List.of(existing));
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir,
+        tempDir.resolve("home"),
+        tempDir.resolve("workspace"),
+        tempDir.resolve("logs")
+    ));
+
+    service.updateProfile(instance, "wx_1", "", "备注");
+
+    verify(mutationMapper).updateWechatAccountProfile(
+        eq("inst_1"),
+        eq("wx_1"),
+        isNull(),
+        eq("备注"),
+        anyString()
+    );
+  }
+
+  @Test
+  void rejectsDuplicatePhoneWhenUpdatingWechatAccountProfile() {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    WechatPairedAccountEntity existing = new WechatPairedAccountEntity();
+    existing.setAccountId("wx_1");
+    existing.setInstanceId("inst_1");
+    WechatPairedAccountEntity duplicate = new WechatPairedAccountEntity();
+    duplicate.setAccountId("wx_2");
+    duplicate.setPhone("13572873189");
+    duplicate.setInstanceId("inst_2");
+    when(aggregateMapper.findWechatAccountByAccountId("wx_1")).thenReturn(existing);
+    when(aggregateMapper.findWechatAccountByPhone("13572873189")).thenReturn(duplicate);
+
+    assertThatThrownBy(() -> service.updateProfile(instance, "wx_1", "13572873189", "备注"))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("该手机号已绑定到其他微信用户。");
   }
 
   @Test

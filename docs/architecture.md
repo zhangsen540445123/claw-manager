@@ -43,6 +43,6 @@ STOMP CONNECT、SUBSCRIBE、SEND 都需要已登录管理员主体。前端断�
 
 ## 数据事实源
 
-MySQL 是业务状态事实源。小程序接入相关的 `miniapp_clients`、`miniapp_user_bindings`、`miniapp_user_keys` 记录了调用方、`openid -> instance_id -> wx_<hash>` 绑定和用户聊天 key；旧纯 API openid 路由仍在 `external_api_user_routes` 中。
+MySQL 是业务状态事实源。小程序接入相关的 `miniapp_clients`、`miniapp_user_bindings`、`miniapp_user_keys` 记录了调用方、`openid -> instance_id -> wx_<hash>` 绑定和用户聊天 key；旧全局 API key 和旧纯 API openid 路由表已经移除。
 
 Runner 容器内的 OpenClaw 数据、微信账号状态和 workspace 文件保存在挂载目录 `./data` 下；OpenViking 记忆保存在外部 OpenViking Server。API/微信共享记忆时，MySQL 中保存的 `wx_<hash>` 是跨通道身份事实源，插件只消费后端传入的显式身份或 handoff。

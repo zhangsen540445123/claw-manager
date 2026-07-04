@@ -21,6 +21,24 @@
     LIMIT 1
   </select>
 
+  <select id="listWechatSummariesByInstanceIds" resultType="com.clawbotforall.miniapp.MiniappWechatBindingSummary">
+    SELECT
+      b.instance_id AS instanceId,
+      b.wechat_user_id AS wechatUserId,
+      b.openviking_user_id AS openVikingUserId,
+      b.openid AS openid,
+      b.bind_status AS bindStatus,
+      k.key_preview AS keyPreview,
+      COALESCE(k.enabled, 0) AS keyEnabled,
+      k.last_used_at AS lastUsedAt
+    FROM miniapp_user_bindings b
+    LEFT JOIN miniapp_user_keys k ON k.openid_hash = b.openid_hash
+    WHERE b.instance_id IN
+    <foreach collection="instanceIds" item="instanceId" open="(" separator="," close=")">
+      #{instanceId}
+    </foreach>
+  </select>
+
   <select id="countByInstanceId" resultType="int">
     SELECT COUNT(*)
     FROM miniapp_user_bindings

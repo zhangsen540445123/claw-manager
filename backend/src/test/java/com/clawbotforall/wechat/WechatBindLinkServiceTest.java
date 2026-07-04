@@ -125,7 +125,6 @@ class WechatBindLinkServiceTest {
 
     PublicWechatBindLink link = service.createMiniappLink(
         "openid_hash_1",
-        "miniapp_openid_hash_1",
         "inst_1",
         "",
         "https://miniapp.example.test"
@@ -135,7 +134,7 @@ class WechatBindLinkServiceTest {
     verify(linkMapper).insert(captor.capture());
     WechatBindLinkEntity stored = captor.getValue();
     assertThat(stored.getMode()).isEqualTo("new");
-    assertThat(stored.getPhone()).isEqualTo("miniapp_openid_hash_1");
+    assertThat(stored.getPhone()).isNull();
     assertThat(stored.getInstanceId()).isEqualTo("inst_1");
     assertThat(stored.getMiniappOpenidHash()).isEqualTo("openid_hash_1");
     assertThat(stored.getCreatedByAdminId()).isNull();
@@ -544,8 +543,41 @@ class WechatBindLinkServiceTest {
     verify(mutationMapper).insertWechatAccount(accountCaptor.capture());
     assertThat(accountCaptor.getValue().getAccountId()).isEqualTo("554603a4df61-im-bot");
     assertThat(accountCaptor.getValue().getWechatUserId()).isEqualTo("wechat-new-user");
+    assertThat(accountCaptor.getValue().getPhone()).isEqualTo("13900000001");
     verify(accountSyncService, never()).readRawAccounts(any(), any());
     verify(gatewayRpcService).restartWechatChannel(instance, List.of("554603a4df61-im-bot"));
+  }
+
+  @Test
+  void miniappNewUserBindingStoresWechatAccountWithoutPhone() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = newLink("token_miniapp_no_phone");
+    stored.setStatus("waiting_scan");
+    stored.setPhone(null);
+    stored.setMiniappOpenidHash("openid_hash_1");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("cmwx_miniapp_no_phone");
+    stored.setStartedAt("2026-06-20T12:45:16Z");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_miniapp_no_phone")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByWechatUserId("wechat-miniapp-user")).thenReturn(null);
+    when(aggregateMapper.findWechatAccountByAccountId("554603a4df61-im-bot")).thenReturn(null);
+
+    service.completeBindAfterLogin(
+        "token_miniapp_no_phone",
+        completion("cmwx_miniapp_no_phone", "554603a4df61-im-bot", "wechat-miniapp-user"),
+        "https://admin.example.test"
+    );
+
+    ArgumentCaptor<WechatPairedAccountEntity> accountCaptor = ArgumentCaptor.forClass(WechatPairedAccountEntity.class);
+    verify(mutationMapper).insertWechatAccount(accountCaptor.capture());
+    assertThat(accountCaptor.getValue().getPhone()).isNull();
+    assertThat(saved.get().getStatus()).isEqualTo("connected");
   }
 
   @Test

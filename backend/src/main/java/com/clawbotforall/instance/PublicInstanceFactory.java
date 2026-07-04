@@ -1,6 +1,7 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.miniapp.MiniappWechatBindingSummary;
 import com.clawbotforall.openviking.OpenVikingIdentityService;
 import com.clawbotforall.openviking.OpenVikingSettingsService;
 import com.clawbotforall.web.RequestOrigins;
@@ -46,6 +47,7 @@ public class PublicInstanceFactory {
       InstanceModelAuthEntity modelAuth,
       List<WechatPairedAccountEntity> pairedAccounts,
       List<WechatAccountChannelEntity> accountChannels,
+      List<MiniappWechatBindingSummary> miniappBindings,
       HttpServletRequest request
   ) {
     List<PublicInstanceModel> publicModels = models.stream()
@@ -67,7 +69,7 @@ public class PublicInstanceFactory {
         publicModels,
         publicModelAuth(modelAuth),
         plugins(instance),
-        publicWechatBinding(pairedAccounts, accountChannels)
+        publicWechatBinding(pairedAccounts, accountChannels, miniappBindings)
     );
   }
 
@@ -130,11 +132,28 @@ public class PublicInstanceFactory {
 
   private PublicWechatBinding publicWechatBinding(
       List<WechatPairedAccountEntity> pairedAccounts,
-      List<WechatAccountChannelEntity> accountChannels
+      List<WechatAccountChannelEntity> accountChannels,
+      List<MiniappWechatBindingSummary> miniappBindings
   ) {
     Map<String, WechatAccountChannelEntity> channelByAccountId = accountChannels.stream()
         .collect(java.util.stream.Collectors.toMap(
             WechatAccountChannelEntity::getAccountId,
+            item -> item,
+            (left, right) -> left,
+            LinkedHashMap::new
+        ));
+    Map<String, MiniappWechatBindingSummary> miniappByWechatUserId = miniappBindings.stream()
+        .filter(item -> !defaultString(item.wechatUserId()).isBlank())
+        .collect(java.util.stream.Collectors.toMap(
+            MiniappWechatBindingSummary::wechatUserId,
+            item -> item,
+            (left, right) -> left,
+            LinkedHashMap::new
+        ));
+    Map<String, MiniappWechatBindingSummary> miniappByOpenVikingUserId = miniappBindings.stream()
+        .filter(item -> !defaultString(item.openVikingUserId()).isBlank())
+        .collect(java.util.stream.Collectors.toMap(
+            MiniappWechatBindingSummary::openVikingUserId,
             item -> item,
             (left, right) -> left,
             LinkedHashMap::new
@@ -145,11 +164,16 @@ public class PublicInstanceFactory {
     List<PublicWechatPairedAccount> accounts = pairedAccounts.stream()
         .map(account -> {
           WechatAccountChannelEntity channel = channelByAccountId.get(account.getAccountId());
+          String openVikingUserId = openVikingUserId(account.getWechatUserId(), identitySalt);
+          MiniappWechatBindingSummary miniapp = miniappByWechatUserId.get(account.getWechatUserId());
+          if (miniapp == null) {
+            miniapp = miniappByOpenVikingUserId.get(openVikingUserId);
+          }
           return new PublicWechatPairedAccount(
               defaultString(account.getAccountId()),
               defaultString(account.getPhone()),
               defaultString(account.getWechatUserId()),
-              openVikingUserId(account.getWechatUserId(), identitySalt),
+              openVikingUserId,
               defaultString(account.getRemark()),
               defaultString(account.getBaseUrl()),
               account.getSavedAt(),
@@ -159,7 +183,12 @@ public class PublicInstanceFactory {
               channel == null ? "" : defaultString(channel.getMessage()),
               channel == null ? null : channel.getUpdatedAt(),
               channel == null ? null : channel.getLastStartedAt(),
-              channel == null ? null : channel.getLastErrorAt()
+              channel == null ? null : channel.getLastErrorAt(),
+              miniapp == null ? "" : defaultString(miniapp.openid()),
+              miniapp == null ? "" : defaultString(miniapp.bindStatus()),
+              miniapp == null ? "" : defaultString(miniapp.keyPreview()),
+              miniapp != null && miniapp.keyEnabled(),
+              miniapp == null ? null : miniapp.lastUsedAt()
           );
         })
         .toList();

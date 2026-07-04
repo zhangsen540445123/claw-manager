@@ -165,7 +165,6 @@ public class WechatBindLinkService {
   @Transactional
   public PublicWechatBindLink createMiniappLink(
       String miniappOpenidHash,
-      String syntheticPhone,
       String instanceId,
       String targetAccountId,
       String origin
@@ -173,10 +172,6 @@ public class WechatBindLinkService {
     String normalizedHash = defaultString(miniappOpenidHash).trim();
     if (normalizedHash.isBlank()) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "小程序 openid hash 不能为空。");
-    }
-    String phone = defaultString(syntheticPhone).trim();
-    if (phone.isBlank()) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, "小程序内部绑定标识不能为空。");
     }
     InstanceEntity instance = requireBindableInstance(
         instanceId,
@@ -186,7 +181,7 @@ public class WechatBindLinkService {
     WechatBindLinkEntity link = new WechatBindLinkEntity();
     link.setToken(randomToken());
     link.setMode(hasText(targetAccountId) ? "existing" : "new");
-    link.setPhone(phone);
+    link.setPhone(null);
     link.setInstanceId(instance.getId());
     link.setTargetAccountId(hasText(targetAccountId) ? targetAccountId : targetAccountIdFromToken(link.getToken()));
     link.setMiniappOpenidHash(normalizedHash);

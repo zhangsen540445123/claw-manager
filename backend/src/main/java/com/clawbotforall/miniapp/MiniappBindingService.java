@@ -92,7 +92,6 @@ public class MiniappBindingService {
     }
     PublicWechatBindLink link = wechatBindLinkService.createMiniappLink(
         identity.openidHash(),
-        syntheticPhone(identity.openidHash()),
         binding.getInstanceId(),
         targetAccountId,
         origin
@@ -134,11 +133,6 @@ public class MiniappBindingService {
 
   private ExternalApiIdentity resolveOpenid(String openid) {
     return identityService.resolve(openid, openVikingSettingsService.effectiveSettings().identityHashSecret());
-  }
-
-  private static String syntheticPhone(String openidHash) {
-    String hash = trim(openidHash);
-    return "miniapp_" + hash.substring(0, Math.min(24, hash.length()));
   }
 
   private static boolean blank(String value) {

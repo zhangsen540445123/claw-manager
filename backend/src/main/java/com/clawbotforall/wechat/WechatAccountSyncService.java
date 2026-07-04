@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
@@ -33,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class WechatAccountSyncService {
 
   private static final Logger log = LoggerFactory.getLogger(WechatAccountSyncService.class);
+  private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
 
   private final InstanceAggregateMapper aggregateMapper;
   private final InstanceMutationMapper mutationMapper;
@@ -65,8 +67,10 @@ public class WechatAccountSyncService {
     List<WechatPairedAccountEntity> existing = aggregateMapper.listWechatAccountsByInstanceIds(List.of(instance.getId()));
     Map<String, WechatPairedAccountEntity> existingByAccountId = existing.stream()
         .collect(Collectors.toMap(WechatPairedAccountEntity::getAccountId, item -> item, (left, right) -> left, LinkedHashMap::new));
-    Map<String, String> remarks = existing.stream()
-        .collect(Collectors.toMap(WechatPairedAccountEntity::getAccountId, WechatPairedAccountEntity::getRemark, (left, right) -> left));
+    Map<String, String> remarks = new LinkedHashMap<>();
+    for (WechatPairedAccountEntity account : existing) {
+      remarks.putIfAbsent(account.getAccountId(), account.getRemark());
+    }
 
     List<WechatPairedAccountEntity> rawAccounts = readRawAccounts(instance, remarks);
     String now = Instant.now().toString();
@@ -135,6 +139,34 @@ public class WechatAccountSyncService {
       throw new ApiException(HttpStatus.NOT_FOUND, "微信绑定账号不存在。");
     }
     mutationMapper.updateWechatAccountRemark(instance.getId(), accountId, remark, Instant.now().toString());
+    return syncInstanceAccounts(instance);
+  }
+
+  @Transactional
+  public List<WechatPairedAccountEntity> updateProfile(
+      InstanceEntity instance,
+      String accountId,
+      String phone,
+      String remark
+  ) {
+    WechatPairedAccountEntity account = aggregateMapper.findWechatAccountByAccountId(accountId);
+    if (account == null || !instance.getId().equals(account.getInstanceId())) {
+      throw new ApiException(HttpStatus.NOT_FOUND, "微信绑定账号不存在。");
+    }
+    String normalizedPhone = normalizeOptionalPhone(phone);
+    if (normalizedPhone != null) {
+      WechatPairedAccountEntity duplicate = aggregateMapper.findWechatAccountByPhone(normalizedPhone);
+      if (duplicate != null && !defaultString(duplicate.getAccountId()).equals(accountId)) {
+        throw new ApiException(HttpStatus.CONFLICT, "该手机号已绑定到其他微信用户。");
+      }
+    }
+    mutationMapper.updateWechatAccountProfile(
+        instance.getId(),
+        accountId,
+        normalizedPhone,
+        sanitizeRemark(remark),
+        Instant.now().toString()
+    );
     return syncInstanceAccounts(instance);
   }
 
@@ -311,5 +343,21 @@ public class WechatAccountSyncService {
 
   private static String defaultString(String value) {
     return value == null ? "" : value;
+  }
+
+  private static String normalizeOptionalPhone(String phone) {
+    String normalized = defaultString(phone).replaceAll("\\s+", "");
+    if (normalized.isBlank()) {
+      return null;
+    }
+    if (!PHONE_PATTERN.matcher(normalized).matches()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "手机号格式无效。");
+    }
+    return normalized;
+  }
+
+  private static String sanitizeRemark(String remark) {
+    String normalized = defaultString(remark).trim().replaceAll("\\s+", " ");
+    return normalized.substring(0, Math.min(60, normalized.length()));
   }
 }

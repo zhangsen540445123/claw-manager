@@ -15,4 +15,34 @@
     WHERE app_id = #{appId}
     LIMIT 1
   </select>
+
+  <select id="list" resultMap="MiniappClientMap">
+    SELECT *
+    FROM miniapp_clients
+    ORDER BY created_at DESC, app_id ASC
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.miniapp.MiniappClientEntity">
+    INSERT INTO miniapp_clients (app_id, app_secret, enabled, created_at, updated_at)
+    VALUES (#{appId}, #{appSecret}, #{enabled}, #{createdAt}, #{updatedAt})
+  </insert>
+
+  <update id="updateEnabled">
+    UPDATE miniapp_clients
+    SET enabled = #{enabled},
+        updated_at = #{updatedAt}
+    WHERE app_id = #{appId}
+  </update>
+
+  <update id="updateSecret">
+    UPDATE miniapp_clients
+    SET app_secret = #{appSecret},
+        updated_at = #{updatedAt}
+    WHERE app_id = #{appId}
+  </update>
+
+  <delete id="deleteByAppId">
+    DELETE FROM miniapp_clients
+    WHERE app_id = #{appId}
+  </delete>
 </mapper>

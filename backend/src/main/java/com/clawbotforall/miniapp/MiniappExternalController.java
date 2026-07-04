@@ -1,10 +1,14 @@
 package com.clawbotforall.miniapp;
 
 import com.clawbotforall.web.ApiException;
+import com.clawbotforall.web.ExternalRequestIds;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class MiniappExternalController {
+  private static final Logger log = LoggerFactory.getLogger(MiniappExternalController.class);
+
   private final MiniappHmacAuthService authService;
   private final MiniappBindingService bindingService;
   private final MiniappUserAccessService userAccessService;
@@ -39,12 +45,38 @@ public class MiniappExternalController {
       @RequestHeader(value = "X-CM-Timestamp", required = false) String timestamp,
       @RequestHeader(value = "X-CM-Nonce", required = false) String nonce,
       @RequestHeader(value = "X-CM-Signature", required = false) String signature,
-      HttpServletRequest request
+      HttpServletRequest request,
+      HttpServletResponse response
   ) {
+    long startedAt = System.nanoTime();
+    String cmRequestId = prepareRequestId(response);
     String raw = body == null ? "" : body;
-    authService.requireAuthorized(request.getMethod(), pathWithQuery(request), raw, new MiniappHmacHeaders(appId, timestamp, nonce, signature));
-    CreateBindLinkRequest payload = read(raw, CreateBindLinkRequest.class);
-    return Map.of("binding", publicBinding(bindingService.createWechatBindLink(payload.openid(), origin(request))));
+    try {
+      authService.requireAuthorized(request.getMethod(), pathWithQuery(request), raw, new MiniappHmacHeaders(appId, timestamp, nonce, signature));
+      CreateBindLinkRequest payload = read(raw, CreateBindLinkRequest.class);
+      MiniappBindLinkResult result = bindingService.createWechatBindLink(payload.openid(), origin(request));
+      log.info(
+          "miniapp.bindLink.create success cmRequestId={} appId={} openidPreview={} bindToken={} status={} instanceId={} openVikingUserId={} elapsedMs={}",
+          cmRequestId,
+          safe(appId),
+          preview(payload.openid()),
+          safe(result.bindToken()),
+          safe(result.status()),
+          safe(result.instanceId()),
+          safe(result.openVikingUserId()),
+          elapsedMs(startedAt)
+      );
+      return Map.of("binding", publicBinding(result));
+    } catch (RuntimeException error) {
+      log.warn(
+          "miniapp.bindLink.create failed cmRequestId={} appId={} elapsedMs={} error={}",
+          cmRequestId,
+          safe(appId),
+          elapsedMs(startedAt),
+          errorMessage(error)
+      );
+      throw error;
+    }
   }
 
   @GetMapping("/api/external/miniapp/wechat-bind-links/{token}")
@@ -54,10 +86,36 @@ public class MiniappExternalController {
       @RequestHeader(value = "X-CM-Timestamp", required = false) String timestamp,
       @RequestHeader(value = "X-CM-Nonce", required = false) String nonce,
       @RequestHeader(value = "X-CM-Signature", required = false) String signature,
-      HttpServletRequest request
+      HttpServletRequest request,
+      HttpServletResponse response
   ) {
-    authService.requireAuthorized(request.getMethod(), pathWithQuery(request), "", new MiniappHmacHeaders(appId, timestamp, nonce, signature));
-    return Map.of("binding", publicBinding(bindingService.getBindLink(token, origin(request))));
+    long startedAt = System.nanoTime();
+    String cmRequestId = prepareRequestId(response);
+    try {
+      authService.requireAuthorized(request.getMethod(), pathWithQuery(request), "", new MiniappHmacHeaders(appId, timestamp, nonce, signature));
+      MiniappBindLinkResult result = bindingService.getBindLink(token, origin(request));
+      log.info(
+          "miniapp.bindLink.get success cmRequestId={} appId={} bindToken={} status={} instanceId={} openVikingUserId={} elapsedMs={}",
+          cmRequestId,
+          safe(appId),
+          safe(result.bindToken()),
+          safe(result.status()),
+          safe(result.instanceId()),
+          safe(result.openVikingUserId()),
+          elapsedMs(startedAt)
+      );
+      return Map.of("binding", publicBinding(result));
+    } catch (RuntimeException error) {
+      log.warn(
+          "miniapp.bindLink.get failed cmRequestId={} appId={} bindToken={} elapsedMs={} error={}",
+          cmRequestId,
+          safe(appId),
+          safe(token),
+          elapsedMs(startedAt),
+          errorMessage(error)
+      );
+      throw error;
+    }
   }
 
   @PostMapping("/api/external/miniapp/user-keys")
@@ -67,12 +125,38 @@ public class MiniappExternalController {
       @RequestHeader(value = "X-CM-Timestamp", required = false) String timestamp,
       @RequestHeader(value = "X-CM-Nonce", required = false) String nonce,
       @RequestHeader(value = "X-CM-Signature", required = false) String signature,
-      HttpServletRequest request
+      HttpServletRequest request,
+      HttpServletResponse response
   ) {
+    long startedAt = System.nanoTime();
+    String cmRequestId = prepareRequestId(response);
     String raw = body == null ? "" : body;
-    authService.requireAuthorized(request.getMethod(), pathWithQuery(request), raw, new MiniappHmacHeaders(appId, timestamp, nonce, signature));
-    UserKeyRequest payload = read(raw, UserKeyRequest.class);
-    return Map.of("userKey", publicUserKey(userAccessService.createOrGetUserKey(payload.openid(), payload.reset())));
+    try {
+      authService.requireAuthorized(request.getMethod(), pathWithQuery(request), raw, new MiniappHmacHeaders(appId, timestamp, nonce, signature));
+      UserKeyRequest payload = read(raw, UserKeyRequest.class);
+      MiniappUserKeyResult result = userAccessService.createOrGetUserKey(payload.openid(), payload.reset());
+      log.info(
+          "miniapp.userKey.create success cmRequestId={} appId={} openidPreview={} keyPreview={} created={} instanceId={} openVikingUserId={} elapsedMs={}",
+          cmRequestId,
+          safe(appId),
+          preview(payload.openid()),
+          safe(result.keyPreview()),
+          result.created(),
+          safe(result.instanceId()),
+          safe(result.openVikingUserId()),
+          elapsedMs(startedAt)
+      );
+      return Map.of("userKey", publicUserKey(result));
+    } catch (RuntimeException error) {
+      log.warn(
+          "miniapp.userKey.create failed cmRequestId={} appId={} elapsedMs={} error={}",
+          cmRequestId,
+          safe(appId),
+          elapsedMs(startedAt),
+          errorMessage(error)
+      );
+      throw error;
+    }
   }
 
   private <T> T read(String body, Class<T> type) {
@@ -125,6 +209,34 @@ public class MiniappExternalController {
 
   private static String defaultString(String value) {
     return value == null ? "" : value;
+  }
+
+  private static String prepareRequestId(HttpServletResponse response) {
+    String cmRequestId = ExternalRequestIds.create();
+    response.setHeader(ExternalRequestIds.HEADER, cmRequestId);
+    return cmRequestId;
+  }
+
+  private static long elapsedMs(long startedAt) {
+    return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000L);
+  }
+
+  private static String preview(String value) {
+    String normalized = defaultString(value).trim();
+    if (normalized.length() <= 10) {
+      return normalized;
+    }
+    return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
+  }
+
+  private static String safe(String value) {
+    String normalized = defaultString(value).trim();
+    return normalized.isBlank() ? "-" : normalized;
+  }
+
+  private static String errorMessage(Throwable error) {
+    String message = error.getMessage();
+    return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
   public record CreateBindLinkRequest(String openid) {}

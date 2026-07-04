@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS instance_model_auth (
 
 CREATE TABLE IF NOT EXISTS wechat_paired_accounts (
   account_id VARCHAR(255) PRIMARY KEY,
-  phone VARCHAR(32) NOT NULL UNIQUE,
+  phone VARCHAR(32) NULL UNIQUE,
   instance_id VARCHAR(64) NOT NULL,
   wechat_user_id VARCHAR(255) NOT NULL UNIQUE,
   remark VARCHAR(100) NULL,
@@ -234,32 +234,3 @@ CREATE TABLE IF NOT EXISTS openviking_user_keys (
   PRIMARY KEY (account_id, openviking_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS external_api_settings (
-  id VARCHAR(64) PRIMARY KEY,
-  api_key TEXT NULL,
-  enabled TINYINT(1) NOT NULL DEFAULT 0,
-  created_at VARCHAR(40) NOT NULL,
-  updated_at VARCHAR(40) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS external_api_route_allocation_locks (
-  id VARCHAR(64) PRIMARY KEY,
-  updated_at VARCHAR(40) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-INSERT IGNORE INTO external_api_route_allocation_locks (id, updated_at)
-VALUES ('global', '1970-01-01T00:00:00Z');
-
-CREATE TABLE IF NOT EXISTS external_api_user_routes (
-  openid_hash VARCHAR(64) PRIMARY KEY,
-  openid VARCHAR(255) NOT NULL,
-  openviking_user_id VARCHAR(128) NOT NULL,
-  instance_id VARCHAR(64) NOT NULL,
-  created_at VARCHAR(40) NOT NULL,
-  updated_at VARCHAR(40) NOT NULL,
-  last_used_at VARCHAR(40) NOT NULL,
-  INDEX idx_external_api_user_routes_openid (openid),
-  INDEX idx_external_api_user_routes_openviking_user_id (openviking_user_id),
-  INDEX idx_external_api_user_routes_instance_id (instance_id),
-  CONSTRAINT fk_external_api_user_routes_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

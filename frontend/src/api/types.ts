@@ -107,6 +107,11 @@ export interface PublicWechatPairedAccount {
   channelUpdatedAt?: string | null;
   lastStartedAt?: string | null;
   lastErrorAt?: string | null;
+  miniappOpenid: string;
+  miniappBindStatus: string;
+  miniappKeyPreview: string;
+  miniappKeyEnabled: boolean;
+  miniappLastUsedAt?: string | null;
 }
 
 export interface PublicWechatBinding {
@@ -190,29 +195,14 @@ export type PublicApiChannelPluginStatus = PublicWechatPluginStatus;
 
 export type PublicApiChannelPluginVersions = PublicWechatPluginVersions;
 
-export interface PublicExternalApiSettings {
+export interface PublicMiniappClient {
+  appId: string;
+  appSecret?: string | null;
+  appSecretPreview: string;
   enabled: boolean;
-  apiKey: string;
-  apiKeyConfigured: boolean;
-  apiKeyPreview: string;
-  updatedAt: string;
-}
-
-export interface PublicExternalApiUserRoute {
-  openid: string;
-  openidHash: string;
-  openvikingUserId: string;
-  instanceId: string;
   createdAt: string;
   updatedAt: string;
-  lastUsedAt: string;
-}
-
-export interface ExternalApiUserRoutePage {
-  routes: PublicExternalApiUserRoute[];
-  total: number;
-  page: number;
-  pageSize: number;
+  created: boolean;
 }
 
 export interface PublicOpenVikingSettings {

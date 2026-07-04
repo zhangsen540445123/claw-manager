@@ -17,5 +17,10 @@ public record PublicWechatPairedAccount(
     String channelMessage,
     String channelUpdatedAt,
     String lastStartedAt,
-    String lastErrorAt
+    String lastErrorAt,
+    String miniappOpenid,
+    String miniappBindStatus,
+    String miniappKeyPreview,
+    boolean miniappKeyEnabled,
+    String miniappLastUsedAt
 ) {}

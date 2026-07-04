@@ -23,7 +23,7 @@
 - 至少一个 OpenClaw 实例处于 `running`，且 `instance_provisioning.status=ready`。
 - 目标实例已安装并加载 API Channel、微信插件和 OpenViking 插件。
 - 后台“OpenViking预设”已配置 base URL、accountId、身份盐值和 Root API Key。
-- `miniapp_clients` 中已创建小程序后端调用方，包含 `app_id` 和 `app_secret`。
+- 后台“小程序接入”中已创建小程序后端调用方，包含 AK(`app_id`) 和 SK(`app_secret`)。
 - 小程序后端能够保存 `cm_user_...` key，并在后续请求中使用它作为用户聊天凭据。
 
 ## 鉴权模型
@@ -38,6 +38,12 @@
 | `X-CM-Timestamp` | 当前毫秒时间戳，允许 5 分钟时钟偏移 |
 | `X-CM-Nonce` | 每次请求唯一随机值，5 分钟内不可重复 |
 | `X-CM-Signature` | HMAC-SHA256 十六进制签名 |
+
+所有外部接口响应都会带：
+
+| Header | 说明 |
+| --- | --- |
+| `X-CM-Request-Id` | Claw Manager 为本次外部调用生成的联调 ID。排查问题时把它提供给 Claw Manager 运维，可在 API 日志中定位同一次请求。 |
 
 ### 签名串
 
@@ -54,23 +60,441 @@ SHA256(rawBody)
 - `rawBody` 必须是实际发送的原始 body 字符串，GET 请求使用空字符串。
 - HMAC secret 使用 `miniapp_clients.app_secret`。
 
-Node.js 示例：
+Java 示例：
 
-```js
-import crypto from "node:crypto";
+```java
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
-function sign({ secret, method, pathWithQuery, timestamp, nonce, rawBody }) {
-  const bodyHash = crypto.createHash("sha256").update(rawBody || "", "utf8").digest("hex");
-  const canonical = [
-    method.toUpperCase(),
-    pathWithQuery,
-    timestamp,
-    nonce,
-    bodyHash,
-  ].join("\n");
-  return crypto.createHmac("sha256", secret).update(canonical, "utf8").digest("hex");
+static String sha256Hex(String text) throws Exception {
+  MessageDigest digest = MessageDigest.getInstance("SHA-256");
+  return HexFormat.of().formatHex(digest.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8)));
+}
+
+static String sign(String secret, String method, String pathWithQuery, String timestamp, String nonce, String rawBody) throws Exception {
+  String canonical = String.join("\n",
+      method.toUpperCase(),
+      pathWithQuery,
+      timestamp,
+      nonce,
+      sha256Hex(rawBody));
+  Mac mac = Mac.getInstance("HmacSHA256");
+  mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+  return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
 }
 ```
+
+## 完整接入 Demo
+
+下面示例使用 Java 21 + Spring Boot 3 + fastjson2 编写“小程序后端”接入层。小程序前端只负责触发按钮、展示二维码和发起业务请求；AK/SK、HMAC 签名、`cm_user_...` key 的保存和聊天转发都应放在小程序后端。
+
+### 第 1 步：后台创建小程序 AK/SK
+
+1. 管理员登录 Claw Manager 后台。
+2. 进入“小程序接入”。
+3. 点击“新增 AK”，填写一个稳定的 AK，例如 `miniapp_main`。
+4. 创建后后台只会展示一次完整 SK，请保存到小程序后端密钥配置中。
+5. 后续列表只展示 SK preview；如果 SK 泄露，使用“重置 SK”，并同步更新小程序后端配置。
+
+### 第 2 步：准备 Spring Boot 配置
+
+`pom.xml` 使用 Java 21，JSON 使用 fastjson2，SSE 客户端使用 `WebClient`：
+
+```xml
+<properties>
+  <java.version>21</java.version>
+</properties>
+
+<dependencies>
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>com.alibaba.fastjson2</groupId>
+    <artifactId>fastjson2</artifactId>
+    <version>2.0.53</version>
+  </dependency>
+</dependencies>
+```
+
+`application.yml`：
+
+```yaml
+cm:
+  openclaw:
+    base-url: http://127.0.0.1:8080
+    app-id: miniapp_main
+    app-secret: ${CM_APP_SECRET}
+```
+
+启动类启用配置绑定：
+
+```java
+package com.example.miniapp;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+
+@SpringBootApplication
+@ConfigurationPropertiesScan
+public class MiniappBackendApplication {
+  public static void main(String[] args) {
+    SpringApplication.run(MiniappBackendApplication.class, args);
+  }
+}
+```
+
+配置对象：
+
+```java
+package com.example.miniapp;
+
+import java.net.URI;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "cm.openclaw")
+public record ClawManagerProperties(
+    URI baseUrl,
+    String appId,
+    String appSecret
+) {}
+```
+
+### 第 3 步：实现 HMAC 签名器
+
+```java
+package com.example.miniapp;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ClawManagerHmacSigner {
+
+  public String sign(String secret, String method, String pathWithQuery, String timestamp, String nonce, String rawBody) {
+    try {
+      String canonical = String.join("\n",
+          method.toUpperCase(),
+          pathWithQuery,
+          timestamp,
+          nonce,
+          sha256Hex(rawBody));
+      Mac mac = Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+      return HexFormat.of().formatHex(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+    } catch (Exception error) {
+      throw new IllegalStateException("Failed to sign Claw Manager request.", error);
+    }
+  }
+
+  private String sha256Hex(String text) throws Exception {
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    return HexFormat.of().formatHex(digest.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8)));
+  }
+}
+```
+
+### 第 4 步：封装 Claw Manager Client
+
+```java
+package com.example.miniapp;
+
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
+import java.time.Duration;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+@Service
+public class ClawManagerMiniappClient {
+  private static final String REQUEST_ID_HEADER = "X-CM-Request-Id";
+  private static final ParameterizedTypeReference<ServerSentEvent<String>> STRING_SSE =
+      new ParameterizedTypeReference<>() {};
+
+  private final ClawManagerProperties properties;
+  private final ClawManagerHmacSigner signer;
+  private final WebClient webClient;
+
+  public ClawManagerMiniappClient(
+      ClawManagerProperties properties,
+      ClawManagerHmacSigner signer,
+      WebClient.Builder webClientBuilder
+  ) {
+    this.properties = properties;
+    this.signer = signer;
+    this.webClient = webClientBuilder.baseUrl(properties.baseUrl().toString()).build();
+  }
+
+  private CmResponse<JSONObject> cmFetch(String method, String pathWithQuery, Object bodyObject) {
+    String rawBody = bodyObject == null ? "" : JSON.toJSONString(bodyObject);
+    String timestamp = String.valueOf(System.currentTimeMillis());
+    String nonce = UUID.randomUUID().toString();
+    String signature = signer.sign(properties.appSecret(), method, pathWithQuery, timestamp, nonce, rawBody);
+
+    WebClient.RequestBodySpec spec = webClient.method(HttpMethod.valueOf(method))
+        .uri(pathWithQuery)
+        .accept(MediaType.APPLICATION_JSON)
+        .header("X-CM-App-Id", properties.appId())
+        .header("X-CM-Timestamp", timestamp)
+        .header("X-CM-Nonce", nonce)
+        .header("X-CM-Signature", signature);
+
+    WebClient.RequestHeadersSpec<?> request = "GET".equalsIgnoreCase(method)
+        ? spec
+        : spec.contentType(MediaType.APPLICATION_JSON).bodyValue(rawBody);
+
+    return request.exchangeToMono(response -> {
+      String cmRequestId = response.headers().asHttpHeaders().getFirst(REQUEST_ID_HEADER);
+      if (response.statusCode().isError()) {
+        return response.bodyToMono(String.class)
+            .defaultIfEmpty("")
+            .flatMap(body -> Mono.<CmResponse<JSONObject>>error(new IllegalStateException(
+                "CM request failed status=" + response.statusCode().value()
+                    + " cmRequestId=" + cmRequestId
+                    + " body=" + body)));
+      }
+      return response.bodyToMono(String.class)
+          .defaultIfEmpty("{}")
+          .map(body -> new CmResponse<>(JSON.parseObject(body), cmRequestId == null ? "" : cmRequestId));
+    }).block(Duration.ofMinutes(2));
+  }
+  public Binding createBindLink(String openid) {
+    CmResponse<JSONObject> response = cmFetch("POST", "/api/external/miniapp/wechat-bind-links", Map.of("openid", openid));
+    return response.body().getObject("binding", Binding.class);
+  }
+
+  public Binding getBindLink(String bindToken) {
+    CmResponse<JSONObject> response = cmFetch("GET", "/api/external/miniapp/wechat-bind-links/" + bindToken, null);
+    return response.body().getObject("binding", Binding.class);
+  }
+
+  public UserKey createOrGetUserKey(String openid, boolean reset) {
+    CmResponse<JSONObject> response = cmFetch("POST", "/api/external/miniapp/user-keys", Map.of("openid", openid, "reset", reset));
+    return response.body().getObject("userKey", UserKey.class);
+  }
+
+  public ChatResult chatStream(String userKey, String conversationId, String message) {
+    Map<String, Object> body = Map.of(
+        "conversationId", conversationId,
+        "message", message,
+        "metadata", Map.of("source", "miniapp")
+    );
+    AtomicReference<String> cmRequestIdRef = new AtomicReference<>("");
+    AtomicReference<String> sseRequestIdRef = new AtomicReference<>("");
+    StringBuilder answer = new StringBuilder();
+
+    webClient.post()
+        .uri("/api/external/openclaw/chat/stream")
+        .contentType(MediaType.APPLICATION_JSON)
+        .accept(MediaType.TEXT_EVENT_STREAM)
+        .headers(headers -> headers.setBearerAuth(userKey.replaceFirst("^Bearer\\s+", "")))
+        .bodyValue(JSON.toJSONString(body))
+        .exchangeToFlux(response -> {
+          String cmRequestId = response.headers().asHttpHeaders().getFirst(REQUEST_ID_HEADER);
+          cmRequestIdRef.set(cmRequestId == null ? "" : cmRequestId);
+          if (response.statusCode().isError()) {
+            return response.bodyToMono(String.class)
+                .defaultIfEmpty("")
+                .flatMapMany(errorBody -> Flux.error(new IllegalStateException(
+                    "chat failed status=" + response.statusCode().value()
+                        + " cmRequestId=" + cmRequestId
+                        + " body=" + errorBody)));
+          }
+          return response.bodyToFlux(STRING_SSE);
+        })
+        .doOnNext(event -> handleChatEvent(event, sseRequestIdRef, answer))
+        .blockLast(Duration.ofMinutes(16));
+
+    return new ChatResult(answer.toString(), cmRequestIdRef.get(), sseRequestIdRef.get());
+  }
+
+  private void handleChatEvent(
+      ServerSentEvent<String> event,
+      AtomicReference<String> sseRequestIdRef,
+      StringBuilder answer
+  ) {
+    String dataText = event.data();
+    if (dataText == null || dataText.isBlank()) {
+      return;
+    }
+    JSONObject data = JSON.parseObject(dataText);
+    if ("start".equals(event.event())) {
+      sseRequestIdRef.set(data.getString("requestId"));
+      return;
+    }
+    if ("delta".equals(event.event())) {
+      answer.append(data.getString("text") == null ? "" : data.getString("text"));
+      return;
+    }
+    if ("error".equals(event.event())) {
+      throw new IllegalStateException("chat SSE error requestId=" + sseRequestIdRef.get()
+          + " message=" + data.getString("message"));
+    }
+  }
+
+  public record CmResponse<T>(T body, String cmRequestId) {}
+
+  public record Binding(
+      String openid,
+      String bindToken,
+      String status,
+      String instanceId,
+      String openVikingUserId,
+      boolean canCreateUserKey,
+      String qrLink,
+      String qrPayload,
+      String expiresAt
+  ) {}
+
+  public record UserKey(
+      String openid,
+      String key,
+      String keyPreview,
+      String openVikingUserId,
+      String instanceId,
+      boolean created
+  ) {}
+
+  public record ChatResult(String answer, String cmRequestId, String sseRequestId) {}
+}
+```
+
+### 第 5 步：给小程序前端提供业务接口
+
+```java
+package com.example.miniapp;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/miniapp/claw-manager")
+public class MiniappClawManagerController {
+  private final ClawManagerMiniappClient clawManagerClient;
+  private final MiniappUserKeyStore userKeyStore;
+
+  public MiniappClawManagerController(
+      ClawManagerMiniappClient clawManagerClient,
+      MiniappUserKeyStore userKeyStore
+  ) {
+    this.clawManagerClient = clawManagerClient;
+    this.userKeyStore = userKeyStore;
+  }
+
+  @PostMapping("/wechat-bind-links")
+  public ClawManagerMiniappClient.Binding createBindLink(@RequestBody OpenidRequest request) {
+    return clawManagerClient.createBindLink(request.openid());
+  }
+
+  @GetMapping("/wechat-bind-links/{bindToken}")
+  public ClawManagerMiniappClient.Binding getBindLink(@PathVariable String bindToken) {
+    return clawManagerClient.getBindLink(bindToken);
+  }
+
+  @PostMapping("/user-keys")
+  public UserKeyStatus createUserKey(@RequestBody OpenidRequest request) {
+    ClawManagerMiniappClient.UserKey userKey = clawManagerClient.createOrGetUserKey(request.openid(), false);
+    if (userKey.key() != null && !userKey.key().isBlank()) {
+      userKeyStore.save(request.openid(), userKey.key(), userKey.keyPreview());
+    }
+    return new UserKeyStatus(
+        userKey.keyPreview(),
+        userKey.openVikingUserId(),
+        userKey.instanceId(),
+        userKey.created()
+    );
+  }
+
+  @PostMapping("/chat")
+  public ClawManagerMiniappClient.ChatResult chat(@RequestBody ChatRequest request) {
+    String userKey = userKeyStore.requireUserKey(request.openid());
+    return clawManagerClient.chatStream(userKey, request.conversationId(), request.message());
+  }
+
+  public record OpenidRequest(String openid) {}
+
+  public record ChatRequest(String openid, String conversationId, String message) {}
+
+  public record UserKeyStatus(
+      String keyPreview,
+      String openVikingUserId,
+      String instanceId,
+      boolean created
+  ) {}
+}
+```
+
+`MiniappUserKeyStore` 是你们小程序后端自己的持久化层，可以落 MySQL、Redis 或现有用户表。至少需要按 `openid` 保存完整 `cm_user_...`：
+
+```java
+package com.example.miniapp;
+
+public interface MiniappUserKeyStore {
+  void save(String openid, String userKey, String keyPreview);
+
+  String requireUserKey(String openid);
+}
+```
+
+### 第 6 步：前端/后端串联流程
+
+1. 小程序前端点击“接入微信”按钮。
+2. 小程序后端调用 `POST /miniapp/claw-manager/wechat-bind-links`，body 为 `{"openid":"..."}`。
+3. 小程序前端展示返回的 `qrLink` 或 `qrPayload`。
+4. 小程序前端或后端轮询 `GET /miniapp/claw-manager/wechat-bind-links/{bindToken}`。
+5. 状态变为 `connected` 后，小程序后端调用 `POST /miniapp/claw-manager/user-keys`。
+6. 小程序后端保存首次返回的完整 `key`，后续只需要展示 `keyPreview`，小程序前端不要持有完整 `cm_user_...`。
+7. 用户在小程序中聊天时，小程序后端调用 `POST /miniapp/claw-manager/chat`。
+8. 排查时记录 `X-CM-Request-Id` 和聊天结果里的 `sseRequestId`。
+
+### 第 7 步：验证微信/API 共享 OpenViking 记忆
+
+双向验收建议用两个互不混淆的事实：
+
+1. 微信侧发送：`请记住我的微信侧代号是海棠九号。`
+2. 等待 OpenViking 异步抽取完成。
+3. API 侧调用：`我的微信侧代号是什么？`
+4. API 答案应包含：`海棠九号`。
+5. API 侧调用：`请记住我的 API 侧口令是松针回声。`
+6. 等待 OpenViking 异步抽取完成。
+7. 微信侧发送：`我的 API 侧口令是什么？`
+8. 微信答案应包含：`松针回声`。
+
+排查时把以下 ID 一起给 Claw Manager 运维：
+
+- 小程序接口响应头 `X-CM-Request-Id`
+- 聊天 SSE `event:start` 里的 `requestId`
+- `bindToken`
+- `keyPreview`
+- `openVikingUserId`
+
+API 日志中 `cmRequestId` 用于定位 Claw Manager 收到的 HTTP 请求；SSE `requestId` 用于继续追到 API Channel、runner 和 OpenViking 插件日志。
 
 ## 接口定义
 
@@ -112,7 +536,7 @@ X-CM-Signature: <hex>
 行为说明：
 
 - 首次请求会根据实例负载选择一个 OpenClaw 实例，并写入 `miniapp_user_bindings`。
-- 当前“负载最小”按 `微信绑定用户数 + 旧 API 用户数 + 小程序绑定用户数` 计算。
+- 当前“负载最小”按 `微信绑定用户数 + 小程序绑定用户数` 计算。
 - 同一 `openid` 二次出码会复用原 `instance_id`，不会改变已绑定的 `openviking_user_id`。
 
 ### 查询绑定状态
@@ -331,7 +755,7 @@ HMAC 防重放表。
 | --- | --- |
 | `token` | 绑定链接 token |
 | `mode` | 出码模式 |
-| `phone` | 绑定流程使用的手机号字段；小程序出码使用合成值 |
+| `phone` | 传统管理员扫码绑定流程使用的手机号字段；小程序出码为空 |
 | `instance_id` | 出码所在 OpenClaw 实例 |
 | `target_account_id` | 二次扫码时指定原微信账号，确保回到同一实例和账号链路 |
 | `scanned_wechat_user_id` | 实际扫码得到的微信用户 ID |
@@ -356,7 +780,7 @@ OpenViking user key broker 缓存表。
 | 字段 | 作用 |
 | --- | --- |
 | `account_id` | OpenViking account，默认 `claw-manager` |
-| `openviking_user_id` | `wx_<hash>` 或旧纯 API 用户的 `api_<hash>` |
+| `openviking_user_id` | 微信用户对应的 `wx_<hash>`；小程序 API 和微信共享这一身份 |
 | `user_key` | OpenViking Server 返回的用户级 API key |
 | `created_at` | 创建时间 |
 | `updated_at` | 更新时间 |
@@ -367,8 +791,7 @@ OpenViking user key broker 缓存表。
 | --- | --- |
 | `instances` | OpenClaw 实例元数据，`id/status/container_name/port` 用于路由和可用性判断 |
 | `instance_provisioning` | 实例 ready 状态，小程序首绑和聊天都要求目标实例 ready |
-| `wechat_paired_accounts` | 已绑定微信账号，二次出码会根据 `wechat_user_id` 查回原账号 |
-| `external_api_user_routes` | 旧纯 API openid 路由表；小程序用户聊天不应新建这里的 `api_<hash>` 记忆身份 |
+| `wechat_paired_accounts` | 已绑定微信账号，二次出码会根据 `wechat_user_id` 查回原账号；小程序扫码绑定允许 `phone` 为空 |
 
 ## 二次扫码
 
