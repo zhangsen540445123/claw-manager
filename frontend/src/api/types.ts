@@ -205,6 +205,61 @@ export interface PublicMiniappClient {
   created: boolean;
 }
 
+export interface PublicSkillRepository {
+  id: string;
+  name: string;
+  repoUrl: string;
+  branch: string;
+  authType: "none" | "token" | string;
+  accessToken?: string | null;
+  tokenPreview: string;
+  hasToken: boolean;
+  lastCommitSha: string;
+  lastPullStatus: string;
+  lastPullMessage: string;
+  lastPulledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicSkillDefinition {
+  id: string;
+  repositoryId: string;
+  repositoryName: string;
+  skillName: string;
+  originalName: string;
+  relativePath: string;
+  description: string;
+  contentHash: string;
+  warnings: string[];
+  syncable: boolean;
+  lastCommitSha: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicSkillInstanceSync {
+  instanceId: string;
+  skillName: string;
+  skillId: string;
+  repositoryId: string;
+  sourceCommitSha: string;
+  status: string;
+  message: string;
+  syncedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface SkillSyncResult {
+  skillId: string;
+  skillName: string;
+  instanceId: string;
+  instanceName: string;
+  status: string;
+  message: string;
+  syncedAt: string;
+}
+
 export interface PublicOpenVikingSettings {
   baseUrl: string;
   trustedModeEnabled: boolean;

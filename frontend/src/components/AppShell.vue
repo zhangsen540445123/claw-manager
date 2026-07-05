@@ -11,6 +11,7 @@ import {
   QrCode,
   Server,
   SlidersHorizontal,
+  WandSparkles,
   UsersRound,
   Menu,
   X
@@ -21,6 +22,7 @@ import clawManagerLogo from "../claw-manager.png";
 type ShellNavKey =
   | "overview"
   | "presets"
+  | "skills"
   | "create"
   | "instances"
   | "openVikingSettings"
@@ -59,6 +61,7 @@ const navGroups = computed(() => {
       items: [
         { key: "create" as const, label: "创建实例", desc: "新建 OpenClaw", icon: PlusSquare },
         { key: "presets" as const, label: "模型预设", desc: "模型供应商", icon: SlidersHorizontal },
+        { key: "skills" as const, label: "Skill 管理", desc: "本地能力", icon: WandSparkles },
         { key: "openVikingSettings" as const, label: "OpenViking预设", desc: "记忆服务", icon: Database }
       ]
     },
@@ -83,6 +86,7 @@ const navGroups = computed(() => {
 const routeTitles: Record<string, string> = {
   overview: "运行总览",
   presets: "模型预设",
+  skills: "Skill 管理",
   create: "创建实例",
   instances: "实例管理",
   openVikingSettings: "OpenViking预设",

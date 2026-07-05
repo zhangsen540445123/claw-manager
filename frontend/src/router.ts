@@ -6,6 +6,7 @@ import MiniappClientsView from "./views/admin/MiniappClientsView.vue";
 import ModelPresetsView from "./views/admin/ModelPresetsView.vue";
 import OpenVikingSettingsView from "./views/admin/OpenVikingSettingsView.vue";
 import OpsView from "./views/admin/OpsView.vue";
+import SkillManagementView from "./views/admin/SkillManagementView.vue";
 import WechatLinksView from "./views/admin/WechatLinksView.vue";
 import WechatPluginsView from "./views/admin/WechatPluginsView.vue";
 import WechatUsersView from "./views/admin/WechatUsersView.vue";
@@ -20,6 +21,7 @@ export const router = createRouter({
     { path: "/admin", redirect: "/admin/overview" },
     { path: "/admin/overview", name: "admin-overview", component: AdminOverviewView, meta: { shellKey: "overview", title: "运行总览" } },
     { path: "/admin/model-presets", name: "admin-model-presets", component: ModelPresetsView, meta: { shellKey: "presets", title: "模型预设" } },
+    { path: "/admin/skills", name: "admin-skills", component: SkillManagementView, meta: { shellKey: "skills", title: "Skill 管理" } },
     { path: "/admin/instances/new", name: "admin-instance-new", component: InstanceCreateView, meta: { shellKey: "create", title: "创建实例" } },
     { path: "/admin/instances", name: "admin-instances", component: InstancesView, meta: { shellKey: "instances", title: "实例管理" } },
     { path: "/admin/openviking-settings", name: "admin-openviking-settings", component: OpenVikingSettingsView, meta: { shellKey: "openVikingSettings", title: "OpenViking 配置" } },

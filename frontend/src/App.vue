@@ -28,6 +28,7 @@ const activeShellRoute = computed(() => {
 const adminRoutePaths = {
   overview: "/admin/overview",
   presets: "/admin/model-presets",
+  skills: "/admin/skills",
   create: "/admin/instances/new",
   instances: "/admin/instances",
   openVikingSettings: "/admin/openviking-settings",
@@ -102,7 +103,7 @@ async function logout() {
 }
 
 async function navigate(
-  routeName: "overview" | "presets" | "create" | "instances" | "openVikingSettings" | "wechat" | "wechatPlugins" | "wechatUsers" | "miniappClients" | "ops" | "account"
+  routeName: "overview" | "presets" | "skills" | "create" | "instances" | "openVikingSettings" | "wechat" | "wechatPlugins" | "wechatUsers" | "miniappClients" | "ops" | "account"
 ) {
   if (routeName === "account") {
     void router.push("/change-password");

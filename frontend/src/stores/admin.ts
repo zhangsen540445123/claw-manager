@@ -20,6 +20,10 @@ import type {
   PublicWechatBinding,
   PublicWechatPluginStatus,
   PublicWechatPluginVersions,
+  PublicSkillDefinition,
+  PublicSkillInstanceSync,
+  PublicSkillRepository,
+  SkillSyncResult,
   WechatBindLinkPage,
   WechatBindingLookup
 } from "../api/types";
@@ -86,6 +90,9 @@ export const useAdminStore = defineStore("admin", {
     openVikingPluginStatusByInstanceId: {} as Record<string, PublicOpenVikingPluginStatus>,
     openVikingPluginVersions: { latest: "", versions: [] } as PublicOpenVikingPluginVersions,
     miniappClients: [] as PublicMiniappClient[],
+    skillRepositories: [] as PublicSkillRepository[],
+    skillDefinitions: [] as PublicSkillDefinition[],
+    skillInstanceSyncs: [] as PublicSkillInstanceSync[],
     apiChannelPluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
     apiChannelPluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
@@ -390,6 +397,75 @@ export const useAdminStore = defineStore("admin", {
     async deleteMiniappClient(appId: string) {
       await api<{ ok: boolean }>(`/api/admin/miniapp-clients/${encodeURIComponent(appId)}`, { method: "DELETE" });
       await this.loadMiniappClients();
+    },
+    async loadSkillRepositories() {
+      const response = await api<{ repositories: PublicSkillRepository[] }>("/api/admin/skill-repositories");
+      this.skillRepositories = response.repositories;
+      return response.repositories;
+    },
+    async createSkillRepository(payload: {
+      name: string;
+      repoUrl: string;
+      branch: string;
+      authType: string;
+      accessToken?: string;
+    }) {
+      const response = await api<{ repository: PublicSkillRepository }>("/api/admin/skill-repositories", {
+        method: "POST",
+        ...jsonBody(payload)
+      });
+      await this.loadSkillRepositories();
+      return response.repository;
+    },
+    async updateSkillRepository(repositoryId: string, payload: {
+      name: string;
+      repoUrl: string;
+      branch: string;
+      authType: string;
+      accessToken?: string;
+    }) {
+      const response = await api<{ repository: PublicSkillRepository }>(`/api/admin/skill-repositories/${encodeURIComponent(repositoryId)}`, {
+        method: "PATCH",
+        ...jsonBody(payload)
+      });
+      await this.loadSkillRepositories();
+      return response.repository;
+    },
+    async deleteSkillRepository(repositoryId: string) {
+      await api<{ ok: boolean }>(`/api/admin/skill-repositories/${encodeURIComponent(repositoryId)}`, { method: "DELETE" });
+      await this.loadSkillRepositories();
+      await this.loadSkills();
+    },
+    async pullSkillRepository(repositoryId: string) {
+      const response = await api<{ repository: PublicSkillRepository }>(
+        `/api/admin/skill-repositories/${encodeURIComponent(repositoryId)}/pull`,
+        { method: "POST" }
+      );
+      await this.loadSkillRepositories();
+      await this.loadSkills();
+      return response.repository;
+    },
+    async loadSkills() {
+      const response = await api<{ skills: PublicSkillDefinition[]; syncs: PublicSkillInstanceSync[] }>("/api/admin/skills");
+      this.skillDefinitions = response.skills;
+      this.skillInstanceSyncs = response.syncs;
+      return response;
+    },
+    async updateSkillName(skillId: string, skillName: string) {
+      const response = await api<{ skill: PublicSkillDefinition }>(`/api/admin/skills/${encodeURIComponent(skillId)}`, {
+        method: "PATCH",
+        ...jsonBody({ skillName })
+      });
+      await this.loadSkills();
+      return response.skill;
+    },
+    async syncSkills(items: Array<{ skillId: string; instanceIds: string[] }>) {
+      const response = await api<{ results: SkillSyncResult[] }>("/api/admin/skills/sync", {
+        method: "POST",
+        ...jsonBody({ items })
+      });
+      await this.loadSkills();
+      return response.results;
     },
     async loadApiChannelPluginStatus(instanceId: string, checkLatest = false) {
       const response = await api<{ plugin: PublicApiChannelPluginStatus }>(

@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.skill.SkillMapper">
+  <resultMap id="SkillRepositoryMap" type="com.clawbotforall.skill.SkillRepositoryEntity">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="repoUrl" column="repo_url"/>
+    <result property="branch" column="branch_name"/>
+    <result property="authType" column="auth_type"/>
+    <result property="accessToken" column="access_token"/>
+    <result property="tokenPreview" column="token_preview"/>
+    <result property="lastCommitSha" column="last_commit_sha"/>
+    <result property="lastPullStatus" column="last_pull_status"/>
+    <result property="lastPullMessage" column="last_pull_message"/>
+    <result property="lastPulledAt" column="last_pulled_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="SkillDefinitionMap" type="com.clawbotforall.skill.SkillDefinitionEntity">
+    <id property="id" column="id"/>
+    <result property="repositoryId" column="repository_id"/>
+    <result property="repositoryName" column="repository_name"/>
+    <result property="skillName" column="skill_name"/>
+    <result property="originalName" column="original_name"/>
+    <result property="relativePath" column="relative_path"/>
+    <result property="description" column="description"/>
+    <result property="contentHash" column="content_hash"/>
+    <result property="warnings" column="warnings"/>
+    <result property="syncable" column="syncable"/>
+    <result property="lastCommitSha" column="last_commit_sha"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="SkillInstanceSyncMap" type="com.clawbotforall.skill.SkillInstanceSyncEntity">
+    <id property="instanceId" column="instance_id"/>
+    <id property="skillName" column="skill_name"/>
+    <result property="skillId" column="skill_id"/>
+    <result property="repositoryId" column="repository_id"/>
+    <result property="sourceCommitSha" column="source_commit_sha"/>
+    <result property="status" column="status"/>
+    <result property="message" column="message"/>
+    <result property="syncedAt" column="synced_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="listRepositories" resultMap="SkillRepositoryMap">
+    SELECT *
+    FROM skill_repositories
+    ORDER BY updated_at DESC, created_at DESC
+  </select>
+
+  <select id="findRepositoryById" resultMap="SkillRepositoryMap">
+    SELECT *
+    FROM skill_repositories
+    WHERE id = #{id}
+    LIMIT 1
+  </select>
+
+  <insert id="insertRepository" parameterType="com.clawbotforall.skill.SkillRepositoryEntity">
+    INSERT INTO skill_repositories (
+      id, name, repo_url, branch_name, auth_type, access_token, token_preview,
+      last_commit_sha, last_pull_status, last_pull_message, last_pulled_at,
+      created_at, updated_at
+    )
+    VALUES (
+      #{id}, #{name}, #{repoUrl}, #{branch}, #{authType}, #{accessToken}, #{tokenPreview},
+      #{lastCommitSha}, #{lastPullStatus}, #{lastPullMessage}, #{lastPulledAt},
+      #{createdAt}, #{updatedAt}
+    )
+  </insert>
+
+  <update id="updateRepository" parameterType="com.clawbotforall.skill.SkillRepositoryEntity">
+    UPDATE skill_repositories
+    SET name = #{name},
+        repo_url = #{repoUrl},
+        branch_name = #{branch},
+        auth_type = #{authType},
+        access_token = #{accessToken},
+        token_preview = #{tokenPreview},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="deleteRepository">
+    DELETE FROM skill_repositories
+    WHERE id = #{id}
+  </delete>
+
+  <update id="updateRepositoryPull">
+    UPDATE skill_repositories
+    SET last_commit_sha = #{lastCommitSha},
+        last_pull_status = #{lastPullStatus},
+        last_pull_message = #{lastPullMessage},
+        last_pulled_at = #{lastPulledAt},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+
+  <select id="listSkills" resultMap="SkillDefinitionMap">
+    SELECT d.*, r.name AS repository_name
+    FROM skill_definitions d
+    JOIN skill_repositories r ON r.id = d.repository_id
+    ORDER BY r.updated_at DESC, d.skill_name ASC
+  </select>
+
+  <select id="listSkillsByRepositoryId" resultMap="SkillDefinitionMap">
+    SELECT d.*, r.name AS repository_name
+    FROM skill_definitions d
+    JOIN skill_repositories r ON r.id = d.repository_id
+    WHERE d.repository_id = #{repositoryId}
+    ORDER BY d.relative_path ASC
+  </select>
+
+  <select id="findSkillById" resultMap="SkillDefinitionMap">
+    SELECT d.*, r.name AS repository_name
+    FROM skill_definitions d
+    JOIN skill_repositories r ON r.id = d.repository_id
+    WHERE d.id = #{id}
+    LIMIT 1
+  </select>
+
+  <update id="updateSkillName">
+    UPDATE skill_definitions
+    SET skill_name = #{skillName},
+        updated_at = #{updatedAt}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="deleteDefinitionsByRepositoryId">
+    DELETE FROM skill_definitions
+    WHERE repository_id = #{repositoryId}
+  </delete>
+
+  <insert id="insertDefinitions">
+    INSERT INTO skill_definitions (
+      id, repository_id, skill_name, original_name, relative_path, description,
+      content_hash, warnings, syncable, last_commit_sha, created_at, updated_at
+    )
+    VALUES
+    <foreach collection="definitions" item="definition" separator=",">
+      (
+        #{definition.id}, #{definition.repositoryId}, #{definition.skillName},
+        #{definition.originalName}, #{definition.relativePath}, #{definition.description},
+        #{definition.contentHash}, #{definition.warnings}, #{definition.syncable},
+        #{definition.lastCommitSha}, #{definition.createdAt}, #{definition.updatedAt}
+      )
+    </foreach>
+  </insert>
+
+  <select id="listInstanceSyncs" resultMap="SkillInstanceSyncMap">
+    SELECT *
+    FROM skill_instance_syncs
+    ORDER BY updated_at DESC, instance_id ASC, skill_name ASC
+  </select>
+
+  <insert id="upsertInstanceSync" parameterType="com.clawbotforall.skill.SkillInstanceSyncEntity">
+    INSERT INTO skill_instance_syncs (
+      instance_id, skill_name, skill_id, repository_id, source_commit_sha,
+      status, message, synced_at, updated_at
+    )
+    VALUES (
+      #{instanceId}, #{skillName}, #{skillId}, #{repositoryId}, #{sourceCommitSha},
+      #{status}, #{message}, #{syncedAt}, #{updatedAt}
+    )
+    ON DUPLICATE KEY UPDATE
+      skill_id = VALUES(skill_id),
+      repository_id = VALUES(repository_id),
+      source_commit_sha = VALUES(source_commit_sha),
+      status = VALUES(status),
+      message = VALUES(message),
+      synced_at = VALUES(synced_at),
+      updated_at = VALUES(updated_at)
+  </insert>
+</mapper>
