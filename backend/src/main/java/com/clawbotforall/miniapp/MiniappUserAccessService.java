@@ -14,6 +14,8 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class MiniappUserAccessService {
+  private static final Logger log = LoggerFactory.getLogger(MiniappUserAccessService.class);
   private static final SecureRandom RANDOM = new SecureRandom();
 
   private final MiniappUserBindingMapper bindingMapper;
@@ -201,6 +204,15 @@ public class MiniappUserAccessService {
     binding.setBindStatus("connected");
     binding.setBoundAt(now);
     binding.setUpdatedAt(now);
+    log.info(
+        "miniapp.binding.identityReady openidHash={} bindToken={} linkStatus={} instanceId={} wechatUserId={} openVikingUserId={}",
+        openidHash,
+        token,
+        link.getStatus(),
+        binding.getInstanceId(),
+        link.getScannedWechatUserId(),
+        senderIdentity.openVikingUserId()
+    );
     return binding;
   }
 

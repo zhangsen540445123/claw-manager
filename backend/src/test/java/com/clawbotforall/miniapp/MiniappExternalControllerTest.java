@@ -88,10 +88,10 @@ class MiniappExternalControllerTest {
     when(bindingService.getBindLink("wbl_token", "")).thenReturn(new MiniappBindLinkResult(
         "openid_1",
         "wbl_token",
-        "connected",
+        "initializing",
         "inst_1",
-        "wx_123",
-        true,
+        "",
+        false,
         null
     ));
 
@@ -102,7 +102,9 @@ class MiniappExternalControllerTest {
             .header("X-CM-Signature", "signature"))
         .andExpect(status().isOk())
         .andExpect(header().exists("X-CM-Request-Id"))
-        .andExpect(jsonPath("$.binding.openVikingUserId").value("wx_123"));
+        .andExpect(jsonPath("$.binding.status").value("initializing"))
+        .andExpect(jsonPath("$.binding.canCreateUserKey").value(false))
+        .andExpect(jsonPath("$.binding.openVikingUserId").value(""));
   }
 
   @Test

@@ -210,6 +210,10 @@ function miniappStatusLabel(status: string) {
       return "已绑定";
     case "waiting_scan":
       return "待扫码";
+    case "scanned":
+      return "已扫码";
+    case "initializing":
+      return "初始化中";
     case "rejected":
       return "已拒绝";
     default:
@@ -222,6 +226,8 @@ function miniappStatusType(status: string): "success" | "warning" | "danger" | "
     case "connected":
       return "success";
     case "waiting_scan":
+    case "scanned":
+    case "initializing":
       return "warning";
     case "rejected":
       return "danger";

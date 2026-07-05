@@ -18,6 +18,7 @@ export function bindStatusLabel(status: string, fallback = "") {
     starting: "出码中",
     waiting_scan: "等待扫码",
     scanned: "已扫码",
+    initializing: "初始化中",
     connected: "已连接",
     expired: "已过期",
     rejected: "已拒绝",
@@ -30,7 +31,7 @@ export function bindStatusLabel(status: string, fallback = "") {
 export function bindStatusTagType(status: string) {
   if (status === "connected") return "success";
   if (status === "failed" || status === "rejected" || status === "expired" || status === "revoked") return "danger";
-  if (status === "waiting_scan" || status === "scanned" || status === "starting") return "warning";
+  if (status === "waiting_scan" || status === "scanned" || status === "initializing" || status === "starting") return "warning";
   return "info";
 }
 

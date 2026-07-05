@@ -23,6 +23,7 @@ import com.clawbotforall.runtime.InstancePaths;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
@@ -402,6 +403,37 @@ class WechatBindLinkServiceTest {
     assertThat(saved.get().getStatus()).isEqualTo("connected");
     verify(accountSyncService).syncInstanceAccounts(instance);
     verify(gatewayRpcService).restartWechatChannel(instance, List.of("wx_existing"));
+  }
+
+  @Test
+  void newUserLinkPublishesScannedAndInitializingBeforeConnected() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = newLink("token_status_steps");
+    stored.setStatus("waiting_scan");
+    stored.setPhone("13900000001");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("cmwx_status_steps");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    List<String> statusUpdates = new ArrayList<>();
+    when(linkMapper.findByToken("token_status_steps")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      WechatBindLinkEntity updated = invocation.getArgument(0);
+      statusUpdates.add(updated.getStatus());
+      saved.set(updated);
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByWechatUserId("wechat-user")).thenReturn(null);
+    when(aggregateMapper.findWechatAccountByAccountId("554603a4df61-im-bot")).thenReturn(null);
+
+    service.completeBindAfterLogin(
+        "token_status_steps",
+        completion("cmwx_status_steps", "554603a4df61-im-bot", "wechat-user"),
+        "https://admin.example.test"
+    );
+
+    assertThat(statusUpdates).containsSubsequence("scanned", "initializing", "connected");
+    assertThat(saved.get().getStatus()).isEqualTo("connected");
   }
 
   @Test

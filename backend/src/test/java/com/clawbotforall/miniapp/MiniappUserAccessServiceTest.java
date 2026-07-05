@@ -2,6 +2,7 @@ package com.clawbotforall.miniapp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,6 +68,39 @@ class MiniappUserAccessServiceTest {
     assertThatThrownBy(() -> service.createOrGetUserKey("openid_1", false))
         .isInstanceOf(ApiException.class)
         .hasMessage("小程序用户尚未完成微信扫码绑定。");
+  }
+
+  @Test
+  void rejectsUserKeyWhenWechatLinkIsOnlyInitializing() {
+    service = new MiniappUserAccessService(
+        bindingMapper,
+        keyMapper,
+        openVikingSettingsService,
+        identityService,
+        instanceService,
+        bindLinkMapper,
+        new OpenVikingIdentityService(),
+        Clock.fixed(Instant.parse("2026-07-04T10:00:00Z"), ZoneOffset.UTC)
+    );
+    when(openVikingSettingsService.effectiveSettings()).thenReturn(settings());
+    when(identityService.resolve("openid_1", "salt_1")).thenReturn(apiIdentity("hash_1"));
+    MiniappUserBindingEntity binding = binding("hash_1", "openid_1", "waiting_scan", "inst_1", "", "");
+    binding.setCurrentBindToken("token_1");
+    when(bindingMapper.findByOpenidHash("hash_1")).thenReturn(binding);
+    WechatBindLinkEntity link = new WechatBindLinkEntity();
+    link.setStatus("initializing");
+    link.setScannedWechatUserId("o9cq805zYxJ9dUBkeCRtXhCiSQro@im.wechat");
+    when(bindLinkMapper.findByToken("token_1")).thenReturn(link);
+    assertThatThrownBy(() -> service.createOrGetUserKey("openid_1", false))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("小程序用户尚未完成微信扫码绑定。");
+    verify(bindingMapper, never()).markConnected(
+        "hash_1",
+        "o9cq805zYxJ9dUBkeCRtXhCiSQro@im.wechat",
+        "wx_a67b392317ec3e01e7ee1285528f8a2e",
+        "2026-07-04T10:00:00Z",
+        "2026-07-04T10:00:00Z"
+    );
   }
 
   @Test

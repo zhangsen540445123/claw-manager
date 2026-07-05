@@ -78,9 +78,9 @@ curl -X DELETE "http://127.0.0.1:1933/api/v1/admin/accounts/claw-manager/users/w
 
 ## 小程序生成用户 key 返回 409
 
-`POST /api/external/miniapp/user-keys` 只有在微信扫码绑定完成后才允许生成 `cm_user_...`。排查顺序：
+`POST /api/external/miniapp/user-keys` 只有在微信扫码绑定进入 `connected` 后才允许生成 `cm_user_...`。排查顺序：
 
-1. `miniapp_user_bindings.bind_status` 是否为 `connected`。
+1. `GET /api/external/miniapp/wechat-bind-links/{token}` 是否返回 `status=connected` 和 `canCreateUserKey=true`。
 2. `miniapp_user_bindings.openviking_user_id` 是否为 `wx_...`。
 3. `miniapp_user_bindings.instance_id` 对应实例是否仍存在并 ready。
 4. 同一 `openid` 二次出码是否仍落在原 `instance_id`，没有被错误分配到新实例。

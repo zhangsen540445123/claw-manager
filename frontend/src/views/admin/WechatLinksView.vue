@@ -50,6 +50,7 @@ const statusOptions = [
   { label: "出码中", value: "starting" },
   { label: "等待扫码", value: "waiting_scan" },
   { label: "已扫码", value: "scanned" },
+  { label: "初始化中", value: "initializing" },
   { label: "已连接", value: "connected" },
   { label: "已过期", value: "expired" },
   { label: "已拒绝", value: "rejected" },

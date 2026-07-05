@@ -549,23 +549,30 @@ X-CM-Nonce: 8f1d1f32-6c7d-4b7e-b9e4-002
 X-CM-Signature: <hex>
 ```
 
-扫码完成后响应：
+扫码后初始化中响应：
 
 ```json
 {
   "binding": {
     "openid": "miniapp-openid-001",
     "bindToken": "wbl_xxx",
-    "status": "connected",
+    "status": "initializing",
     "instanceId": "mr67mzy8-30acf3",
-    "openVikingUserId": "wx_8db1ee8f655145d6cfa4e286cda3fda3",
-    "canCreateUserKey": true,
+    "openVikingUserId": "",
+    "canCreateUserKey": false,
     "qrLink": "",
     "qrPayload": "",
     "expiresAt": "2026-07-05T10:30:10Z"
   }
 }
 ```
+
+状态说明：
+
+- `waiting_scan`：二维码已生成，等待用户扫码。
+- `scanned`：Claw Manager 已收到微信登录确认，正在校验绑定关系。
+- `initializing`：微信身份已确认，正在初始化微信通道；小程序可以轮询到该进度，但还不能生成用户 key。
+- `connected`：微信通道已激活；此时 `canCreateUserKey=true`，小程序后端可以生成用户 key。
 
 ### 生成或查看用户 key
 
@@ -664,7 +671,8 @@ sequenceDiagram
   C-->>M: 返回 bindToken 和 qrLink
   W->>G: 扫码
   G->>C: 上报扫码结果
-  C->>D: 写 wechat_user_id 和 wx_<hash>
+  C->>D: 写 scanned/initializing
+  C->>D: 微信通道激活后写 connected 和 wx_<hash>
   M->>C: GET /miniapp/wechat-bind-links/{token}
   C-->>M: status=connected, canCreateUserKey=true
 ```
@@ -726,7 +734,7 @@ HMAC 防重放表。
 | `instance_id` | 首次出码选择的 OpenClaw 实例，二次出码继续复用 |
 | `wechat_user_id` | 扫码完成后的微信用户 ID |
 | `openviking_user_id` | 微信用户对应的 `wx_<hash>`，API 和微信共享记忆的关键字段 |
-| `bind_status` | 绑定状态，例如 `pending`、`waiting_scan`、`connected`、`rejected` |
+| `bind_status` | 小程序绑定状态，例如 `pending`、`waiting_scan`、`connected`、`rejected`；`connected` 表示已具备 `wx_<hash>` 身份，可生成用户 key |
 | `current_bind_token` | 当前二维码 token，对应 `wechat_bind_links.token` |
 | `bound_at` | 成功绑定时间 |
 | `created_at` | 创建时间 |
@@ -759,7 +767,7 @@ HMAC 防重放表。
 | `instance_id` | 出码所在 OpenClaw 实例 |
 | `target_account_id` | 二次扫码时指定原微信账号，确保回到同一实例和账号链路 |
 | `scanned_wechat_user_id` | 实际扫码得到的微信用户 ID |
-| `status` | 二维码状态，例如 `created`、`waiting_scan`、`connected`、`rejected` |
+| `status` | 二维码状态，例如 `created`、`waiting_scan`、`scanned`、`initializing`、`connected`、`rejected` |
 | `qr_mode` | 二维码模式 |
 | `qr_payload` | 二维码 payload |
 | `qr_link` | 可直接打开的二维码链接 |
