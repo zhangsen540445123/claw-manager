@@ -73,5 +73,33 @@ async function createInstance() {
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card shadow="never">
+      <template #header>
+        <div class="card-title with-action">
+          <span>可用模型预设</span>
+          <el-tag effect="plain">{{ admin.configuredPresets.length }} 个已配置</el-tag>
+        </div>
+      </template>
+      <el-table :data="admin.configuredPresets" row-key="id">
+        <el-table-column prop="name" label="名称" min-width="160" />
+        <el-table-column label="模型" min-width="220">
+          <template #default="{ row }">{{ row.providerId }}/{{ row.modelId }}</template>
+        </el-table-column>
+        <el-table-column label="Context Window" width="150" align="right">
+          <template #default="{ row }">{{ row.contextWindow }}</template>
+        </el-table-column>
+        <el-table-column label="Max Tokens" width="130" align="right">
+          <template #default="{ row }">{{ row.maxTokens }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.isDefault ? 'success' : 'info'" effect="plain">
+              {{ row.isDefault ? "默认" : "可用" }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </section>
 </template>

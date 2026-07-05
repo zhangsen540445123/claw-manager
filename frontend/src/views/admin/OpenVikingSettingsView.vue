@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { RefreshCw, Save } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
@@ -19,6 +19,27 @@ const form = reactive({
   rootApiKey: "",
   clearRootApiKey: false
 });
+
+const statusRows = computed(() => [
+  {
+    name: "Root API Key",
+    status: admin.openVikingSettings?.rootApiKeyConfigured ? "已配置" : "未配置",
+    tagType: admin.openVikingSettings?.rootApiKeyConfigured ? "success" : "danger",
+    value: admin.openVikingSettings?.rootApiKeyFingerprint || "-"
+  },
+  {
+    name: "身份盐值",
+    status: admin.openVikingSettings?.saltConfigured ? "已配置" : "不可用",
+    tagType: admin.openVikingSettings?.saltConfigured ? "success" : "danger",
+    value: admin.openVikingSettings?.saltFingerprint || "-"
+  },
+  {
+    name: "盐值来源",
+    status: admin.openVikingSettings?.saltSource || "-",
+    tagType: "info",
+    value: formatDateTime(admin.openVikingSettings?.updatedAt)
+  }
+]);
 
 onMounted(async () => {
   await loadSettings();
@@ -129,32 +150,15 @@ async function saveSettings() {
         <el-form-item>
           <el-checkbox v-model="form.clearRootApiKey">清空已保存的 Root API Key</el-checkbox>
         </el-form-item>
-        <div class="secret-row">
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="Root API Key">
-              <el-tag :type="admin.openVikingSettings?.rootApiKeyConfigured ? 'success' : 'danger'" effect="plain">
-                {{ admin.openVikingSettings?.rootApiKeyConfigured ? "已配置" : "未配置" }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="Root Key 指纹">
-              {{ admin.openVikingSettings?.rootApiKeyFingerprint || "-" }}
-            </el-descriptions-item>
-            <el-descriptions-item label="身份盐值">
-              <el-tag :type="admin.openVikingSettings?.saltConfigured ? 'success' : 'danger'" effect="plain">
-                {{ admin.openVikingSettings?.saltConfigured ? "已配置" : "不可用" }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="盐值来源">
-              {{ admin.openVikingSettings?.saltSource || "-" }}
-            </el-descriptions-item>
-            <el-descriptions-item label="盐值指纹">
-              {{ admin.openVikingSettings?.saltFingerprint || "-" }}
-            </el-descriptions-item>
-            <el-descriptions-item label="更新时间">
-              {{ formatDateTime(admin.openVikingSettings?.updatedAt) }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
+        <el-table class="settings-status-table" :data="statusRows" row-key="name">
+          <el-table-column prop="name" label="配置项" min-width="140" />
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag :type="row.tagType" effect="plain">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="value" label="指纹 / 更新时间" min-width="220" />
+        </el-table>
         <div class="form-actions">
           <el-button type="primary" :icon="Save" :loading="saving" @click="saveSettings">保存</el-button>
         </div>
@@ -168,7 +172,7 @@ async function saveSettings() {
   max-width: 760px;
 }
 
-.secret-row {
+.settings-status-table {
   margin-top: 8px;
 }
 

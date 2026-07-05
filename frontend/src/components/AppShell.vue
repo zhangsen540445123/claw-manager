@@ -45,18 +45,38 @@ const emit = defineEmits<{
 
 const mobileNavOpen = ref(false);
 const sidebarCollapsed = ref(localStorage.getItem("claw-manager-sidebar-collapsed") === "1");
-const navItems = computed(() => {
+const navGroups = computed(() => {
   return [
-    { key: "overview" as const, label: "运行总览", icon: Activity },
-    { key: "presets" as const, label: "模型预设", icon: SlidersHorizontal },
-    { key: "openVikingSettings" as const, label: "OpenViking预设", icon: Database },
-    { key: "create" as const, label: "创建实例", icon: PlusSquare },
-    { key: "instances" as const, label: "实例管理", icon: Boxes },
-    { key: "wechatPlugins" as const, label: "插件管理", icon: PackageCheck },
-    { key: "wechat" as const, label: "扫码链接", icon: QrCode },
-    { key: "wechatUsers" as const, label: "用户中心", icon: UsersRound },
-    { key: "miniappClients" as const, label: "小程序接入", icon: KeyRound },
-    { key: "ops" as const, label: "系统运维", icon: Server }
+    {
+      label: "运行",
+      items: [
+        { key: "overview" as const, label: "运行总览", desc: "全局状态", icon: Activity },
+        { key: "instances" as const, label: "实例管理", desc: "容器与 Gateway", icon: Boxes }
+      ]
+    },
+    {
+      label: "配置",
+      items: [
+        { key: "create" as const, label: "创建实例", desc: "新建 OpenClaw", icon: PlusSquare },
+        { key: "presets" as const, label: "模型预设", desc: "模型供应商", icon: SlidersHorizontal },
+        { key: "openVikingSettings" as const, label: "OpenViking预设", desc: "记忆服务", icon: Database }
+      ]
+    },
+    {
+      label: "渠道",
+      items: [
+        { key: "wechatPlugins" as const, label: "插件管理", desc: "渠道插件", icon: PackageCheck },
+        { key: "wechat" as const, label: "扫码链接", desc: "微信接入", icon: QrCode },
+        { key: "wechatUsers" as const, label: "用户中心", desc: "微信与 API", icon: UsersRound },
+        { key: "miniappClients" as const, label: "小程序接入", desc: "AK / SK", icon: KeyRound }
+      ]
+    },
+    {
+      label: "运维",
+      items: [
+        { key: "ops" as const, label: "系统运维", desc: "日志与镜像", icon: Server }
+      ]
+    }
   ];
 });
 
@@ -98,6 +118,7 @@ function toggleSidebar() {
           <img class="brand-mark" :src="clawManagerLogo" alt="Claw Manager" />
           <div class="brand-copy">
             <strong>Claw Manager</strong>
+            <span>OpenClaw 控制台</span>
           </div>
           <button class="sidebar-collapse-button" type="button" @click="toggleSidebar">
             <ChevronsRight v-if="sidebarCollapsed" :size="16" />
@@ -106,23 +127,29 @@ function toggleSidebar() {
         </div>
 
         <nav class="sidebar-nav">
-          <el-tooltip
-            v-for="item in navItems"
-            :key="item.key"
-            :content="item.label"
-            placement="right"
-            :disabled="!sidebarCollapsed"
-          >
-            <button
-              class="nav-item"
-              :class="{ 'is-active': activeRoute === item.key }"
-              type="button"
-              @click="navigate(item.key)"
+          <section v-for="group in navGroups" :key="group.label" class="nav-group">
+            <span class="nav-group-label">{{ group.label }}</span>
+            <el-tooltip
+              v-for="item in group.items"
+              :key="item.key"
+              :content="`${item.label} · ${item.desc}`"
+              placement="right"
+              :disabled="!sidebarCollapsed"
             >
-              <component :is="item.icon" :size="18" />
-              <span class="nav-label">{{ item.label }}</span>
-            </button>
-          </el-tooltip>
+              <button
+                class="nav-item"
+                :class="{ 'is-active': activeRoute === item.key }"
+                type="button"
+                @click="navigate(item.key)"
+              >
+                <span class="nav-icon"><component :is="item.icon" :size="17" /></span>
+                <span class="nav-copy">
+                  <strong>{{ item.label }}</strong>
+                  <small>{{ item.desc }}</small>
+                </span>
+              </button>
+            </el-tooltip>
+          </section>
         </nav>
       </aside>
 
@@ -137,7 +164,7 @@ function toggleSidebar() {
         </button>
         <div class="topbar-title">
           <span>{{ routeTitles[activeRoute] || "后台管理" }}</span>
-          <small>OpenClaw 实例、模型与微信绑定</small>
+          <small>实例、插件、微信与小程序接入</small>
         </div>
         <div class="topbar-actions">
           <el-tag :type="wsConnected ? 'success' : 'warning'" effect="plain">
