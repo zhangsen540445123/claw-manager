@@ -71,6 +71,19 @@ describe("miniapp bridge", () => {
     expect(schemas).not.toContain("userKey");
   });
 
+  it("exposes every goal create variant at the top schema level", () => {
+    const registered: Array<{ factory: (ctx: object) => { name: string; parameters: unknown }; name: string }> = [];
+    plugin.register({
+      registerTool: (factory: (ctx: object) => { name: string; parameters: unknown }, options: { name: string }) => registered.push({ factory, name: options.name }),
+      logger: { info: vi.fn() },
+    } as never);
+    const goal = registered.find(item => item.name === "miniapp_goal")!.factory({ requesterSenderId: "sender" }).parameters as {
+      anyOf: Array<{ anyOf?: unknown; properties?: { operation?: { const?: string } } }>;
+    };
+    expect(goal.anyOf.every(branch => branch.anyOf === undefined)).toBe(true);
+    expect(goal.anyOf.filter(branch => branch.properties?.operation?.const === "create")).toHaveLength(8);
+  });
+
   it.each(operationMappings)("maps %s.%s to %s", (domain, operation, actionKey) => {
     expect(mapDomainOperation(domain, { operation })).toEqual({ actionKey, parameters: {} });
   });

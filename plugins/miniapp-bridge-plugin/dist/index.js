@@ -43,7 +43,7 @@ const habitFields = {
     habitPrefix: Type.Optional(Type.String({ maxLength: 100 })),
     habitEncourageText: Type.Optional(Type.String({ maxLength: 500 })),
 };
-const goalCreateSchema = Type.Union([
+const goalCreateVariants = [
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("PROJECT") }),
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("PROJECT") }),
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("DAILY"), habitDailyWeekDays: Type.Array(Type.Integer({ minimum: 0, maximum: 6 }), { minItems: 1, uniqueItems: true }) }),
@@ -52,7 +52,7 @@ const goalCreateSchema = Type.Union([
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("WEEKLY"), habitWeeklyDays: Type.Integer({ minimum: 1, maximum: 7 }) }),
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("PERIOD"), habitIntervalDays: Type.Integer({ minimum: 1 }) }),
     strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("PERIOD"), habitIntervalDays: Type.Integer({ minimum: 1 }) }),
-]);
+];
 const goalUpdateFields = {
     goalId: POSITIVE_ID,
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
@@ -74,7 +74,8 @@ const goalUpdateFields = {
 const completionFields = { completedMonth: Type.Optional(MONTH), completionSummary: Type.Optional(Type.String()), completionImages: Type.Optional(Type.String()) };
 const goalSchema = Type.Union([
     strictObject({ operation: Type.Literal("list"), year: Type.Optional(YEAR), month: Type.Optional(MONTH), goalType: Type.Optional(GOAL_TYPE), status: Type.Optional(STATUS), category: Type.Optional(CATEGORY), completed: Type.Optional(Type.Union([Type.Literal(0), Type.Literal(1)])), keyword: Type.Optional(Type.String()) }),
-    strictObject({ operation: Type.Literal("get"), goalId: POSITIVE_ID }), goalCreateSchema,
+    strictObject({ operation: Type.Literal("get"), goalId: POSITIVE_ID }),
+    ...goalCreateVariants,
     strictObject({ operation: Type.Literal("update"), ...goalUpdateFields }),
     strictObject({ operation: Type.Literal("delete"), goalId: POSITIVE_ID }),
     strictObject({ operation: Type.Literal("toggle_completion"), goalId: POSITIVE_ID, ...completionFields }),
