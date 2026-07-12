@@ -1,37 +1,179 @@
-import { Type } from "@sinclair/typebox";
+import { Type, type TSchema } from "@sinclair/typebox";
 import { randomUUID } from "node:crypto";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 type ToolContext = { requesterSenderId?: string };
-type BridgeInput = { actionKey: string; parameters?: Record<string, unknown> };
+type Domain = "daily_task" | "goal" | "subtask" | "habit_checkin" | "html_content";
+type DomainInput = { operation: string; [key: string]: unknown };
+type BridgeInput = { actionKey: string; parameters: Record<string, unknown> };
 
-const ACTION_KEYS = [
-  "daily_checklist", "daily_task_create", "daily_task_update", "daily_task_toggle", "daily_task_delete",
-  "daily_task_yesterday_uncompleted_count", "goal_list", "goal_get", "goal_create", "goal_update", "goal_delete",
-  "goal_toggle_completion", "goal_uncomplete", "goal_statistics", "goal_year_month_statistics", "goal_categories",
-  "goal_category_list", "subtask_list", "subtask_create", "subtask_update", "subtask_delete", "subtask_toggle",
-  "habit_checkin", "habit_cancel", "habit_status", "habit_records", "habit_count", "habit_batch",
-  "html_create", "html_get", "html_list", "html_delete",
-] as const;
+const DATE = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Date in yyyy-MM-dd format" });
+const DATE_TIME = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$", description: "Date-time in yyyy-MM-dd HH:mm:ss format" });
+const POSITIVE_ID = Type.Integer({ minimum: 1 });
+const YEAR = Type.Integer({ minimum: 2000, maximum: 9999 });
+const MONTH = Type.Integer({ minimum: 1, maximum: 12 });
+const CATEGORY = Type.Union([
+  Type.Literal("study"), Type.Literal("experience"), Type.Literal("relax"),
+  Type.Literal("family"), Type.Literal("core"), Type.Literal("work"),
+  Type.Literal("social"), Type.Literal("finance"), Type.Literal("health"),
+]);
+const GOAL_TYPE = Type.Union([Type.Literal("YEAR"), Type.Literal("MONTH")]);
+const GOAL_CATEGORY = Type.Union([Type.Literal("PROJECT"), Type.Literal("HABIT")]);
+const STATUS = Type.Union([Type.Literal("ACTIVE"), Type.Literal("COMPLETED"), Type.Literal("PAUSED"), Type.Literal("CANCELLED")]);
+const PRIORITY = Type.Union([Type.Literal("HIGH"), Type.Literal("MEDIUM"), Type.Literal("LOW")]);
 
-export async function callMiniappBridge(
-  input: BridgeInput,
-  ctx: ToolContext,
-  env: NodeJS.ProcessEnv = process.env,
-  fetcher: typeof fetch = fetch,
-): Promise<unknown> {
+function strictObject(properties: Record<string, TSchema>) {
+  return Type.Object(properties, { additionalProperties: false });
+}
+
+const dailyTaskSchema = Type.Union([
+  strictObject({ operation: Type.Literal("get_checklist"), date: Type.Optional(DATE) }),
+  strictObject({ operation: Type.Literal("create"), title: Type.String({ minLength: 1, maxLength: 200 }), date: Type.Optional(DATE), goalId: Type.Optional(POSITIVE_ID) }),
+  strictObject({ operation: Type.Literal("update"), taskId: POSITIVE_ID, title: Type.String({ minLength: 1, maxLength: 200 }), goalId: Type.Optional(POSITIVE_ID) }),
+  strictObject({ operation: Type.Literal("toggle"), taskId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("delete"), taskId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("yesterday_uncompleted_count") }),
+]);
+
+const goalCreateBase = {
+  title: Type.String({ minLength: 1, maxLength: 100 }),
+  goalYear: YEAR,
+  category: CATEGORY,
+  description: Type.Optional(Type.String({ maxLength: 500 })),
+  isFrogGoal: Type.Optional(Type.Union([Type.Literal(0), Type.Literal(1)])),
+  startTime: Type.Optional(DATE_TIME),
+  endTime: Type.Optional(DATE_TIME),
+  icon: Type.Optional(Type.String({ maxLength: 100 })),
+};
+const habitFields = {
+  habitStartDate: DATE,
+  habitTargetDays: Type.Integer({ minimum: -1 }),
+  habitTargetCount: Type.Integer({ minimum: 1 }),
+  habitSuffix: Type.String({ minLength: 1, maxLength: 100 }),
+  habitPrefix: Type.Optional(Type.String({ maxLength: 100 })),
+  habitEncourageText: Type.Optional(Type.String({ maxLength: 500 })),
+};
+const goalCreateSchema = Type.Union([
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("PROJECT") }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("PROJECT") }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("DAILY"), habitDailyWeekDays: Type.Array(Type.Integer({ minimum: 0, maximum: 6 }), { minItems: 1, uniqueItems: true }) }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("DAILY"), habitDailyWeekDays: Type.Array(Type.Integer({ minimum: 0, maximum: 6 }), { minItems: 1, uniqueItems: true }) }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("WEEKLY"), habitWeeklyDays: Type.Integer({ minimum: 1, maximum: 7 }) }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("WEEKLY"), habitWeeklyDays: Type.Integer({ minimum: 1, maximum: 7 }) }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("YEAR"), goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("PERIOD"), habitIntervalDays: Type.Integer({ minimum: 1 }) }),
+  strictObject({ operation: Type.Literal("create"), ...goalCreateBase, ...habitFields, goalType: Type.Literal("MONTH"), goalMonth: MONTH, goalCategory: Type.Literal("HABIT"), habitFrequencyType: Type.Literal("PERIOD"), habitIntervalDays: Type.Integer({ minimum: 1 }) }),
+]);
+
+const goalUpdateFields = {
+  goalId: POSITIVE_ID,
+  title: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  goalContent: Type.Optional(Type.String({ maxLength: 500 })),
+  description: Type.Optional(Type.String({ maxLength: 500 })),
+  status: Type.Optional(STATUS), priority: Type.Optional(PRIORITY),
+  deadline: Type.Optional(DATE_TIME), progress: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
+  isFrogGoal: Type.Optional(Type.Union([Type.Literal(0), Type.Literal(1)])),
+  startTime: Type.Optional(DATE_TIME), endTime: Type.Optional(DATE_TIME),
+  icon: Type.Optional(Type.String({ maxLength: 100 })), goalCategory: Type.Optional(GOAL_CATEGORY),
+  habitPrefix: Type.Optional(Type.String({ maxLength: 100 })), habitTargetCount: Type.Optional(Type.Integer({ minimum: 1 })),
+  habitSuffix: Type.Optional(Type.String({ maxLength: 100 })), completionSummary: Type.Optional(Type.String()),
+  clearHabitConfig: Type.Optional(Type.Boolean()), habitFrequencyType: Type.Optional(Type.Union([Type.Literal("DAILY"), Type.Literal("WEEKLY"), Type.Literal("PERIOD")])),
+  habitDailyWeekDays: Type.Optional(Type.Array(Type.Integer({ minimum: 0, maximum: 6 }), { uniqueItems: true })),
+  habitWeeklyDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 })), habitEncourageText: Type.Optional(Type.String()),
+  habitLivesRemaining: Type.Optional(Type.Integer({ minimum: 0 })), habitTargetDays: Type.Optional(Type.Integer({ minimum: -1 })),
+  habitStartDate: Type.Optional(DATE), habitIntervalDays: Type.Optional(Type.Integer({ minimum: 1 })),
+};
+const completionFields = { completedMonth: Type.Optional(MONTH), completionSummary: Type.Optional(Type.String()), completionImages: Type.Optional(Type.String()) };
+const goalSchema = Type.Union([
+  strictObject({ operation: Type.Literal("list"), year: Type.Optional(YEAR), month: Type.Optional(MONTH), goalType: Type.Optional(GOAL_TYPE), status: Type.Optional(STATUS), category: Type.Optional(CATEGORY), completed: Type.Optional(Type.Union([Type.Literal(0), Type.Literal(1)])), keyword: Type.Optional(Type.String()) }),
+  strictObject({ operation: Type.Literal("get"), goalId: POSITIVE_ID }), goalCreateSchema,
+  strictObject({ operation: Type.Literal("update"), ...goalUpdateFields }),
+  strictObject({ operation: Type.Literal("delete"), goalId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("toggle_completion"), goalId: POSITIVE_ID, ...completionFields }),
+  strictObject({ operation: Type.Literal("uncomplete"), goalId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("statistics") }),
+  strictObject({ operation: Type.Literal("year_month_statistics"), year: Type.Optional(YEAR) }),
+  strictObject({ operation: Type.Literal("categories"), year: Type.Optional(YEAR), month: Type.Optional(MONTH), goalType: Type.Optional(GOAL_TYPE) }),
+  strictObject({ operation: Type.Literal("category_list"), category: CATEGORY, year: Type.Optional(YEAR), month: Type.Optional(MONTH) }),
+]);
+
+const subtaskFields = { taskName: Type.String({ minLength: 1, maxLength: 200 }), startTime: Type.Optional(DATE_TIME), endTime: Type.Optional(DATE_TIME), sortOrder: Type.Optional(Type.Integer({ minimum: 0 })) };
+const subtaskSchema = Type.Union([
+  strictObject({ operation: Type.Literal("list"), goalId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("create"), goalId: POSITIVE_ID, ...subtaskFields }),
+  strictObject({ operation: Type.Literal("update"), goalId: POSITIVE_ID, subTaskId: POSITIVE_ID, ...subtaskFields }),
+  strictObject({ operation: Type.Literal("toggle"), goalId: POSITIVE_ID, subTaskId: POSITIVE_ID, ...completionFields }),
+  strictObject({ operation: Type.Literal("delete"), goalId: POSITIVE_ID, subTaskId: POSITIVE_ID }),
+]);
+
+const habitCheckinSchema = Type.Union([
+  strictObject({ operation: Type.Literal("status"), goalId: POSITIVE_ID, date: Type.Optional(DATE) }),
+  strictObject({ operation: Type.Literal("records"), goalId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("count"), goalId: POSITIVE_ID }),
+  strictObject({ operation: Type.Literal("checkin"), goalId: POSITIVE_ID, date: Type.Optional(DATE) }),
+  strictObject({ operation: Type.Literal("cancel"), goalId: POSITIVE_ID, date: Type.Optional(DATE) }),
+  strictObject({ operation: Type.Literal("batch"), goalId: POSITIVE_ID, count: Type.Integer({ minimum: 1 }) }),
+]);
+
+const htmlContentSchema = Type.Union([
+  strictObject({ operation: Type.Literal("create"), htmlContent: Type.String({ minLength: 1 }), title: Type.Optional(Type.String()), contentKey: Type.Optional(Type.String({ minLength: 1 })) }),
+  strictObject({ operation: Type.Literal("get"), contentKey: Type.String({ minLength: 1 }) }),
+  strictObject({ operation: Type.Literal("list") }),
+  strictObject({ operation: Type.Literal("delete"), contentKey: Type.String({ minLength: 1 }) }),
+]);
+
+const ACTIONS: Record<Domain, Record<string, string>> = {
+  daily_task: { get_checklist: "daily_checklist", create: "daily_task_create", update: "daily_task_update", toggle: "daily_task_toggle", delete: "daily_task_delete", yesterday_uncompleted_count: "daily_task_yesterday_uncompleted_count" },
+  goal: { list: "goal_list", get: "goal_get", create: "goal_create", update: "goal_update", delete: "goal_delete", toggle_completion: "goal_toggle_completion", uncomplete: "goal_uncomplete", statistics: "goal_statistics", year_month_statistics: "goal_year_month_statistics", categories: "goal_categories", category_list: "goal_category_list" },
+  subtask: { list: "subtask_list", create: "subtask_create", update: "subtask_update", toggle: "subtask_toggle", delete: "subtask_delete" },
+  habit_checkin: { status: "habit_status", records: "habit_records", count: "habit_count", checkin: "habit_checkin", cancel: "habit_cancel", batch: "habit_batch" },
+  html_content: { create: "html_create", get: "html_get", list: "html_list", delete: "html_delete" },
+};
+
+const CATEGORY_NAMES: Record<string, string> = { study: "学习·成长", experience: "体验·突破", relax: "休闲·放松", family: "家庭·生活", core: "核心词", work: "工作·事业", social: "人际·社群", finance: "财务·理财", health: "健康·身体" };
+
+export function mapDomainOperation(domain: string, input: DomainInput): BridgeInput {
+  const actionKey = ACTIONS[domain as Domain]?.[input.operation];
+  if (!actionKey) throw new Error("unsupported miniapp operation");
+  const parameters = Object.fromEntries(Object.entries(input).filter(([key, value]) => key !== "operation" && value !== undefined));
+  if (domain === "goal" && input.operation === "create") validateGoalCreate(parameters);
+  return { actionKey, parameters };
+}
+
+function validateGoalCreate(parameters: Record<string, unknown>) {
+  for (const key of ["title", "goalType", "goalYear", "goalCategory", "category"]) requireValue(parameters, key);
+  if (parameters.goalType === "MONTH") requireValue(parameters, "goalMonth");
+  if (parameters.goalType === "YEAR" && parameters.goalMonth !== undefined) throw new Error("YEAR goal must not include goalMonth");
+  const category = String(parameters.category);
+  if (!CATEGORY_NAMES[category]) throw new Error("invalid category");
+  if (parameters.goalCategory === "HABIT") {
+    for (const key of ["habitStartDate", "habitTargetDays", "habitTargetCount", "habitSuffix", "habitFrequencyType"]) requireValue(parameters, key);
+    if (parameters.habitFrequencyType === "DAILY") requireValue(parameters, "habitDailyWeekDays");
+    if (parameters.habitFrequencyType === "WEEKLY") requireValue(parameters, "habitWeeklyDays");
+    if (parameters.habitFrequencyType === "PERIOD") requireValue(parameters, "habitIntervalDays");
+  }
+}
+
+function requireValue(parameters: Record<string, unknown>, key: string) {
+  const value = parameters[key];
+  if (value === undefined || value === null || (typeof value === "string" && !value.trim()) || (Array.isArray(value) && value.length === 0)) {
+    throw new Error(`missing required parameter: ${key}`);
+  }
+}
+
+export async function callDomainBridge(domain: string, input: DomainInput, ctx: ToolContext,
+  env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = fetch): Promise<unknown> {
   const sender = ctx.requesterSenderId?.trim() ?? "";
   if (!sender) throw new Error("miniapp bridge identity unavailable");
   const baseUrl = (env.CLAW_MANAGER_INTERNAL_BASE_URL ?? "").replace(/\/+$/, "");
   const token = env.OPENVIKING_BROKER_TOKEN ?? "";
   const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
   if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
-  if (!ACTION_KEYS.includes(input.actionKey as (typeof ACTION_KEYS)[number])) throw new Error("unsupported miniapp actionKey");
+  const mapped = mapDomainOperation(domain, input);
   const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
-  const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/actions/${encodeURIComponent(input.actionKey)}`, {
+  const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/actions/${encodeURIComponent(mapped.actionKey)}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ instanceId, requesterSenderId: sender, parameters: input.parameters ?? {}, requestId }),
+    body: JSON.stringify({ instanceId, requesterSenderId: sender, parameters: mapped.parameters, requestId }),
   });
   const text = await response.text();
   let body: unknown;
@@ -40,31 +182,27 @@ export async function callMiniappBridge(
   return body;
 }
 
+function registerTool(api: OpenClawPluginApi, domain: Domain, name: string, label: string, description: string, parameters: TSchema) {
+  api.registerTool((ctx: ToolContext) => ({
+    name, label, description, parameters,
+    execute: async (_toolCallId: string, input: DomainInput) => {
+      const result = await callDomainBridge(domain, input, ctx);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+    },
+  }), { name });
+}
+
 const plugin = {
   id: "miniapp-bridge",
   name: "Claw Manager Miniapp Bridge",
-  description: "Sender-scoped tools for the bound miniapp Open API",
+  description: "Sender-scoped typed tools for the bound Time Manager Open API",
   register(api: OpenClawPluginApi) {
-    api.registerTool(
-      (ctx: ToolContext) => ({
-        name: "miniapp_api_call",
-        label: "Miniapp API Call",
-        description: "Call an approved goal-management miniapp action for the current sender. Never ask for or pass openid or credentials.",
-        parameters: Type.Object({
-          actionKey: Type.Union(ACTION_KEYS.map((value) => Type.Literal(value))),
-          parameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-        }),
-        execute: async (_toolCallId: string, params: BridgeInput) => {
-          const result = await callMiniappBridge(params, ctx);
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(result) }],
-            details: result,
-          };
-        },
-      }),
-      { name: "miniapp_api_call" },
-    );
-    api.logger?.info?.("miniapp-bridge: sender-scoped tool registered");
+    registerTool(api, "daily_task", "miniapp_daily_task", "Miniapp Daily Task", "Query and manage the current sender's daily checklist and tasks.", dailyTaskSchema);
+    registerTool(api, "goal", "miniapp_goal", "Miniapp Goal", "Query and manage the current sender's yearly and monthly project or habit goals.", goalSchema);
+    registerTool(api, "subtask", "miniapp_subtask", "Miniapp Subtask", "Query and manage subtasks belonging to the current sender's goals.", subtaskSchema);
+    registerTool(api, "habit_checkin", "miniapp_habit_checkin", "Miniapp Habit Check-in", "Query and manage habit check-ins for the current sender.", habitCheckinSchema);
+    registerTool(api, "html_content", "miniapp_html_content", "Miniapp HTML Content", "Store and retrieve displayable HTML content for the current sender.", htmlContentSchema);
+    api.logger?.info?.("miniapp-bridge: five sender-scoped typed tools registered");
   },
 };
 

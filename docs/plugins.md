@@ -9,7 +9,7 @@ Claw Manager 通过后台插件管理为 OpenClaw 实例安装插件。当前重
 | 微信插件 | `@claw-manager/openclaw-weixin` | `openclaw-weixin` | 基于官方微信插件二开，补充 sender 身份传递和 OpenViking handoff |
 | API Channel 插件 | `@claw-manager/openclaw-api-channel` | `claw-manager-api` | 接收 Claw Manager 外部聊天请求，转发后端确定的 `openVikingUserId`，写 handoff 并输出 SSE delta |
 | OpenViking 插件 | `@claw-manager/openviking-openclaw-plugin` | `openviking` | 基于 OpenViking 官方 OpenClaw 示例插件二开，接入 broker 和用户级记忆隔离 |
-| 小程序 Bridge 插件 | `@claw-manager/miniapp-bridge-plugin` | `miniapp-bridge` | 注册 sender-scoped `miniapp_api_call`，通过 Claw Manager 安全调用当前用户的小程序业务接口 |
+| 小程序 Bridge 插件 | `@claw-manager/miniapp-bridge-plugin` | `miniapp-bridge` | 在单个插件中注册待办、目标、子任务、习惯打卡、HTML 五个 sender-scoped 强类型工具，通过 Claw Manager 安全调用当前用户的小程序业务接口 |
 
 ## 安装方式
 
