@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 public interface MiniappUserBindingMapper {
   MiniappUserBindingEntity findByOpenidHash(@Param("openidHash") String openidHash);
 
+  MiniappUserBindingEntity findByWechatUserId(@Param("wechatUserId") String wechatUserId);
+
   List<MiniappWechatBindingSummary> listWechatSummariesByInstanceIds(@Param("instanceIds") List<String> instanceIds);
 
   int countByInstanceId(@Param("instanceId") String instanceId);

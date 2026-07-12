@@ -22,13 +22,9 @@ function Assert-Contains {
   }
 }
 
-$batPath = Get-ChildItem -LiteralPath $Root -Filter "reset-test-env - *.bat" |
-  Select-Object -First 1 -ExpandProperty FullName
+$batPath = Join-Path $Root "reset-test-env.bat"
 $helperPath = Join-Path $Root "scripts\reset-test-env-bootstrap.ps1"
 
-if (-not $batPath) {
-  throw "Expected reset-test-env copy bat to exist under $Root"
-}
 Assert-FileExists $batPath
 Assert-FileExists $helperPath
 
@@ -62,6 +58,10 @@ Assert-Contains $helper "preset_mr5vi8yy_54139e" "helper must seed the fixed mod
 Assert-Contains $helper "/api/admin/wechat-plugins/install" "helper must batch install the WeChat plugin."
 Assert-Contains $helper "/api/admin/openviking-plugins/install" "helper must batch install the OpenViking plugin."
 Assert-Contains $helper "/api/admin/api-channel-plugins/install" "helper must batch install the API Channel plugin."
+Assert-Contains $helper "/api/admin/miniapp-bridge-plugins/install" "helper must batch install the Miniapp Bridge plugin."
+Assert-Contains $helper "/api/admin/miniapp-bridge-plugins/check" "helper must wait for the Miniapp Bridge plugin installation."
+Assert-Contains $helper "Skipping already installed" "helper must skip plugin installation for instances that are already installed."
+Assert-Contains $helper "missingInstanceIds" "helper must install plugins only on missing instances."
 Assert-Contains $helper "/api/admin/instances/batch/restart-gateway" "helper must batch restart both gateways."
 
 if ($helper -match 'Write-(Host|Output|Information).*(sk-[A-Za-z0-9])') {

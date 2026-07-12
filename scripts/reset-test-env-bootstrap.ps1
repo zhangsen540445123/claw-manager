@@ -363,8 +363,22 @@ function Install-PluginBatch {
   )
 
   Write-Section "Installing $($Plugin.Name)"
+  $current = @(Invoke-PluginCheck -Plugin $Plugin -InstanceIds $InstanceIds)
+  $installedInstanceIds = @($current | Where-Object { $_.plugin -and $_.plugin.installed -eq $true } | ForEach-Object { $_.instanceId })
+  $missingInstanceIds = @($InstanceIds | Where-Object { $installedInstanceIds -notcontains $_ })
+
+  if ($missingInstanceIds.Count -eq 0) {
+    Write-Host "[OK] Skipping already installed $($Plugin.Name) on all requested instances."
+    Wait-PluginInstalled -Plugin $Plugin -InstanceIds $InstanceIds | Out-Null
+    return
+  }
+
+  if ($installedInstanceIds.Count -gt 0) {
+    Write-Host "  Skipping already installed instances: $(($installedInstanceIds) -join ', ')"
+  }
+
   $response = Invoke-ClawApi -Method POST -Path $Plugin.Install -Body @{
-    instanceIds = $InstanceIds
+    instanceIds = $missingInstanceIds
     version = ""
   } -TimeoutSec 60
   $items = @($response.plugins)
@@ -421,7 +435,8 @@ try {
   $plugins = @(
     @{ Name = "WeChat"; Install = "/api/admin/wechat-plugins/install"; Check = "/api/admin/wechat-plugins/check" },
     @{ Name = "OpenViking"; Install = "/api/admin/openviking-plugins/install"; Check = "/api/admin/openviking-plugins/check" },
-    @{ Name = "API Channel"; Install = "/api/admin/api-channel-plugins/install"; Check = "/api/admin/api-channel-plugins/check" }
+    @{ Name = "API Channel"; Install = "/api/admin/api-channel-plugins/install"; Check = "/api/admin/api-channel-plugins/check" },
+    @{ Name = "Miniapp Bridge"; Install = "/api/admin/miniapp-bridge-plugins/install"; Check = "/api/admin/miniapp-bridge-plugins/check" }
   )
 
   foreach ($plugin in $plugins) {

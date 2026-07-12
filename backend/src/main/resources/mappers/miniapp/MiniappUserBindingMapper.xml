@@ -21,6 +21,14 @@
     LIMIT 1
   </select>
 
+  <select id="findByWechatUserId" resultMap="MiniappUserBindingMap">
+    SELECT *
+    FROM miniapp_user_bindings
+    WHERE wechat_user_id = #{wechatUserId}
+      AND bind_status = 'connected'
+    LIMIT 1
+  </select>
+
   <select id="listWechatSummariesByInstanceIds" resultType="com.clawbotforall.miniapp.MiniappWechatBindingSummary">
     SELECT
       b.instance_id AS instanceId,

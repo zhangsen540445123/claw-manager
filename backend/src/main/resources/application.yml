@@ -48,6 +48,7 @@ springdoc:
     path: /swagger-ui.html
 
 clawbot:
+  miniapp-open-api-base-url: ${MINIAPP_OPEN_API_BASE_URL:}
   paths:
     data-dir: ${DATA_DIR:data}
   admin:

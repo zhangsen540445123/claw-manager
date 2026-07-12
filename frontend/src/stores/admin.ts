@@ -76,6 +76,11 @@ interface ApiChannelPluginBatchItem {
   plugin: PublicApiChannelPluginStatus;
 }
 
+interface MiniappBridgePluginBatchItem {
+  instanceId: string;
+  plugin: PublicApiChannelPluginStatus;
+}
+
 export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
@@ -95,6 +100,8 @@ export const useAdminStore = defineStore("admin", {
     skillInstanceSyncs: [] as PublicSkillInstanceSync[],
     apiChannelPluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
     apiChannelPluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
+    miniappBridgePluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
+    miniappBridgePluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
@@ -562,6 +569,44 @@ export const useAdminStore = defineStore("admin", {
         next[instanceId] = withPluginVersion(plugin, versions);
       }
       this.apiChannelPluginStatusByInstanceId = next;
+    },
+    async loadMiniappBridgePluginStatus(instanceId: string, checkLatest = false) {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/miniapp-bridge-plugin?checkLatest=${checkLatest ? "true" : "false"}`
+      );
+      this.miniappBridgePluginStatusByInstanceId = {
+        ...this.miniappBridgePluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.miniappBridgePluginVersions)
+      };
+      return this.miniappBridgePluginStatusByInstanceId[instanceId];
+    },
+    async loadMiniappBridgePluginVersions() {
+      const response = await api<{ versions: PublicApiChannelPluginVersions }>("/api/admin/miniapp-bridge-plugins/versions");
+      this.miniappBridgePluginVersions = response.versions;
+      return response.versions;
+    },
+    async operateMiniappBridgePlugin(instanceId: string, action: "install" | "uninstall" | "upgrade" | "reinstall", version = "") {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/miniapp-bridge-plugin/${action}`,
+        { method: "POST", ...jsonBody({ version }) }
+      );
+      this.miniappBridgePluginStatusByInstanceId = {
+        ...this.miniappBridgePluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.miniappBridgePluginVersions)
+      };
+      return this.miniappBridgePluginStatusByInstanceId[instanceId];
+    },
+    async batchMiniappBridgePlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
+      if (action === "check") {
+        return Promise.all(instanceIds.map(async (instanceId) => ({ instanceId, plugin: await this.loadMiniappBridgePluginStatus(instanceId) })));
+      }
+      const response = await api<{ plugins: MiniappBridgePluginBatchItem[] }>(`/api/admin/miniapp-bridge-plugins/${action}`, {
+        method: "POST", ...jsonBody({ instanceIds, version })
+      });
+      const next = { ...this.miniappBridgePluginStatusByInstanceId };
+      for (const item of response.plugins) next[item.instanceId] = withPluginVersion(item.plugin, this.miniappBridgePluginVersions);
+      this.miniappBridgePluginStatusByInstanceId = next;
+      return response.plugins;
     },
     async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(

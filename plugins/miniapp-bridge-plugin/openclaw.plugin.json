@@ -1,0 +1,12 @@
+{
+  "id": "miniapp-bridge",
+  "version": "2026.7.14",
+  "contracts": {
+    "tools": ["miniapp_api_call"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

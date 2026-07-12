@@ -115,6 +115,32 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual(["你好", "呀"]);
   });
 
+  it("preserves a legitimate repeated character in cumulative assistant text", async () => {
+    const chunks: string[] = [];
+    resetApiAgentEventStreamsForTest();
+    registerApiAgentEventStream({
+      requestId: "req-agent-repeated-character",
+      runId: "run-agent-repeated-character",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      onDelta: async (text) => chunks.push(text),
+    });
+
+    await handleApiAssistantAgentEvent({
+      stream: "assistant",
+      runId: "run-agent-repeated-character",
+      data: { text: "Skil", delta: "l" },
+      seq: 1,
+    });
+    await handleApiAssistantAgentEvent({
+      stream: "assistant",
+      runId: "run-agent-repeated-character",
+      data: { text: "Skill", delta: "l" },
+      seq: 2,
+    });
+
+    expect(chunks.join("")).toBe("Skill");
+  });
+
   it("prefers the monotonic assistant text suffix over an overlapping explicit delta", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();
@@ -245,7 +271,7 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual(["你", "好"]);
   });
 
-  it("skips duplicate single-character tail deltas", async () => {
+  it("preserves repeated single-character deltas when events have no duplicate seq", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();
     registerApiAgentEventStream({
@@ -263,7 +289,7 @@ describe("buildApiInboundContext", () => {
       });
     }
 
-    expect(chunks).toEqual(["甲", "乙", "丙"]);
+    expect(chunks).toEqual(["甲", "乙", "乙", "丙"]);
   });
 
   it("uses explicit delta to correct duplicated suffixes in cumulative text events", async () => {
@@ -290,7 +316,7 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual(["甲乙丙丁戊己庚辛", "壬癸"]);
   });
 
-  it("collapses duplicated leading characters in cumulative text suffixes without explicit delta", async () => {
+  it("preserves repeated leading characters in cumulative text suffixes without explicit delta", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();
     registerApiAgentEventStream({
@@ -311,10 +337,10 @@ describe("buildApiInboundContext", () => {
       data: { text: "甲乙丙丁戊己己庚辛壬癸" },
     });
 
-    expect(chunks).toEqual(["甲乙丙丁戊", "己庚辛壬癸"]);
+    expect(chunks).toEqual(["甲乙丙丁戊", "己己庚辛壬癸"]);
   });
 
-  it("collapses duplicated internal characters in cumulative text suffixes without explicit delta", async () => {
+  it("preserves repeated internal characters in cumulative text suffixes without explicit delta", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();
     registerApiAgentEventStream({
@@ -335,7 +361,7 @@ describe("buildApiInboundContext", () => {
       data: { text: "甲乙丙丁戊己庚庚辛壬癸" },
     });
 
-    expect(chunks).toEqual(["甲乙丙丁戊己", "庚辛壬癸"]);
+    expect(chunks).toEqual(["甲乙丙丁戊己", "庚庚辛壬癸"]);
   });
 
   it("does not emit non-monotonic cumulative assistant text without an explicit delta", async () => {

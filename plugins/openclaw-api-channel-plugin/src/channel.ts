@@ -206,14 +206,13 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
   const text = stringValue(event.data.text);
   const explicitDelta = stringValue(event.data.delta);
   let delta = "";
+  let authoritativeCumulativeSuffix = false;
   if (text) {
     if (text.startsWith(state.emittedText)) {
-      const suffix = collapseAdjacentDuplicatesInCumulativeSuffix(
-        state.emittedText,
-        trimOverlappingDelta(state.emittedText, text.slice(state.emittedText.length)),
-      );
+      const suffix = text.slice(state.emittedText.length);
       const explicit = explicitDelta ? trimOverlappingDelta(state.emittedText, explicitDelta) : "";
       delta = shouldPreferExplicitAgentDelta(state.emittedText, suffix, explicit) ? explicit : suffix;
+      authoritativeCumulativeSuffix = true;
     } else {
       const explicit = explicitDelta ? trimOverlappingDelta(state.emittedText, explicitDelta) : "";
       if (explicit) {
@@ -237,7 +236,9 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
   if (!delta) {
     return false;
   }
-  delta = trimOverlappingDelta(state.emittedText, delta);
+  if (!authoritativeCumulativeSuffix && delta.length > 1) {
+    delta = trimOverlappingDelta(state.emittedText, delta);
+  }
   if (!delta) {
     return false;
   }
@@ -992,21 +993,6 @@ function shouldPreferExplicitAgentDelta(previous: string, suffix: string, explic
   }
   const extraPrefix = suffix.slice(0, suffix.length - explicit.length);
   return extraPrefix.length === 1 && explicit.startsWith(extraPrefix);
-}
-
-function collapseAdjacentDuplicatesInCumulativeSuffix(previous: string, suffix: string): string {
-  if (!previous || suffix.length < 2) {
-    return suffix;
-  }
-  const chars = [...suffix];
-  const collapsed: string[] = [];
-  for (const ch of chars) {
-    if (collapsed.length > 0 && collapsed[collapsed.length - 1] === ch) {
-      continue;
-    }
-    collapsed.push(ch);
-  }
-  return collapsed.length === chars.length ? suffix : collapsed.join("");
 }
 
 function errorMessage(error: unknown): string {

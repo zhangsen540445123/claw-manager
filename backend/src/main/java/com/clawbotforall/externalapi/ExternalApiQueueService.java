@@ -13,8 +13,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -276,28 +278,21 @@ public class ExternalApiQueueService {
         continue;
       }
       Map<String, Object> event = objectMapper.readValue(line, MAP_TYPE);
+      String sequence = valueString(event.get("seq"));
+      if (!sequence.isBlank() && !state.seenSequences.add(sequence)) {
+        continue;
+      }
       String type = stringValue(event.get("type"));
       if ("delta".equals(type)) {
         String text = valueString(event.get("text"));
         if (!text.isBlank()) {
-          if (isDuplicateSingleCharacterTailDelta(state.emitted, text)) {
-            continue;
-          }
           onDelta.accept(text);
-          state.emitted.append(text);
         }
       } else if ("error".equals(type)) {
         throw new IllegalStateException("API Channel 处理失败：" + valueString(event.get("error")));
       }
     }
     return new StreamReadResult(progressed);
-  }
-
-  private static boolean isDuplicateSingleCharacterTailDelta(StringBuilder emitted, String text) {
-    if (emitted.isEmpty() || text.isEmpty() || text.codePointCount(0, text.length()) != 1) {
-      return false;
-    }
-    return emitted.toString().endsWith(text);
   }
 
   private static int indexOfNewline(StringBuilder builder) {
@@ -366,7 +361,7 @@ public class ExternalApiQueueService {
   private static class StreamReadState {
     private long offset;
     private final StringBuilder pending = new StringBuilder();
-    private final StringBuilder emitted = new StringBuilder();
+    private final Set<String> seenSequences = new HashSet<>();
   }
 
   record QueueTimeouts(

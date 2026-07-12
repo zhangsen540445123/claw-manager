@@ -189,7 +189,7 @@ class ExternalApiQueueServiceTest {
   }
 
   @Test
-  void skipsDuplicateSingleCharacterStreamDeltaAtCurrentTail() throws Exception {
+  void deduplicatesStreamEventsBySequenceAndPreservesRepeatedText() throws Exception {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
     Path homeDir = tempDir.resolve("home");
@@ -218,20 +218,21 @@ class ExternalApiQueueServiceTest {
     Files.writeString(streamPath, """
         {"seq":1,"type":"delta","text":"甲","createdAt":"2026-06-28T00:00:00Z"}
         {"seq":2,"type":"delta","text":"乙","createdAt":"2026-06-28T00:00:01Z"}
-        {"seq":3,"type":"delta","text":"乙","createdAt":"2026-06-28T00:00:02Z"}
-        {"seq":4,"type":"delta","text":"丙","createdAt":"2026-06-28T00:00:03Z"}
+        {"seq":2,"type":"delta","text":"乙","createdAt":"2026-06-28T00:00:02Z"}
+        {"seq":3,"type":"delta","text":"乙","createdAt":"2026-06-28T00:00:03Z"}
+        {"seq":4,"type":"delta","text":"丙","createdAt":"2026-06-28T00:00:04Z"}
         """);
-    waitUntil(() -> deltas.size() >= 3);
+    waitUntil(() -> deltas.size() >= 4);
 
     objectMapper.writeValue(root.resolve("responses").resolve("req_duplicate_delta.json").toFile(), Map.of(
         "ok", true,
         "requestId", "req_duplicate_delta",
         "messageId", "msg_duplicate_delta",
-        "text", "甲乙丙"
+        "text", "甲乙乙丙"
     ));
 
-    assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("甲乙丙");
-    assertThat(deltas).containsExactly("甲", "乙", "丙");
+    assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("甲乙乙丙");
+    assertThat(deltas).containsExactly("甲", "乙", "乙", "丙");
   }
 
   @Test
