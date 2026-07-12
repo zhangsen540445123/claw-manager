@@ -126,7 +126,7 @@ async function refreshVersions(showMessage = true) {
         ? await admin.loadOpenVikingPluginVersions(showMessage)
         : activePlugin.value === "api"
           ? await admin.loadApiChannelPluginVersions(showMessage)
-          : await admin.loadMiniappBridgePluginVersions();
+          : await admin.loadMiniappBridgePluginVersions(showMessage);
     if (showMessage) {
       ElMessage.success(versions.latest ? pluginMeta.value.refreshSuccess : "版本暂不可用，请稍后重试。");
     }

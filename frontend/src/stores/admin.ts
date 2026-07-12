@@ -580,9 +580,12 @@ export const useAdminStore = defineStore("admin", {
       };
       return this.miniappBridgePluginStatusByInstanceId[instanceId];
     },
-    async loadMiniappBridgePluginVersions() {
-      const response = await api<{ versions: PublicApiChannelPluginVersions }>("/api/admin/miniapp-bridge-plugins/versions");
+    async loadMiniappBridgePluginVersions(forceRefresh = false) {
+      const response = await api<{ versions: PublicApiChannelPluginVersions }>(
+        `/api/admin/miniapp-bridge-plugins/versions${forceRefresh ? "?forceRefresh=true" : ""}`
+      );
       this.miniappBridgePluginVersions = response.versions;
+      this.applyMiniappBridgePluginVersions(response.versions);
       return response.versions;
     },
     async operateMiniappBridgePlugin(instanceId: string, action: "install" | "uninstall" | "upgrade" | "reinstall", version = "") {
@@ -597,9 +600,6 @@ export const useAdminStore = defineStore("admin", {
       return this.miniappBridgePluginStatusByInstanceId[instanceId];
     },
     async batchMiniappBridgePlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
-      if (action === "check") {
-        return Promise.all(instanceIds.map(async (instanceId) => ({ instanceId, plugin: await this.loadMiniappBridgePluginStatus(instanceId) })));
-      }
       const response = await api<{ plugins: MiniappBridgePluginBatchItem[] }>(`/api/admin/miniapp-bridge-plugins/${action}`, {
         method: "POST", ...jsonBody({ instanceIds, version })
       });
@@ -607,6 +607,13 @@ export const useAdminStore = defineStore("admin", {
       for (const item of response.plugins) next[item.instanceId] = withPluginVersion(item.plugin, this.miniappBridgePluginVersions);
       this.miniappBridgePluginStatusByInstanceId = next;
       return response.plugins;
+    },
+    applyMiniappBridgePluginVersions(versions: PublicApiChannelPluginVersions) {
+      const next = { ...this.miniappBridgePluginStatusByInstanceId };
+      for (const [instanceId, plugin] of Object.entries(next)) {
+        next[instanceId] = withPluginVersion(plugin, versions);
+      }
+      this.miniappBridgePluginStatusByInstanceId = next;
     },
     async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
@@ -787,6 +794,13 @@ export const useAdminStore = defineStore("admin", {
         this.openVikingPluginStatusByInstanceId = {
           ...this.openVikingPluginStatusByInstanceId,
           [payload.instanceId]: withPluginVersion(payload.plugin, this.openVikingPluginVersions)
+        };
+      }
+      if (event.type === "miniapp.bridge.plugin.updated") {
+        const payload = event.payload as { instanceId: string; plugin: PublicApiChannelPluginStatus };
+        this.miniappBridgePluginStatusByInstanceId = {
+          ...this.miniappBridgePluginStatusByInstanceId,
+          [payload.instanceId]: withPluginVersion(payload.plugin, this.miniappBridgePluginVersions)
         };
       }
       if (event.type === "wechat.bindLink.updated") {
