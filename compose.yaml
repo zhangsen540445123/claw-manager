@@ -52,7 +52,7 @@ services:
       MYSQL_PASSWORD: clawbot
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      MINIAPP_OPEN_API_BASE_URL: ${MINIAPP_OPEN_API_BASE_URL:-https://caoxf.nyc.mn/api}
+      MINIAPP_OPEN_API_BASE_URL: ${MINIAPP_OPEN_API_BASE_URL:-https://www.caoxf.nyc.mn/api}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-14}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_NAME: ${ADMIN_NAME:-平台管理员}
