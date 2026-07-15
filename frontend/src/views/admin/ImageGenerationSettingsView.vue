@@ -8,13 +8,13 @@ import { useAdminStore } from "../../stores/admin";
 const admin = useAdminStore();
 const loading = ref(false);
 const saving = ref(false);
-const form = reactive({ enabled: false, providerId: "openai", modelId: "gpt-image-2", apiMode: "openai-images", baseUrl: "", apiKey: "", providerConfig: "{}", timeoutMs: 180000 });
+const form = reactive({ enabled: false, providerId: "openai", modelId: "gpt-image-2", baseUrl: "", apiKey: "", providerConfig: "{}", timeoutMs: 180000 });
 
 async function load() {
   loading.value = true;
   try {
     const value = await admin.loadImageGenerationSettings();
-    Object.assign(form, { enabled: value.enabled, providerId: value.providerId || "openai", modelId: value.modelId || "gpt-image-2", apiMode: value.apiMode || "openai-images", baseUrl: value.baseUrl || "", apiKey: "", providerConfig: value.providerConfig || "{}", timeoutMs: value.timeoutMs || 180000 });
+    Object.assign(form, { enabled: value.enabled, providerId: value.providerId || "openai", modelId: value.modelId || "gpt-image-2", baseUrl: value.baseUrl || "", apiKey: "", providerConfig: value.providerConfig || "{}", timeoutMs: value.timeoutMs || 180000 });
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : "图片生成配置读取失败"); }
   finally { loading.value = false; }
 }
@@ -26,7 +26,7 @@ async function save() {
     if (!form.apiKey.trim()) delete payload.apiKey;
     const result = await admin.saveImageGenerationSettings(payload);
     form.apiKey = "";
-    ElMessage.success(`配置已同步到 ${result.syncedInstanceIds.length} 个实例，请重启 Gateway 使图片工具加载。`);
+    ElMessage.success(`图片生成配置已保存并同步到 ${result.syncedInstanceIds.length} 个实例。`);
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : "图片生成配置保存失败"); }
   finally { saving.value = false; }
 }
@@ -36,7 +36,7 @@ onMounted(load);
 
 <template>
   <section class="workspace">
-    <PageHeader title="图片生成" description="配置所有 OpenClaw 实例共享的原生图片生成模型。">
+    <PageHeader title="图片生成" description="配置由 Claw Manager 调用的 OpenAI 兼容图片生成服务。">
       <template #actions><el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button></template>
     </PageHeader>
     <el-card shadow="never" v-loading="loading">
@@ -44,8 +44,7 @@ onMounted(load);
         <el-form-item label="启用图片生成"><el-switch v-model="form.enabled" /></el-form-item>
         <el-form-item label="Provider ID"><el-input v-model="form.providerId" placeholder="openai" /></el-form-item>
         <el-form-item label="模型 ID"><el-input v-model="form.modelId" placeholder="gpt-image-2" /></el-form-item>
-        <el-form-item label="API 模式"><el-input v-model="form.apiMode" placeholder="openai-images" /></el-form-item>
-        <el-form-item label="Base URL"><el-input v-model="form.baseUrl" placeholder="留空使用 Provider 默认地址" /></el-form-item>
+        <el-form-item label="Base URL"><el-input v-model="form.baseUrl" placeholder="例如 https://image.example.com/v1" /></el-form-item>
         <el-form-item label="API Key">
           <el-input v-model="form.apiKey" type="password" show-password :placeholder="admin.imageGenerationSettings?.apiKeyPreview ? `已配置 ${admin.imageGenerationSettings.apiKeyPreview}，留空保持` : '请输入图片模型 API Key'" />
         </el-form-item>

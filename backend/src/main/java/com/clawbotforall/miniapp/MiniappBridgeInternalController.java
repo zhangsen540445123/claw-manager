@@ -1,6 +1,7 @@
 package com.clawbotforall.miniapp;
 
 import com.clawbotforall.openviking.OpenVikingBrokerTokenService;
+import com.clawbotforall.image.ImageGenerationService;
 import com.clawbotforall.web.ApiException;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -18,12 +19,21 @@ public class MiniappBridgeInternalController {
   private final OpenVikingBrokerTokenService tokenService;
   private final MiniappBridgeService bridgeService;
   private final MiniappArtifactService artifactService;
+  private final ImageGenerationService imageGenerationService;
 
   public MiniappBridgeInternalController(OpenVikingBrokerTokenService tokenService, MiniappBridgeService bridgeService,
-      MiniappArtifactService artifactService) {
+      MiniappArtifactService artifactService, ImageGenerationService imageGenerationService) {
     this.tokenService = tokenService;
     this.bridgeService = bridgeService;
     this.artifactService = artifactService;
+    this.imageGenerationService = imageGenerationService;
+  }
+
+  @PostMapping("/api/internal/miniapp-bridge/image-generation")
+  public Map<String, Object> generateImage(@RequestBody MiniappImageGenerationRequest request,
+      @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+    requireToken(authorization);
+    return imageGenerationService.generate(request.instanceId(), request.prompt(), request.size(), request.quality());
   }
 
   @PostMapping("/api/internal/miniapp-bridge/artifacts/html")

@@ -271,9 +271,14 @@ public class ApiChannelPluginService {
   private String resolveInstallVersion(String version) {
     String normalized = defaultString(version).trim();
     if (!normalized.isBlank()) {
+      if ("latest".equalsIgnoreCase(normalized)) {
+        String latest = versions(true).latest();
+        if (latest.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取 API Channel 插件最新版本。");
+        return latest;
+      }
       return normalized;
     }
-    String latest = versions(false).latest();
+    String latest = versions(true).latest();
     if (latest.isBlank()) {
       throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取 API Channel 插件版本。");
     }
@@ -288,7 +293,9 @@ public class ApiChannelPluginService {
   }
 
   private PublicApiChannelPluginStatus successStatus(InstanceEntity instance, String message, String output) {
-    return new PublicApiChannelPluginStatus(true, currentVersion(instance), cachedLatestVersion(), false, "installed", message, output, Instant.now().toString());
+    ApiChannelPluginVersions refreshed = versions(true);
+    String current = currentVersion(instance);
+    return new PublicApiChannelPluginStatus(true, current, refreshed.latest(), compareVersion(refreshed.latest(), current) > 0, "installed", message, output, Instant.now().toString());
   }
 
   private PublicApiChannelPluginStatus runningStatus(String status, String message) {
@@ -458,7 +465,8 @@ public class ApiChannelPluginService {
     try {
       HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
       HttpResponse<String> response = client.send(
-          HttpRequest.newBuilder(URI.create(REGISTRY_URL)).timeout(Duration.ofSeconds(5)).GET().build(),
+          HttpRequest.newBuilder(URI.create(REGISTRY_URL + "?cacheBust=" + System.currentTimeMillis()))
+              .timeout(Duration.ofSeconds(5)).header("Cache-Control", "no-cache").header("Pragma", "no-cache").GET().build(),
           HttpResponse.BodyHandlers.ofString()
       );
       if (response.statusCode() < 200 || response.statusCode() >= 300) {

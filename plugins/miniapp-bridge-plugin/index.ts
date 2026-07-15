@@ -9,6 +9,7 @@ type Domain = "daily_task" | "goal" | "subtask" | "habit_checkin" | "html_conten
 type DomainInput = { operation: string; [key: string]: unknown };
 type BridgeInput = { actionKey: string; parameters: Record<string, unknown> };
 type ArtifactInput = { operation: "publish_image" | "publish_html"; localPath?: string; htmlContent?: string; title?: string; description?: string; contentKey?: string };
+type ImageGenerationInput = { prompt: string; size?: string; quality?: string };
 
 const DATE = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Date in yyyy-MM-dd format" });
 const DATE_TIME = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$", description: "Date-time in yyyy-MM-dd HH:mm:ss format" });
@@ -129,6 +130,11 @@ const artifactSchema = Type.Union([
   strictObject({ operation: Type.Literal("publish_image"), localPath: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), description: Type.Optional(Type.String({ maxLength: 1000 })) }),
   strictObject({ operation: Type.Literal("publish_html"), htmlContent: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), contentKey: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }),
 ]);
+const imageGenerationSchema = strictObject({
+  prompt: Type.String({ minLength: 1, maxLength: 4000 }),
+  size: Type.Optional(Type.String({ maxLength: 32 })),
+  quality: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
+});
 
 const ACTIONS: Record<Domain, Record<string, string>> = {
   daily_task: { get_checklist: "daily_checklist", create: "daily_task_create", update: "daily_task_update", toggle: "daily_task_toggle", delete: "daily_task_delete", yesterday_uncompleted_count: "daily_task_yesterday_uncompleted_count" },
@@ -229,6 +235,25 @@ export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
   return body;
 }
 
+export async function callImageGeneration(input: ImageGenerationInput, ctx: ToolContext,
+  env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = fetch): Promise<unknown> {
+  const sender = ctx.requesterSenderId?.trim() ?? "";
+  if (!sender) throw new Error("miniapp bridge identity unavailable");
+  const baseUrl = (env.CLAW_MANAGER_INTERNAL_BASE_URL ?? "").replace(/\/+$/, "");
+  const token = env.OPENVIKING_BROKER_TOKEN ?? "";
+  const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
+  if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
+  const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
+  const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/image-generation`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, prompt: input.prompt, size: input.size, quality: input.quality }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`image generation request failed (${response.status}): ${text.slice(0, 300)}`);
+  try { return text ? JSON.parse(text) : {}; } catch { throw new Error("image generation service returned invalid JSON"); }
+}
+
 async function validatedImage(localPath: string, configuredRoots?: string) {
   const requested = path.resolve(localPath);
   const roots = (configuredRoots?.split(path.delimiter) ?? ["/tmp/openclaw", "/workspace/.openclaw/media", "/workspace/media"])
@@ -282,7 +307,14 @@ const plugin = {
         return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
       },
     }), { name: "miniapp_artifact" });
-    api.logger?.info?.("miniapp-bridge: six sender-scoped typed tools registered");
+    api.registerTool((ctx: ToolContext) => ({
+      name: "image_generate", label: "Image Generate", description: "Generate an image from text for the current sender. Publish it with miniapp_artifact.publish_image afterward.", parameters: imageGenerationSchema,
+      execute: async (_toolCallId: string, input: ImageGenerationInput) => {
+        const result = await callImageGeneration(input, ctx);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+      },
+    }), { name: "image_generate" });
+    api.logger?.info?.("miniapp-bridge: seven sender-scoped typed tools registered");
   },
 };
 

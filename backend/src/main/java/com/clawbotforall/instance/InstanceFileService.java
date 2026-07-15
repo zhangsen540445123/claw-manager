@@ -58,9 +58,8 @@ public class InstanceFileService {
     InstancePaths paths = paths(instance.getId());
     try {
       ensureLayout(paths);
-      ImageGenerationSettings imageSettings = imageGenerationSettingsProvider.current();
-      Map<String, Object> providers = mergeProviderConfigs(models, imageSettings);
-      Map<String, Object> config = buildOpenClawConfig(instance, models, providers, imageSettings, readExistingConfig(paths));
+      Map<String, Object> providers = mergeProviderConfigs(models);
+      Map<String, Object> config = buildOpenClawConfig(instance, models, providers, readExistingConfig(paths));
       objectMapper.writeValue(paths.homeDir().resolve("openclaw.json").toFile(), config);
       writeAgentModels(paths, providers);
       writeReadme(instance, paths);
@@ -109,12 +108,11 @@ public class InstanceFileService {
       InstanceEntity instance,
       List<InstanceModelEntity> models,
       Map<String, Object> providers,
-      ImageGenerationSettings imageSettings,
       Map<String, Object> existingConfig
   ) {
     Map<String, Object> managed = new LinkedHashMap<>();
     managed.put("gateway", gatewayConfig(instance));
-    managed.put("agents", agentsConfig(models, imageSettings));
+    managed.put("agents", agentsConfig(models));
 
     if (!providers.isEmpty()) {
       managed.put("models", Map.of(
@@ -129,7 +127,7 @@ public class InstanceFileService {
       managed.put("channels", channels);
     }
     managed.put("session", sessionConfig());
-    return mergeOpenClawRuntimeConfig(existingConfig, managed);
+    return mergeOpenClawRuntimeConfig(removeLegacyImageGenerationConfig(existingConfig), managed);
   }
 
   private Map<String, Object> gatewayConfig(InstanceEntity instance) {
@@ -161,7 +159,7 @@ public class InstanceFileService {
     return gateway;
   }
 
-  private Map<String, Object> agentsConfig(List<InstanceModelEntity> models, ImageGenerationSettings imageSettings) {
+  private Map<String, Object> agentsConfig(List<InstanceModelEntity> models) {
     Map<String, Object> defaults = new LinkedHashMap<>();
     defaults.put("workspace", "/workspace");
     if (!models.isEmpty()) {
@@ -177,17 +175,10 @@ public class InstanceFileService {
       }
       defaults.put("model", model);
     }
-    if (imageSettings.configured()) {
-      String runtimeProviderId = imageRuntimeProviderId(models, imageSettings);
-      defaults.put("imageGenerationModel", Map.of(
-          "primary", runtimeProviderId + "/" + imageSettings.modelId(),
-          "timeoutMs", imageSettings.timeoutMs()
-      ));
-    }
     return Map.of("defaults", defaults);
   }
 
-  private Map<String, Object> mergeProviderConfigs(List<InstanceModelEntity> models, ImageGenerationSettings imageSettings) {
+  private Map<String, Object> mergeProviderConfigs(List<InstanceModelEntity> models) {
     Map<String, Object> providers = new LinkedHashMap<>();
     for (InstanceModelEntity model : models) {
       String providerId = defaultString(model.getProviderId()).trim();
@@ -205,27 +196,39 @@ public class InstanceFileService {
       Map<String, Object> target = (Map<String, Object>) providers.get(providerId);
       mergeProviderConfig(target, providerConfig);
     }
-    if (imageSettings.configured()) {
-      Map<String, Object> imageProvider = imageProviderConfig(imageSettings);
-      providers.put(imageRuntimeProviderId(models, imageSettings), imageProvider);
-    }
     return providers;
   }
 
-  private Map<String, Object> imageProviderConfig(ImageGenerationSettings settings) {
-    Map<String, Object> saved = readJsonMap(settings.providerConfig());
-    Map<String, Object> config = saved.isEmpty() ? new LinkedHashMap<>() : new LinkedHashMap<>(saved);
-    if (!settings.apiMode().isBlank()) config.put("api", settings.apiMode());
-    if (!settings.baseUrl().isBlank()) config.put("baseUrl", settings.baseUrl());
-    config.put("apiKey", settings.apiKey());
-    config.put("models", List.of(Map.of("id", settings.modelId(), "name", settings.modelId())));
-    return config;
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> removeLegacyImageGenerationConfig(Map<String, Object> existingConfig) {
+    Map<String, Object> cleaned = deepCopyMap(existingConfig);
+    Object agentsValue = cleaned.get("agents");
+    if (agentsValue instanceof Map<?, ?> agentsRaw) {
+      Map<String, Object> agents = new LinkedHashMap<>((Map<String, Object>) agentsRaw);
+      Object defaultsValue = agents.get("defaults");
+      if (defaultsValue instanceof Map<?, ?> defaultsRaw) {
+        Map<String, Object> defaults = new LinkedHashMap<>((Map<String, Object>) defaultsRaw);
+        defaults.remove("imageGenerationModel");
+        agents.put("defaults", defaults);
+      }
+      cleaned.put("agents", agents);
+    }
+    Object modelsValue = cleaned.get("models");
+    if (modelsValue instanceof Map<?, ?> modelsRaw) {
+      Map<String, Object> modelConfig = new LinkedHashMap<>((Map<String, Object>) modelsRaw);
+      Object providersValue = modelConfig.get("providers");
+      if (providersValue instanceof Map<?, ?> providersRaw) {
+        Map<String, Object> providers = new LinkedHashMap<>((Map<String, Object>) providersRaw);
+        providers.remove("openai-image-generation");
+        modelConfig.put("providers", providers);
+      }
+      cleaned.put("models", modelConfig);
+    }
+    return cleaned;
   }
 
-  private String imageRuntimeProviderId(List<InstanceModelEntity> models, ImageGenerationSettings settings) {
-    boolean conflictsWithChatProvider = models.stream()
-        .anyMatch(model -> settings.providerId().equals(defaultString(model.getProviderId()).trim()));
-    return conflictsWithChatProvider ? settings.providerId() + "-image-generation" : settings.providerId();
+  private Map<String, Object> deepCopyMap(Map<String, Object> source) {
+    return objectMapper.convertValue(source == null ? Map.of() : source, new TypeReference<>() {});
   }
 
   private Map<String, Object> providerConfig(InstanceModelEntity model) {

@@ -18,9 +18,15 @@ type ArtifactInput = {
     description?: string;
     contentKey?: string;
 };
+type ImageGenerationInput = {
+    prompt: string;
+    size?: string;
+    quality?: string;
+};
 export declare function mapDomainOperation(domain: string, input: DomainInput): BridgeInput;
 export declare function callDomainBridge(domain: string, input: DomainInput, ctx: ToolContext, env?: NodeJS.ProcessEnv, fetcher?: typeof fetch): Promise<unknown>;
 export declare function callArtifactBridge(input: ArtifactInput, ctx: ToolContext, env?: NodeJS.ProcessEnv, fetcher?: typeof fetch): Promise<unknown>;
+export declare function callImageGeneration(input: ImageGenerationInput, ctx: ToolContext, env?: NodeJS.ProcessEnv, fetcher?: typeof fetch): Promise<unknown>;
 declare const plugin: {
     id: string;
     name: string;

@@ -90,7 +90,7 @@ class InstanceFileServiceTest {
   }
 
   @Test
-  void writesEnabledImageGenerationModelAndProvider() throws Exception {
+  void doesNotWriteUnsupportedImageGenerationConfig() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
     ImageGenerationSettings imageSettings = new ImageGenerationSettings(
@@ -113,20 +113,14 @@ class InstanceFileServiceTest {
     Map<String, Object> config = objectMapper.readValue(configPath.toFile(), new TypeReference<>() {});
     Map<String, Object> agents = (Map<String, Object>) config.get("agents");
     Map<String, Object> defaults = (Map<String, Object>) agents.get("defaults");
-    assertThat(defaults.get("imageGenerationModel"))
-        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("primary", "openai-image-generation/gpt-image-2")
-        .containsEntry("timeoutMs", 180_000);
+    assertThat(defaults).doesNotContainKey("imageGenerationModel");
     Map<String, Object> models = (Map<String, Object>) config.get("models");
     Map<String, Object> providers = (Map<String, Object>) models.get("providers");
     assertThat(providers.get("openai"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
         .containsEntry("api", "openai-responses")
         .containsEntry("apiKey", "sk-test");
-    assertThat(providers.get("openai-image-generation"))
-        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("api", "openai-images")
-        .containsEntry("apiKey", "sk-image");
+    assertThat(providers).doesNotContainKey("openai-image-generation");
   }
 
   @Test

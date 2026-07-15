@@ -284,7 +284,7 @@ public class MiniappBridgePluginService {
   private String resolveInstallVersion(String version) {
     String normalized = defaultString(version).trim();
     if (normalized.isBlank() || "latest".equalsIgnoreCase(normalized)) {
-      String latest = versions(false).latest();
+      String latest = versions(true).latest();
       if (latest.isBlank()) {
         throw new ApiException(HttpStatus.BAD_GATEWAY, "未能获取小程序 Bridge 插件版本。");
       }
@@ -304,11 +304,13 @@ public class MiniappBridgePluginService {
   }
 
   private PublicApiChannelPluginStatus successStatus(InstanceEntity instance, String message, String output) {
+    ApiChannelPluginVersions refreshed = versions(true);
+    String current = currentVersion(instance);
     return new PublicApiChannelPluginStatus(
         true,
-        currentVersion(instance),
-        cachedLatestVersion(),
-        false,
+        current,
+        refreshed.latest(),
+        compareVersion(refreshed.latest(), current) > 0,
         "installed",
         message,
         tail(output),
@@ -488,7 +490,8 @@ public class MiniappBridgePluginService {
     try {
       HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
       HttpResponse<String> response = client.send(
-          HttpRequest.newBuilder(URI.create(REGISTRY_URL)).timeout(Duration.ofSeconds(5)).GET().build(),
+          HttpRequest.newBuilder(URI.create(REGISTRY_URL + "?cacheBust=" + System.currentTimeMillis()))
+              .timeout(Duration.ofSeconds(5)).header("Cache-Control", "no-cache").header("Pragma", "no-cache").GET().build(),
           HttpResponse.BodyHandlers.ofString()
       );
       if (response.statusCode() < 200 || response.statusCode() >= 300) {

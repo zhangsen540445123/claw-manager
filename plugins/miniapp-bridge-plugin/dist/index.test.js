@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import plugin, { callArtifactBridge, callDomainBridge, mapDomainOperation } from "./index.js";
+import plugin, { callArtifactBridge, callDomainBridge, callImageGeneration, mapDomainOperation } from "./index.js";
 const env = {
     CLAW_MANAGER_INTERNAL_BASE_URL: "http://claw-manager-api:8080/",
     OPENVIKING_BROKER_TOKEN: "broker-secret",
@@ -13,6 +13,7 @@ const expectedTools = [
     "miniapp_habit_checkin",
     "miniapp_html_content",
     "miniapp_artifact",
+    "image_generate",
 ];
 const operationMappings = [
     ["daily_task", "get_checklist", "daily_checklist"],
@@ -48,12 +49,12 @@ const operationMappings = [
     ["html_content", "delete", "html_delete"],
 ];
 describe("miniapp bridge", () => {
-    it("declares exactly six typed tools in the OpenClaw manifest", () => {
+    it("declares exactly seven typed tools in the OpenClaw manifest", () => {
         const manifest = JSON.parse(readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"));
         expect(manifest.contracts?.tools).toEqual(expectedTools);
         expect(manifest.contracts?.tools).not.toContain("miniapp_api_call");
     });
-    it("registers exactly the six typed tools and exposes no identity parameters", () => {
+    it("registers exactly the seven typed tools and exposes no identity parameters", () => {
         const registered = [];
         const api = {
             registerTool: (factory, options) => registered.push({ factory, name: options.name }),
@@ -65,6 +66,14 @@ describe("miniapp bridge", () => {
         expect(schemas).not.toContain("openid");
         expect(schemas).not.toContain("Authorization");
         expect(schemas).not.toContain("userKey");
+    });
+    it("calls image generation without exposing identity parameters", async () => {
+        const fetcher = vi.fn(async () => new Response(JSON.stringify({ localPath: "/workspace/media/generated/img.png" }), { status: 200 }));
+        const result = await callImageGeneration({ prompt: "极简红色圆形" }, { requesterSenderId: "sender" }, env, fetcher);
+        const [, init] = fetcher.mock.calls[0];
+        expect(result).toMatchObject({ localPath: "/workspace/media/generated/img.png" });
+        expect(String(init.body)).not.toContain("openid");
+        expect(String(init.body)).not.toContain("cm_user");
     });
     it("exposes every goal create variant at the top schema level", () => {
         const registered = [];

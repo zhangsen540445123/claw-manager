@@ -37,8 +37,8 @@ public class ImageGenerationSettingsService implements ImageGenerationSettingsPr
     String apiKey = text(payload, "apiKey", previous.apiKey());
     String providerConfig = text(payload, "providerConfig", previous.providerConfig());
     int timeoutMs = integer(payload, "timeoutMs", previous.timeoutMs() <= 0 ? 180_000 : previous.timeoutMs());
-    if (enabled && (providerId.isBlank() || modelId.isBlank() || apiKey.isBlank())) {
-      throw new ApiException(HttpStatus.BAD_REQUEST, "启用图片生成时 Provider、模型和 API Key 不能为空。");
+    if (enabled && (providerId.isBlank() || modelId.isBlank() || baseUrl.isBlank() || apiKey.isBlank())) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "启用图片生成时 Provider、模型、Base URL 和 API Key 不能为空。");
     }
     if (timeoutMs < 10_000 || timeoutMs > 600_000) {
       throw new ApiException(HttpStatus.BAD_REQUEST, "图片生成超时必须在 10000 到 600000 毫秒之间。");

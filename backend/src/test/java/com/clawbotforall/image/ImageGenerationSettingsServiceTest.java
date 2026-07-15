@@ -23,6 +23,7 @@ class ImageGenerationSettingsServiceTest {
         "providerId", "openai",
         "modelId", "gpt-image-2",
         "apiMode", "openai-images",
+        "baseUrl", "https://image.example.com/v1",
         "timeoutMs", 120000
     ));
 
