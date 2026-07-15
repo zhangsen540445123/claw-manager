@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import plugin, { callDomainBridge, mapDomainOperation } from "./index.js";
+import plugin, { callArtifactBridge, callDomainBridge, mapDomainOperation } from "./index.js";
 const env = {
     CLAW_MANAGER_INTERNAL_BASE_URL: "http://claw-manager-api:8080/",
     OPENVIKING_BROKER_TOKEN: "broker-secret",
@@ -12,6 +12,7 @@ const expectedTools = [
     "miniapp_subtask",
     "miniapp_habit_checkin",
     "miniapp_html_content",
+    "miniapp_artifact",
 ];
 const operationMappings = [
     ["daily_task", "get_checklist", "daily_checklist"],
@@ -47,12 +48,12 @@ const operationMappings = [
     ["html_content", "delete", "html_delete"],
 ];
 describe("miniapp bridge", () => {
-    it("declares exactly five domain tools in the OpenClaw manifest", () => {
+    it("declares exactly six typed tools in the OpenClaw manifest", () => {
         const manifest = JSON.parse(readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"));
         expect(manifest.contracts?.tools).toEqual(expectedTools);
         expect(manifest.contracts?.tools).not.toContain("miniapp_api_call");
     });
-    it("registers exactly the five typed tools and exposes no identity parameters", () => {
+    it("registers exactly the six typed tools and exposes no identity parameters", () => {
         const registered = [];
         const api = {
             registerTool: (factory, options) => registered.push({ factory, name: options.name }),
@@ -130,5 +131,22 @@ describe("miniapp bridge", () => {
     it("rejects missing sender identity without fallback", async () => {
         await expect(callDomainBridge("goal", { operation: "list" }, {}, env, vi.fn()))
             .rejects.toThrow("identity unavailable");
+    });
+    it("publishes html as a trusted artifact without exposing identity parameters", async () => {
+        const fetcher = vi.fn(async () => new Response(JSON.stringify({
+            artifact: { id: "artifact-1", type: "html_report", title: "周报", miniappPath: "/pages/html-viewer/index?contentKey=x" },
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+        const result = await callArtifactBridge({ operation: "publish_html", htmlContent: "<html>原文</html>", title: "周报" }, { requesterSenderId: "wechat-user-1" }, env, fetcher);
+        const [url, init] = fetcher.mock.calls[0];
+        expect(url).toContain("/artifacts/html");
+        expect(JSON.parse(String(init.body))).toMatchObject({
+            instanceId: "inst-1", requesterSenderId: "wechat-user-1", htmlContent: "<html>原文</html>", title: "周报",
+        });
+        expect(result).toMatchObject({ artifact: { type: "html_report" } });
+    });
+    it("rejects image paths outside configured media roots before network access", async () => {
+        const fetcher = vi.fn();
+        await expect(callArtifactBridge({ operation: "publish_image", localPath: "C:/Windows/System32/logo.png" }, { requesterSenderId: "wechat-user-1" }, { ...env, OPENCLAW_ARTIFACT_DIRS: "D:/allowed/media" }, fetcher)).rejects.toThrow("allowed media directories");
+        expect(fetcher).not.toHaveBeenCalled();
     });
 });

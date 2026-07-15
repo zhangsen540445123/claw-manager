@@ -1,11 +1,14 @@
 import { Type, type TSchema } from "@sinclair/typebox";
 import { randomUUID } from "node:crypto";
+import { readFile, realpath, stat } from "node:fs/promises";
+import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 type ToolContext = { requesterSenderId?: string };
 type Domain = "daily_task" | "goal" | "subtask" | "habit_checkin" | "html_content";
 type DomainInput = { operation: string; [key: string]: unknown };
 type BridgeInput = { actionKey: string; parameters: Record<string, unknown> };
+type ArtifactInput = { operation: "publish_image" | "publish_html"; localPath?: string; htmlContent?: string; title?: string; description?: string; contentKey?: string };
 
 const DATE = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Date in yyyy-MM-dd format" });
 const DATE_TIME = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$", description: "Date-time in yyyy-MM-dd HH:mm:ss format" });
@@ -122,6 +125,11 @@ const htmlContentSchema = Type.Union([
   strictObject({ operation: Type.Literal("delete"), contentKey: Type.String({ minLength: 1 }) }),
 ]);
 
+const artifactSchema = Type.Union([
+  strictObject({ operation: Type.Literal("publish_image"), localPath: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), description: Type.Optional(Type.String({ maxLength: 1000 })) }),
+  strictObject({ operation: Type.Literal("publish_html"), htmlContent: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), contentKey: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }),
+]);
+
 const ACTIONS: Record<Domain, Record<string, string>> = {
   daily_task: { get_checklist: "daily_checklist", create: "daily_task_create", update: "daily_task_update", toggle: "daily_task_toggle", delete: "daily_task_delete", yesterday_uncompleted_count: "daily_task_yesterday_uncompleted_count" },
   goal: { list: "goal_list", get: "goal_get", create: "goal_create", update: "goal_update", delete: "goal_delete", toggle_completion: "goal_toggle_completion", uncomplete: "goal_uncomplete", statistics: "goal_statistics", year_month_statistics: "goal_year_month_statistics", categories: "goal_categories", category_list: "goal_category_list" },
@@ -183,6 +191,70 @@ export async function callDomainBridge(domain: string, input: DomainInput, ctx: 
   return body;
 }
 
+export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
+  env: NodeJS.ProcessEnv = process.env, fetcher: typeof fetch = fetch): Promise<unknown> {
+  const sender = ctx.requesterSenderId?.trim() ?? "";
+  if (!sender) throw new Error("miniapp bridge identity unavailable");
+  const baseUrl = (env.CLAW_MANAGER_INTERNAL_BASE_URL ?? "").replace(/\/+$/, "");
+  const token = env.OPENVIKING_BROKER_TOKEN ?? "";
+  const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
+  if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
+  const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
+  let response: Response;
+  if (input.operation === "publish_html") {
+    response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/html`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, title: input.title, contentKey: input.contentKey, htmlContent: input.htmlContent }),
+    });
+  } else if (input.operation === "publish_image") {
+    const image = await validatedImage(input.localPath ?? "", env.OPENCLAW_ARTIFACT_DIRS);
+    const form = new FormData();
+    form.set("instanceId", instanceId);
+    form.set("requesterSenderId", sender);
+    form.set("requestId", requestId);
+    if (input.title) form.set("title", input.title);
+    if (input.description) form.set("description", input.description);
+    form.set("image", new Blob([image.bytes], { type: image.mime }), path.basename(image.path));
+    response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/images`, {
+      method: "POST", headers: { authorization: `Bearer ${token}` }, body: form,
+    });
+  } else {
+    throw new Error("unsupported miniapp artifact operation");
+  }
+  const text = await response.text();
+  let body: unknown;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { message: text }; }
+  if (!response.ok) throw new Error(`miniapp artifact request failed (${response.status}): ${text.slice(0, 500)}`);
+  return body;
+}
+
+async function validatedImage(localPath: string, configuredRoots?: string) {
+  const requested = path.resolve(localPath);
+  const roots = (configuredRoots?.split(path.delimiter) ?? ["/tmp/openclaw", "/workspace/.openclaw/media", "/workspace/media"])
+    .map(value => path.resolve(value.trim())).filter(Boolean);
+  if (!roots.some(root => requested === root || requested.startsWith(root + path.sep))) {
+    throw new Error("image path is outside allowed media directories");
+  }
+  const resolved = await realpath(requested);
+  if (!roots.some(root => resolved === root || resolved.startsWith(root + path.sep))) {
+    throw new Error("image real path is outside allowed media directories");
+  }
+  const info = await stat(resolved);
+  if (!info.isFile() || info.size <= 0 || info.size > 10 * 1024 * 1024) throw new Error("image file size is invalid");
+  const bytes = await readFile(resolved);
+  const mime = detectImageMime(bytes);
+  if (!mime) throw new Error("unsupported image content; expected PNG, JPEG, or WebP");
+  return { path: resolved, bytes, mime };
+}
+
+function detectImageMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
+  return null;
+}
+
 function registerTool(api: OpenClawPluginApi, domain: Domain, name: string, label: string, description: string, parameters: TSchema) {
   api.registerTool((ctx: ToolContext) => ({
     name, label, description, parameters,
@@ -203,7 +275,14 @@ const plugin = {
     registerTool(api, "subtask", "miniapp_subtask", "Miniapp Subtask", "Query and manage subtasks belonging to the current sender's goals.", subtaskSchema);
     registerTool(api, "habit_checkin", "miniapp_habit_checkin", "Miniapp Habit Check-in", "Query and manage habit check-ins for the current sender.", habitCheckinSchema);
     registerTool(api, "html_content", "miniapp_html_content", "Miniapp HTML Content", "Store and retrieve displayable HTML content for the current sender.", htmlContentSchema);
-    api.logger?.info?.("miniapp-bridge: five sender-scoped typed tools registered");
+    api.registerTool((ctx: ToolContext) => ({
+      name: "miniapp_artifact", label: "Miniapp Artifact", description: "Publish generated image or HTML content for the current sender and return trusted miniapp navigation metadata.", parameters: artifactSchema,
+      execute: async (_toolCallId: string, input: ArtifactInput) => {
+        const result = await callArtifactBridge(input, ctx);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+      },
+    }), { name: "miniapp_artifact" });
+    api.logger?.info?.("miniapp-bridge: six sender-scoped typed tools registered");
   },
 };
 

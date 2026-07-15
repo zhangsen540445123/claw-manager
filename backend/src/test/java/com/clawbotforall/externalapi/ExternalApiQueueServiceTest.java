@@ -189,6 +189,31 @@ class ExternalApiQueueServiceTest {
   }
 
   @Test
+  void streamsArtifactEventsBeforeFinalQueueResponse() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    Path homeDir = tempDir.resolve("home");
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(tempDir, homeDir, tempDir.resolve("workspace"), tempDir.resolve("logs")));
+    Path root = homeDir.resolve(".openclaw").resolve("claw-manager-api");
+    writeRecentHeartbeat(root);
+    ExternalApiQueueService service = new ExternalApiQueueService(fileService, objectMapper, gatewayRpcService);
+    List<Map<String, Object>> artifacts = new ArrayList<>();
+
+    CompletableFuture<Map<String, Object>> result = CompletableFuture.supplyAsync(() ->
+        service.streamApiChannelMessage(instance, Map.of("requestId", "req_artifact"), text -> {}, artifacts::add));
+    waitUntilExists(root.resolve("requests").resolve("req_artifact.json"));
+    Path streamPath = root.resolve("streams").resolve("req_artifact.jsonl");
+    Files.createDirectories(streamPath.getParent());
+    Files.writeString(streamPath, "{\"seq\":1,\"type\":\"artifact\",\"artifact\":{\"id\":\"artifact-1\",\"type\":\"image_report\",\"miniappPath\":\"/pages/html-viewer/index?contentKey=x\"},\"createdAt\":\"2026-07-13T00:00:00Z\"}\n");
+    waitUntil(() -> artifacts.size() == 1);
+    objectMapper.writeValue(root.resolve("responses").resolve("req_artifact.json").toFile(), Map.of(
+        "ok", true, "requestId", "req_artifact", "messageId", "msg", "text", "完成"));
+
+    assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("完成");
+    assertThat(artifacts.getFirst()).containsEntry("id", "artifact-1");
+  }
+
+  @Test
   void deduplicatesStreamEventsBySequenceAndPreservesRepeatedText() throws Exception {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");

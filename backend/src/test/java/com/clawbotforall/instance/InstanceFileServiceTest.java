@@ -3,6 +3,8 @@ package com.clawbotforall.instance;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.image.ImageGenerationSettings;
+import com.clawbotforall.image.ImageGenerationSettingsProvider;
 import com.clawbotforall.model.NormalizedModelSelection;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +27,7 @@ class InstanceFileServiceTest {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
 
-    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
     fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
 
     Path instanceDir = tempDir.resolve("instances").resolve(draft.instance().getId());
@@ -88,10 +90,50 @@ class InstanceFileServiceTest {
   }
 
   @Test
+  void writesEnabledImageGenerationModelAndProvider() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    ImageGenerationSettings imageSettings = new ImageGenerationSettings(
+        true,
+        "openai",
+        "gpt-image-2",
+        "openai-images",
+        "https://api.openai.com/v1",
+        "sk-image",
+        "{}",
+        180_000,
+        "2026-07-13T00:00:00Z"
+    );
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, () -> imageSettings);
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path configPath = tempDir.resolve("instances").resolve(draft.instance().getId())
+        .resolve("home").resolve("openclaw.json");
+    Map<String, Object> config = objectMapper.readValue(configPath.toFile(), new TypeReference<>() {});
+    Map<String, Object> agents = (Map<String, Object>) config.get("agents");
+    Map<String, Object> defaults = (Map<String, Object>) agents.get("defaults");
+    assertThat(defaults.get("imageGenerationModel"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("primary", "openai-image-generation/gpt-image-2")
+        .containsEntry("timeoutMs", 180_000);
+    Map<String, Object> models = (Map<String, Object>) config.get("models");
+    Map<String, Object> providers = (Map<String, Object>) models.get("providers");
+    assertThat(providers.get("openai"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("api", "openai-responses")
+        .containsEntry("apiKey", "sk-test");
+    assertThat(providers.get("openai-image-generation"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("api", "openai-images")
+        .containsEntry("apiKey", "sk-image");
+  }
+
+  @Test
   void preservesExistingChannelsWithoutForcingWechatChannel() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
-    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
 
     Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
     Files.createDirectories(homeDir);
@@ -135,7 +177,7 @@ class InstanceFileServiceTest {
     InstanceCreationDraft draft = createDraft("OpenClaw");
     draft.instance().setPluginsAllow("[\"openclaw-weixin\"]");
     draft.instance().setPluginsEntries("{\"openclaw-weixin\":{\"enabled\":true}}");
-    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
 
     fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
 
@@ -158,7 +200,7 @@ class InstanceFileServiceTest {
     InstanceCreationDraft draft = createDraft("OpenClaw");
     draft.instance().setPluginsAllow("[\"claw-manager-api\"]");
     draft.instance().setPluginsEntries("{\"claw-manager-api\":{\"enabled\":true}}");
-    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
 
     fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
 
@@ -181,7 +223,7 @@ class InstanceFileServiceTest {
     InstanceCreationDraft draft = createDraft("OpenClaw");
     draft.instance().setPluginsAllow("[\"openviking\"]");
     draft.instance().setPluginsEntries("{\"openviking\":{\"enabled\":true}}");
-    InstanceFileService fileService = new InstanceFileService(properties, objectMapper);
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
 
     fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
 

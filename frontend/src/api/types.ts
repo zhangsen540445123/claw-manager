@@ -28,6 +28,19 @@ export interface PublicModelPreset {
   createdAt: string;
 }
 
+export interface PublicImageGenerationSettings {
+  enabled: boolean;
+  configured: boolean;
+  providerId: string;
+  modelId: string;
+  apiMode: string;
+  baseUrl: string;
+  apiKeyPreview: string;
+  providerConfig: string;
+  timeoutMs: number;
+  updatedAt: string;
+}
+
 export interface ModelProviderDefinition {
   key: string;
   label: string;

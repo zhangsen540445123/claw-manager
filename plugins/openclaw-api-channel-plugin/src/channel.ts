@@ -47,6 +47,7 @@ type GatewaySendMessageContext = ApiSendMessageParams & {
   configRuntime?: ApiConfigRuntime;
   log?: ApiLogSink;
   onDelta?: ApiDeltaSink;
+  onArtifact?: ApiArtifactSink;
 };
 
 type ApiLogSink = {
@@ -80,13 +81,15 @@ type ApiQueueResponse = {
 };
 
 type ApiDeltaSink = (text: string) => Promise<void> | void;
+type ApiArtifactSink = (artifact: Record<string, unknown>) => Promise<void> | void;
 
 type ApiQueueStreamEvent = {
   seq: number;
-  type: "delta" | "done" | "error";
+  type: "delta" | "artifact" | "done" | "error";
   text?: string;
   messageId?: string;
   error?: string;
+  artifact?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -115,6 +118,7 @@ type ApiAgentEventStreamState = {
   runId: string;
   sessionKey: string;
   onDelta: ApiDeltaSink;
+  onArtifact?: ApiArtifactSink;
   log?: ApiLogSink;
   startedAtMs: number;
   emittedText: string;
@@ -122,6 +126,7 @@ type ApiAgentEventStreamState = {
   deliverDeltaCount: number;
   firstAgentEventDeltaAtMs?: number;
   seenAgentEventKeys: Set<string>;
+  seenArtifactIds: Set<string>;
   writeChain: Promise<void>;
 };
 
@@ -134,6 +139,7 @@ export function registerApiAgentEventStream(params: {
   runId?: string;
   sessionKey?: string;
   onDelta?: ApiDeltaSink;
+  onArtifact?: ApiArtifactSink;
   log?: ApiLogSink;
 }): ApiAgentEventStreamState | undefined {
   const sessionKey = trim(params.sessionKey);
@@ -145,12 +151,14 @@ export function registerApiAgentEventStream(params: {
     runId: trim(params.runId) || trim(params.requestId) || "auto",
     sessionKey,
     onDelta: params.onDelta,
+    onArtifact: params.onArtifact,
     log: params.log,
     startedAtMs: Date.now(),
     emittedText: "",
     agentEventDeltaCount: 0,
     deliverDeltaCount: 0,
     seenAgentEventKeys: new Set(),
+    seenArtifactIds: new Set(),
     writeChain: Promise.resolve(),
   };
   activeApiAgentEventStreams.set(sessionKey, state);
@@ -181,9 +189,6 @@ export function resetApiAgentEventStreamsForTest(): void {
 }
 
 export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent): Promise<boolean> {
-  if (event.stream !== "assistant") {
-    return false;
-  }
   const sessionKey = trim(event.sessionKey);
   const runId = trim(event.runId);
   const state = sessionKey
@@ -192,6 +197,13 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
   if (!state || !isRecord(event.data)) {
     return false;
   }
+  if (runId && runId !== state.runId) {
+    return false;
+  }
+  if (event.stream === "tool") {
+    return handleArtifactToolEvent(event, state);
+  }
+  if (event.stream !== "assistant") return false;
   const seq = typeof event.seq === "number" && Number.isFinite(event.seq)
     ? String(event.seq)
     : (typeof event.seq === "string" && event.seq.trim() ? event.seq.trim() : "");
@@ -418,6 +430,34 @@ async function ensureApiDynamicAgentBinding(params: {
   return params.configRuntime?.current?.() ?? current;
 }
 
+async function handleArtifactToolEvent(event: ApiAssistantAgentEvent, state: ApiAgentEventStreamState): Promise<boolean> {
+  if (!state.onArtifact || !isRecord(event.data)) return false;
+  const toolName = stringValue(event.data.toolName) || stringValue(event.data.name) || stringValue(event.data.tool);
+  if (toolName !== "miniapp_artifact") return false;
+  const artifact = extractArtifact(event.data);
+  if (!artifact) return false;
+  const id = stringValue(artifact.id);
+  if (!id || state.seenArtifactIds.has(id)) return false;
+  state.seenArtifactIds.add(id);
+  state.writeChain = state.writeChain.catch(() => undefined).then(() => Promise.resolve(state.onArtifact?.(artifact)));
+  await state.writeChain;
+  return true;
+}
+
+function extractArtifact(data: Record<string, unknown>): Record<string, unknown> | undefined {
+  const candidates = [data, data.details, isRecord(data.result) ? data.result.details : undefined,
+    isRecord(data.result) ? data.result : undefined, isRecord(data.output) ? data.output.details : undefined,
+    isRecord(data.output) ? data.output : undefined];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate) || !isRecord(candidate.artifact)) continue;
+    const artifact = candidate.artifact;
+    const type = stringValue(artifact.type);
+    const miniappPath = stringValue(artifact.miniappPath);
+    if ((type === "image_report" || type === "html_report") && miniappPath.startsWith("/pages/")) return artifact;
+  }
+  return undefined;
+}
+
 function serializeApiDynamicAgentBindingMutation<T>(work: () => Promise<T>): Promise<T> {
   const run = apiDynamicAgentBindingMutationChain
     .catch(() => undefined)
@@ -537,6 +577,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     runId,
     sessionKey,
     onDelta: ctx.onDelta,
+    onArtifact: ctx.onArtifact,
     log: ctx.log,
   });
   const { dispatcher, replyOptions, markDispatchIdle } = runtime.reply.createReplyDispatcherWithTyping({
@@ -784,6 +825,7 @@ async function processApiRequestFile(
       configRuntime: ctx.configRuntime,
       log: ctx.log,
       onDelta: async (text) => writeStreamEvent({ type: "delta", text }),
+      onArtifact: async (artifact) => writeStreamEvent({ type: "artifact", artifact }),
     });
     await writeStreamEvent({ type: "done", messageId: result.messageId });
     await writeQueueResponse(responsePath, {

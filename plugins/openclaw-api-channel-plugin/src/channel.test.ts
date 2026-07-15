@@ -87,6 +87,56 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual(["你", "好"]);
   });
 
+  it("forwards trusted miniapp artifact tool results for the matching API session", async () => {
+    const artifacts: Array<Record<string, unknown>> = [];
+    resetApiAgentEventStreamsForTest();
+    registerApiAgentEventStream({
+      requestId: "req-artifact",
+      runId: "req-artifact",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      onDelta: async () => {},
+      onArtifact: async (artifact) => artifacts.push(artifact),
+    });
+
+    await handleApiAssistantAgentEvent({
+      stream: "tool",
+      runId: "req-artifact",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      seq: 7,
+      data: {
+        toolName: "miniapp_artifact",
+        result: { details: { artifact: { id: "artifact-1", type: "image_report", miniappPath: "/pages/html-viewer/index?contentKey=x" } } },
+      },
+    });
+
+    expect(artifacts).toEqual([{ id: "artifact-1", type: "image_report", miniappPath: "/pages/html-viewer/index?contentKey=x" }]);
+  });
+
+  it("rejects a delayed artifact from another run on the same API session", async () => {
+    const artifacts: Array<Record<string, unknown>> = [];
+    resetApiAgentEventStreamsForTest();
+    registerApiAgentEventStream({
+      requestId: "req-current",
+      runId: "req-current",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      onDelta: async () => {},
+      onArtifact: async (artifact) => artifacts.push(artifact),
+    });
+
+    const handled = await handleApiAssistantAgentEvent({
+      stream: "tool",
+      runId: "req-previous",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      data: {
+        toolName: "miniapp_artifact",
+        details: { artifact: { id: "artifact-old", type: "html_report", miniappPath: "/pages/html-viewer/index?contentKey=old" } },
+      },
+    });
+
+    expect(handled).toBe(false);
+    expect(artifacts).toEqual([]);
+  });
+
   it("derives a delta from cumulative assistant agent event text", async () => {
     const chunks: string[] = [];
     resetApiAgentEventStreamsForTest();

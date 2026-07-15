@@ -73,6 +73,15 @@ public class ExternalApiQueueService {
       Map<String, Object> params,
       StreamDeltaConsumer onDelta
   ) {
+    return streamApiChannelMessage(instance, params, onDelta, artifact -> {});
+  }
+
+  public Map<String, Object> streamApiChannelMessage(
+      InstanceEntity instance,
+      Map<String, Object> params,
+      StreamDeltaConsumer onDelta,
+      StreamArtifactConsumer onArtifact
+  ) {
     String requestId = stringValue(params == null ? null : params.get("requestId"));
     if (requestId.isBlank()) {
       throw new IllegalArgumentException("requestId 不能为空。");
@@ -91,7 +100,8 @@ public class ExternalApiQueueService {
       Files.deleteIfExists(responsePath);
       Files.deleteIfExists(streamPath);
       writeRequest(requests.resolve(requestId + ".json"), params == null ? Map.of() : params);
-      return waitForResponse(responsePath, streamPath, queueTimeouts, onDelta == null ? text -> {} : onDelta);
+      return waitForResponse(responsePath, streamPath, queueTimeouts,
+          onDelta == null ? text -> {} : onDelta, onArtifact == null ? artifact -> {} : onArtifact);
     } catch (IOException error) {
       throw new IllegalStateException("API Channel 队列读写失败：" + message(error), error);
     }
@@ -206,7 +216,8 @@ public class ExternalApiQueueService {
       Path responsePath,
       Path streamPath,
       QueueTimeouts timeouts,
-      StreamDeltaConsumer onDelta
+      StreamDeltaConsumer onDelta,
+      StreamArtifactConsumer onArtifact
   ) throws IOException {
     long startedAt = System.nanoTime();
     long absoluteDeadline = startedAt + timeouts.absoluteTimeout().toNanos();
@@ -215,13 +226,13 @@ public class ExternalApiQueueService {
     boolean sawProgress = false;
     StreamReadState streamState = new StreamReadState();
     while (System.nanoTime() < absoluteDeadline) {
-      StreamReadResult streamRead = readStreamEvents(streamPath, streamState, onDelta);
+      StreamReadResult streamRead = readStreamEvents(streamPath, streamState, onDelta, onArtifact);
       if (streamRead.progressed()) {
         sawProgress = true;
         idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
       }
       if (Files.exists(responsePath)) {
-        streamRead = readStreamEvents(streamPath, streamState, onDelta);
+        streamRead = readStreamEvents(streamPath, streamState, onDelta, onArtifact);
         if (streamRead.progressed()) {
           sawProgress = true;
           idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
@@ -246,7 +257,8 @@ public class ExternalApiQueueService {
     throw new IllegalStateException("API Channel 等待响应超过最大总时长。");
   }
 
-  private StreamReadResult readStreamEvents(Path streamPath, StreamReadState state, StreamDeltaConsumer onDelta) throws IOException {
+  private StreamReadResult readStreamEvents(Path streamPath, StreamReadState state, StreamDeltaConsumer onDelta,
+      StreamArtifactConsumer onArtifact) throws IOException {
     if (!Files.exists(streamPath)) {
       return new StreamReadResult(false);
     }
@@ -288,6 +300,10 @@ public class ExternalApiQueueService {
         if (!text.isBlank()) {
           onDelta.accept(text);
         }
+      } else if ("artifact".equals(type) && event.get("artifact") instanceof Map<?, ?> rawArtifact) {
+        Map<String, Object> artifact = new LinkedHashMap<>();
+        rawArtifact.forEach((key, value) -> artifact.put(String.valueOf(key), value));
+        onArtifact.accept(Map.copyOf(artifact));
       } else if ("error".equals(type)) {
         throw new IllegalStateException("API Channel 处理失败：" + valueString(event.get("error")));
       }
@@ -356,6 +372,11 @@ public class ExternalApiQueueService {
   @FunctionalInterface
   public interface StreamDeltaConsumer {
     void accept(String text) throws IOException;
+  }
+
+  @FunctionalInterface
+  public interface StreamArtifactConsumer {
+    void accept(Map<String, Object> artifact) throws IOException;
   }
 
   private static class StreamReadState {

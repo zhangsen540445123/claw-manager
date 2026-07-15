@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.image.ImageGenerationSettingsMapper">
+  <select id="find" resultType="com.clawbotforall.image.ImageGenerationSettings">
+    SELECT enabled, provider_id, model_id, api_mode, base_url, api_key, provider_config, timeout_ms, updated_at
+    FROM image_generation_settings WHERE id = 1
+  </select>
+  <insert id="upsert">
+    INSERT INTO image_generation_settings
+      (id, enabled, provider_id, model_id, api_mode, base_url, api_key, provider_config, timeout_ms, updated_at)
+    VALUES
+      (1, #{enabled}, #{providerId}, #{modelId}, #{apiMode}, #{baseUrl}, #{apiKey}, #{providerConfig}, #{timeoutMs}, #{updatedAt})
+    ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), provider_id=VALUES(provider_id), model_id=VALUES(model_id),
+      api_mode=VALUES(api_mode), base_url=VALUES(base_url), api_key=VALUES(api_key), provider_config=VALUES(provider_config),
+      timeout_ms=VALUES(timeout_ms), updated_at=VALUES(updated_at)
+  </insert>
+</mapper>

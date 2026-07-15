@@ -1,13 +1,14 @@
 {
   "id": "miniapp-bridge",
-  "version": "2026.7.16",
+  "version": "2026.7.17",
   "contracts": {
     "tools": [
       "miniapp_daily_task",
       "miniapp_goal",
       "miniapp_subtask",
       "miniapp_habit_checkin",
-      "miniapp_html_content"
+      "miniapp_html_content",
+      "miniapp_artifact"
     ]
   },
   "configSchema": {

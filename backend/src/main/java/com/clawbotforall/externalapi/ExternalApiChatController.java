@@ -129,6 +129,8 @@ public class ExternalApiChatController {
             send(emitter, "delta", Map.of("text", text));
             sentDelta[0] = true;
           }
+        }, artifact -> {
+          send(emitter, "artifact", artifact);
         });
         String text = stringify(result.get("text"));
         if (!sentDelta[0] && !text.isBlank()) {

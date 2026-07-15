@@ -56,7 +56,7 @@ class ExternalApiChatControllerTest {
     );
     when(userAccessService.resolveChatRoute("Bearer cm_user_secret", "local-test-user-001")).thenReturn(route);
     when(userAccessService.conversationHash("conv_1")).thenReturn("conversationhash");
-    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any()))
+    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any(), any()))
         .thenThrow(new IllegalStateException("queue timeout"));
 
     MvcResult result = mockMvc.perform(post("/api/external/openclaw/chat/stream")
@@ -99,11 +99,17 @@ class ExternalApiChatControllerTest {
     );
     when(userAccessService.resolveChatRoute("Bearer cm_user_secret", "local-test-user-001")).thenReturn(route);
     when(userAccessService.conversationHash("conv_1")).thenReturn("conversationhash");
-    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any()))
+    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any(), any()))
         .thenAnswer(invocation -> {
           ExternalApiQueueService.StreamDeltaConsumer onDelta = invocation.getArgument(2);
+          ExternalApiQueueService.StreamArtifactConsumer onArtifact = invocation.getArgument(3);
           onDelta.accept("你");
           onDelta.accept("好");
+          onArtifact.accept(java.util.Map.of(
+              "id", "artifact-1",
+              "type", "image_report",
+              "miniappPath", "/pages/html-viewer/index?contentKey=x"
+          ));
           return java.util.Map.of(
               "ok", true,
               "requestId", "req_1",
@@ -135,11 +141,13 @@ class ExternalApiChatControllerTest {
     int startIndex = body.indexOf("event:start");
     int firstDeltaIndex = body.indexOf("event:delta");
     int secondDeltaIndex = body.indexOf("event:delta", firstDeltaIndex + 1);
+    int artifactIndex = body.indexOf("event:artifact");
     int doneIndex = body.indexOf("event:done");
     assertThat(startIndex).isGreaterThanOrEqualTo(0);
     assertThat(firstDeltaIndex).isGreaterThan(startIndex);
     assertThat(secondDeltaIndex).isGreaterThan(firstDeltaIndex);
-    assertThat(doneIndex).isGreaterThan(secondDeltaIndex);
+    assertThat(artifactIndex).isGreaterThan(secondDeltaIndex);
+    assertThat(doneIndex).isGreaterThan(artifactIndex);
     assertThat(body).contains("wx_f9db8c63722f76a920d852d85f502177");
   }
 }

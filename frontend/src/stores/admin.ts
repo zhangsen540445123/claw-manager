@@ -13,6 +13,7 @@ import type {
   PublicOpenVikingPluginVersions,
   PublicOpenVikingSettings,
   PublicInstance,
+  PublicImageGenerationSettings,
   PublicInstanceModelAuth,
   PublicInstanceProvisioning,
   PublicModelPreset,
@@ -85,6 +86,7 @@ export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
     presets: [] as PublicModelPreset[],
+    imageGenerationSettings: null as PublicImageGenerationSettings | null,
     providers: [] as ModelProviderDefinition[],
     runnerImage: null as RunnerImageStatus | null,
     serverLogs: "",
@@ -250,6 +252,18 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<{ settings: PublicOpenVikingSettings }>("/api/admin/openviking-settings");
       this.openVikingSettings = response.settings;
       return response.settings;
+    },
+    async loadImageGenerationSettings() {
+      const response = await api<{ settings: PublicImageGenerationSettings }>("/api/admin/image-generation-settings");
+      this.imageGenerationSettings = response.settings;
+      return response.settings;
+    },
+    async saveImageGenerationSettings(payload: Record<string, unknown>) {
+      const response = await api<{ settings: PublicImageGenerationSettings; syncedInstanceIds: string[]; restartRequired: boolean }>(
+        "/api/admin/image-generation-settings", { method: "PUT", ...jsonBody(payload) }
+      );
+      this.imageGenerationSettings = response.settings;
+      return response;
     },
     async saveOpenVikingSettings(payload: {
       baseUrl: string;
