@@ -24,7 +24,7 @@ async function runAction(name: string, action: () => Promise<unknown>) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace ops-page">
     <PageHeader title="系统运维" description="查看 Runner 镜像状态和后端服务日志。" />
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />

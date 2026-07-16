@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from "vue";
 import { Plus, Save, Star, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { ModelProviderField, PublicModelPreset } from "../../api/types";
@@ -27,6 +28,8 @@ const presetForm = reactive({
 
 const selectedProvider = computed(() => admin.providers.find((provider) => provider.key === presetForm.providerKey));
 const selectedProviderFields = computed(() => selectedProvider.value?.fields ?? []);
+const configuredPresets = computed(() => admin.presets.filter((preset) => preset.isConfigured).length);
+const defaultPresets = computed(() => admin.presets.filter((preset) => preset.isDefault).length);
 
 async function runAction(name: string, action: () => Promise<unknown>) {
   actionLoading.value = name;
@@ -177,7 +180,7 @@ function isPositiveInteger(value: unknown) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace presets-page">
     <PageHeader title="模型预设" description="维护实例创建和运行时使用的模型供应商配置。">
       <template #actions>
         <el-button type="primary" :icon="Plus" @click="openCreatePreset">新增预设</el-button>
@@ -185,6 +188,12 @@ function isPositiveInteger(value: unknown) {
     </PageHeader>
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <section class="metric-grid compact-metric-grid">
+      <MetricCard label="模型预设" :value="admin.presets.length" />
+      <MetricCard label="配置可用" :value="configuredPresets" tone="success" />
+      <MetricCard label="默认预设" :value="defaultPresets" />
+    </section>
 
     <el-card shadow="never">
       <el-table :data="admin.presets">

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { Ban, Clipboard, Eye, Link as LinkIcon, QrCode, RefreshCw, Search } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicWechatBindLink, WechatBindingLookup } from "../../api/types";
@@ -57,6 +58,9 @@ const statusOptions = [
   { label: "出码失败", value: "failed" },
   { label: "已失效", value: "revoked" }
 ];
+const connectedLinks = computed(() => links.value.filter((link) => link.status === "connected").length);
+const pendingLinks = computed(() => links.value.filter((link) => ["created", "starting", "waiting_scan", "scanned", "initializing"].includes(link.status)).length);
+const failedLinks = computed(() => links.value.filter((link) => ["expired", "rejected", "failed", "revoked"].includes(link.status)).length);
 
 onMounted(() => {
   void loadLinks();
@@ -248,7 +252,7 @@ async function updateSelectedQr() {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace wechat-links-page">
     <PageHeader title="微信扫码链接" description="生成扫码入口，查看历史状态，并手动失效未完成的链接。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="tableLoading" @click="loadLinks">刷新</el-button>
@@ -256,6 +260,13 @@ async function updateSelectedQr() {
     </PageHeader>
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <section class="metric-grid">
+      <MetricCard label="历史链接" :value="total" />
+      <MetricCard label="当前页已连接" :value="connectedLinks" tone="success" />
+      <MetricCard label="当前页处理中" :value="pendingLinks" tone="warning" />
+      <MetricCard label="当前页异常或失效" :value="failedLinks" tone="danger" />
+    </section>
 
     <el-card shadow="never">
       <template #header>

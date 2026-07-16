@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { Copy, KeyRound, Plus, RefreshCw, RotateCw, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicMiniappClient } from "../../api/types";
@@ -12,6 +13,8 @@ const loading = ref(false);
 const actionLoading = ref("");
 const createDialogVisible = ref(false);
 const createForm = reactive({ appId: "", enabled: true });
+const enabledClients = computed(() => admin.miniappClients.filter((client) => client.enabled).length);
+const disabledClients = computed(() => admin.miniappClients.filter((client) => !client.enabled).length);
 
 onMounted(() => {
   void loadClients();
@@ -115,13 +118,19 @@ function escapeHtml(value: string) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace miniapp-clients-page">
     <PageHeader title="小程序接入" description="管理小程序后端调用 Claw Manager 的 AK/SK。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="loading" @click="loadClients">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="createDialogVisible = true">新增 AK</el-button>
       </template>
     </PageHeader>
+
+    <section class="metric-grid compact-metric-grid">
+      <MetricCard label="接入方总数" :value="admin.miniappClients.length" />
+      <MetricCard label="已启用" :value="enabledClients" tone="success" />
+      <MetricCard label="已停用" :value="disabledClients" tone="warning" />
+    </section>
 
     <el-card shadow="never">
       <el-table :data="admin.miniappClients" v-loading="loading" row-key="appId">

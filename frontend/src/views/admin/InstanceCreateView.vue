@@ -42,7 +42,7 @@ async function createInstance() {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace instance-create-page">
     <PageHeader title="创建实例" description="从已配置的模型预设启动新的 OpenClaw 实例。" />
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />

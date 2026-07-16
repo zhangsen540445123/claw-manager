@@ -8,7 +8,8 @@ defineProps<{
 
 <template>
   <section class="metric-card" :class="`tone-${tone || 'neutral'}`">
-    <span>{{ label }}</span>
-    <strong>{{ value }}</strong>
+    <span class="metric-label">{{ label }}</span>
+    <strong class="metric-value">{{ value }}</strong>
+    <span class="metric-accent" aria-hidden="true" />
   </section>
 </template>

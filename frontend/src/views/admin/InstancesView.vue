@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { Clipboard, ExternalLink, Play, RefreshCw, Square } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicInstance } from "../../api/types";
@@ -14,6 +15,9 @@ const error = ref("");
 const selectedInstances = ref<PublicInstance[]>([]);
 
 const selectedGatewayInstanceIds = computed(() => selectedInstances.value.map((instance) => instance.id));
+const runningInstances = computed(() => admin.instances.filter((instance) => instance.status === "running").length);
+const readyGateways = computed(() => admin.instances.filter((instance) => instance.provisioning?.status === "ready").length);
+const stoppedInstances = computed(() => admin.instances.filter((instance) => instance.status === "stopped").length);
 
 async function runAction(name: string, action: () => Promise<unknown>) {
   actionLoading.value = name;
@@ -77,7 +81,7 @@ async function batchRestartGateway() {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace instances-page">
     <PageHeader title="实例管理" description="查看实例运行状态，打开 Control UI，维护 Gateway。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="admin.loading" @click="admin.loadAll()">刷新</el-button>
@@ -85,6 +89,13 @@ async function batchRestartGateway() {
     </PageHeader>
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <section class="metric-grid">
+      <MetricCard label="实例总数" :value="admin.instances.length" />
+      <MetricCard label="运行中" :value="runningInstances" tone="success" />
+      <MetricCard label="Gateway 就绪" :value="readyGateways" tone="success" />
+      <MetricCard label="已停止" :value="stoppedInstances" tone="warning" />
+    </section>
 
     <el-card shadow="never">
       <template #header>

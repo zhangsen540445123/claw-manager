@@ -3,6 +3,7 @@ import { computed, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { KeyRound } from "lucide-vue-next";
 import { ApiError } from "../api/http";
+import PageHeader from "../components/PageHeader.vue";
 import { useSessionStore } from "../stores/session";
 
 const router = useRouter();
@@ -37,11 +38,12 @@ async function submit() {
 </script>
 
 <template>
-  <section class="workspace account-page">
-    <div class="section-title">
-      <h1>账号设置</h1>
-      <el-button text @click="router.push('/admin')">返回</el-button>
-    </div>
+  <section class="workspace account-page password-page">
+    <PageHeader title="账号设置" description="更新管理员登录密码和账户安全信息。">
+      <template #actions>
+        <el-button text @click="router.push('/admin')">返回</el-button>
+      </template>
+    </PageHeader>
 
     <el-card shadow="never">
       <template #header>

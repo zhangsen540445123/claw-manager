@@ -30,7 +30,7 @@ function statusType(status: string): "success" | "warning" | "danger" | "info" {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace overview-page">
     <PageHeader title="运行总览" description="OpenClaw 实例、模型预设和微信绑定的当前状态。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="admin.loading" @click="admin.loadAll()">刷新</el-button>

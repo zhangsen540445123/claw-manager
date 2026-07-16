@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { Download, RefreshCw, RotateCcw, Search, Trash2, Upload } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicInstance, PublicWechatPluginStatus } from "../../api/types";
@@ -86,6 +87,9 @@ const versionOptions = computed(() => {
   }
   return options;
 });
+const installedPluginCount = computed(() => tableRows.value.filter((instance) => pluginStatus(instance.id)?.installed).length);
+const upgradablePluginCount = computed(() => tableRows.value.filter((instance) => pluginStatus(instance.id)?.upgradable).length);
+const pluginTaskCount = computed(() => tableRows.value.filter((instance) => isTaskRunning(pluginStatus(instance.id))).length);
 
 onMounted(async () => {
   await loadPage();
@@ -414,7 +418,7 @@ function handleSelectionChange(selection: PublicInstance[]) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace plugins-page">
     <PageHeader title="插件管理" :description="pluginMeta.description">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="loading" @click="loadPage">刷新</el-button>
@@ -422,6 +426,13 @@ function handleSelectionChange(selection: PublicInstance[]) {
     </PageHeader>
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <section class="metric-grid compact-metric-grid">
+      <MetricCard label="实例总数" :value="tableRows.length" />
+      <MetricCard label="已安装" :value="installedPluginCount" tone="success" />
+      <MetricCard label="可升级" :value="upgradablePluginCount" tone="warning" />
+      <MetricCard label="任务执行中" :value="pluginTaskCount" />
+    </section>
 
     <el-tabs v-model="activePlugin" class="plugin-tabs">
       <el-tab-pane label="微信插件" name="wechat" />

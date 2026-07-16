@@ -35,7 +35,7 @@ onMounted(load);
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace image-generation-page">
     <PageHeader title="图片生成" description="配置由 Claw Manager 调用的 OpenAI 兼容图片生成服务。">
       <template #actions><el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button></template>
     </PageHeader>

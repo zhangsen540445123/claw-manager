@@ -30,12 +30,13 @@ async function submit() {
 </script>
 
 <template>
-  <section class="auth-page">
+  <section class="auth-page login-page">
     <el-form class="auth-panel" label-position="top" @submit.prevent="submit">
       <div class="auth-brand">
         <img class="brand-mark" :src="clawManagerLogo" alt="Claw Manager" />
         <div>
           <strong>Claw Manager</strong>
+          <span>OpenClaw 运行与渠道控制台</span>
         </div>
       </div>
       <h1>管理员登录</h1>

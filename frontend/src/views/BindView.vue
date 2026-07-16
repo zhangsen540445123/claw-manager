@@ -6,6 +6,7 @@ import { ApiError, api } from "../api/http";
 import type { PublicWechatBindLink } from "../api/types";
 import { bindStatusLabel, bindStatusTagType, formatDateTime, isLinkExpired } from "../utils/adminUi";
 import { renderQrDataUrl } from "../utils/qr";
+import clawManagerLogo from "../claw-manager.png";
 
 const route = useRoute();
 const link = ref<PublicWechatBindLink | null>(null);
@@ -108,12 +109,18 @@ async function updateQrImage() {
 </script>
 
 <template>
-  <section class="bind-page">
+  <section class="bind-page public-bind-page">
     <el-card class="bind-panel" shadow="never">
       <template #header>
-        <div class="card-title">
-          <Smartphone :size="18" />
-          <span>微信扫码绑定</span>
+        <div class="bind-card-header">
+          <div class="card-title">
+            <Smartphone :size="18" />
+            <span>微信扫码绑定</span>
+          </div>
+          <div class="bind-brand">
+            <img :src="clawManagerLogo" alt="Claw Manager" />
+            <span>Claw Manager</span>
+          </div>
         </div>
       </template>
 

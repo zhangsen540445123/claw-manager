@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { Copy, RefreshCw, Search } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { api } from "../../api/http";
 
@@ -19,6 +20,9 @@ const items=ref<Summary[]>([]), timeline=ref<Event[]>([]), selected=ref<Summary|
 const artifact=ref<Record<string,unknown>>({}), page=ref(1), size=ref(20);
 const filters=reactive<{channel:string;status:string;instanceId:string;component:string;diagnosisCode:string;range:[Date,Date]|null}>({ channel:"", status:"", instanceId:"", component:"", diagnosisCode:"", range:null });
 const paginationTotal=computed(()=>(page.value-1)*size.value+items.value.length+(hasMore.value?1:0));
+const completedCount=computed(()=>items.value.filter((item)=>item.status==="completed").length);
+const failedCount=computed(()=>items.value.filter((item)=>item.status==="failed").length);
+const imageIssueCount=computed(()=>items.value.filter((item)=>item.diagnosisCode&&item.diagnosisCode!=="COMPLETE").length);
 
 async function load(reset=false){
   if(reset) page.value=1;
@@ -48,10 +52,16 @@ onMounted(()=>load());
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace traces-page">
     <PageHeader title="链路追踪" description="按统一 Trace ID 查看消息、工具、生图、Artifact 和渠道发送时间线。">
       <template #actions><el-button :icon="RefreshCw" :loading="loading" @click="load()">刷新</el-button></template>
     </PageHeader>
+    <section class="metric-grid compact-metric-grid">
+      <MetricCard label="当前页链路" :value="items.length" />
+      <MetricCard label="已完成" :value="completedCount" tone="success" />
+      <MetricCard label="失败" :value="failedCount" tone="danger" />
+      <MetricCard label="需要诊断" :value="imageIssueCount" tone="warning" />
+    </section>
     <div class="toolbar-row">
       <el-date-picker v-model="filters.range" type="datetimerange" start-placeholder="开始时间" end-placeholder="结束时间" />
       <el-input v-model="filters.instanceId" placeholder="实例 ID" clearable />

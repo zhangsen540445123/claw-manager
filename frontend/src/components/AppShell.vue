@@ -154,10 +154,7 @@ function toggleSidebar() {
                 @click="navigate(item.key)"
               >
                 <span class="nav-icon"><component :is="item.icon" :size="17" /></span>
-                <span class="nav-copy">
-                  <strong>{{ item.label }}</strong>
-                  <small>{{ item.desc }}</small>
-                </span>
+                <span class="nav-copy">{{ item.label }}</span>
               </button>
             </el-tooltip>
           </section>
@@ -175,7 +172,7 @@ function toggleSidebar() {
         </button>
         <div class="topbar-title">
           <span>{{ routeTitles[activeRoute] || "后台管理" }}</span>
-          <small>实例、插件、微信与小程序接入</small>
+          <small>OpenClaw 运行与渠道控制台</small>
         </div>
         <div class="topbar-actions">
           <el-tag :type="wsConnected ? 'success' : 'warning'" effect="plain">

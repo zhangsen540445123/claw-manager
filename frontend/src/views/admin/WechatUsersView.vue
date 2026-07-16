@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { RefreshCw, Search, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicInstance, PublicWechatPairedAccount } from "../../api/types";
@@ -95,6 +96,9 @@ const filteredUsers = computed(() => {
 const selectedRestartableUsers = computed(() => {
   return selectedUsers.value.filter(canRestartWechatChannel);
 });
+const readyUsers = computed(() => users.value.filter((user) => user.channelStatus === "ready").length);
+const miniappBoundUsers = computed(() => users.value.filter((user) => user.miniappBindStatus === "connected").length);
+const enabledKeys = computed(() => users.value.filter((user) => user.miniappKeyEnabled).length);
 
 onMounted(() => {
   void loadUsers();
@@ -317,7 +321,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace wechat-users-page">
     <PageHeader title="用户中心" description="查看全系统微信用户、小程序绑定与 API Key 状态。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="tableLoading" @click="loadUsers">刷新</el-button>
@@ -325,6 +329,13 @@ async function deleteWechatAccount(user: WechatUserRow) {
     </PageHeader>
 
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
+
+    <section class="metric-grid">
+      <MetricCard label="微信用户" :value="users.length" />
+      <MetricCard label="通道就绪" :value="readyUsers" tone="success" />
+      <MetricCard label="小程序已绑定" :value="miniappBoundUsers" tone="success" />
+      <MetricCard label="用户 Key 已启用" :value="enabledKeys" />
+    </section>
 
     <el-card shadow="never">
       <template #header>

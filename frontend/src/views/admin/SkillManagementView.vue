@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { DownloadCloud, Edit3, GitBranch, Plus, RefreshCw, Trash2, UploadCloud } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
 import type { PublicSkillDefinition, PublicSkillRepository, SkillSyncResult } from "../../api/types";
@@ -185,13 +186,20 @@ function syncStatusType(status: string) {
 </script>
 
 <template>
-  <section class="workspace">
+  <section class="workspace skills-page">
     <PageHeader title="Skill 管理" description="从 GitHub 仓库拉取 OpenClaw 本地 Skill，并按实例选择同步。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="loading" @click="loadAll">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreateRepository">新增仓库</el-button>
       </template>
     </PageHeader>
+
+    <section class="metric-grid">
+      <MetricCard label="Skill 仓库" :value="admin.skillRepositories.length" />
+      <MetricCard label="已发现 Skill" :value="admin.skillDefinitions.length" />
+      <MetricCard label="可同步" :value="syncableSkills.length" tone="success" />
+      <MetricCard label="实例同步记录" :value="admin.skillInstanceSyncs.length" />
+    </section>
 
     <el-card shadow="never" class="panel">
       <template #header>
