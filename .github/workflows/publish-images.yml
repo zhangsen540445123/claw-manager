@@ -113,13 +113,36 @@ jobs:
         if: steps.gate.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Prepare image name
+      - name: Prepare image metadata
         if: steps.gate.outputs.should_build == 'true'
         id: prep
         shell: bash
+        env:
+          IMAGE_VERSION: ${{ needs.detect-changes.outputs.version }}
+          IMAGE_NAME: ${{ matrix.image_name }}
         run: |
           owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${owner}/${{ matrix.image_name }}" >> "$GITHUB_OUTPUT"
+          image="ghcr.io/${owner}/${IMAGE_NAME}"
+          short_sha="${GITHUB_SHA:0:7}"
+          created="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          repository_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+
+          {
+            echo "image=${image}"
+            echo "tags<<EOF"
+            echo "${image}:${IMAGE_VERSION}"
+            echo "${image}:latest"
+            echo "${image}:sha-${short_sha}"
+            echo "EOF"
+            echo "labels<<EOF"
+            echo "org.opencontainers.image.created=${created}"
+            echo "org.opencontainers.image.revision=${GITHUB_SHA}"
+            echo "org.opencontainers.image.source=${repository_url}"
+            echo "org.opencontainers.image.title=${IMAGE_NAME}"
+            echo "org.opencontainers.image.url=${repository_url}"
+            echo "org.opencontainers.image.version=${IMAGE_VERSION}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare runner metadata
         if: steps.gate.outputs.should_build == 'true'
@@ -143,17 +166,6 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Extract Docker metadata
-        if: steps.gate.outputs.should_build == 'true'
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.prep.outputs.image }}
-          tags: |
-            type=raw,value=${{ needs.detect-changes.outputs.version }}
-            type=raw,value=latest
-            type=sha,prefix=sha-
-
       - name: Log in to GHCR
         if: steps.gate.outputs.should_build == 'true'
         uses: docker/login-action@v3
@@ -170,9 +182,9 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.prep.outputs.tags }}
           labels: |
-            ${{ steps.meta.outputs.labels }}
+            ${{ steps.prep.outputs.labels }}
             ${{ steps.runner_meta.outputs.extra_labels }}
           build-args: ${{ steps.runner_meta.outputs.build_args }}
           cache-from: type=gha
