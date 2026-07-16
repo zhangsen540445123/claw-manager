@@ -1,15 +1,69 @@
 import { Type, type TSchema } from "@sinclair/typebox";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
-type ToolContext = { requesterSenderId?: string };
+type ToolContext = { requesterSenderId?: string; sessionKey?: string };
 type Domain = "daily_task" | "goal" | "subtask" | "habit_checkin" | "html_content";
 type DomainInput = { operation: string; [key: string]: unknown };
 type BridgeInput = { actionKey: string; parameters: Record<string, unknown> };
 type ArtifactInput = { operation: "publish_image" | "publish_html"; localPath?: string; htmlContent?: string; title?: string; description?: string; contentKey?: string };
 type ImageGenerationInput = { prompt: string; size?: string; quality?: string };
+
+async function resolveCmTraceId(ctx: ToolContext, env: NodeJS.ProcessEnv): Promise<string> {
+  const secret = env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "";
+  const sessionKey = ctx.sessionKey?.trim() ?? "";
+  if (secret && sessionKey) {
+    const key = createHmac("sha256", secret).update(sessionKey, "utf8").digest("hex").slice(0, 32);
+    const stateDir = env.OPENCLAW_STATE_DIR || env.CLAWDBOT_STATE_DIR || path.join(os.homedir(), ".openclaw");
+    try {
+      const file = JSON.parse(await readFile(path.join(stateDir, "openviking", "sender-handoff.json"), "utf8")) as { entries?: Record<string, { cmTraceId?: string }> };
+      const traceId = file.entries?.[key]?.cmTraceId?.trim() ?? "";
+      if (traceId) return traceId;
+    } catch { /* correlation is best effort */ }
+  }
+  return `cmtrace_orphan_${randomUUID().replaceAll("-", "")}`;
+}
+
+async function reportBridgeTool(params: {
+  baseUrl: string;
+  token: string;
+  instanceId: string;
+  traceId: string;
+  requestId: string;
+  sender: string;
+  toolName: string;
+  status: "started" | "completed" | "failed";
+  fetcher: typeof fetch;
+}): Promise<void> {
+  try {
+    await params.fetcher(`${params.baseUrl}/api/internal/integration-traces/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${params.token}`,
+        "X-CM-Trace-Id": params.traceId,
+      },
+      body: JSON.stringify({
+        traceId: params.traceId,
+        parentRequestId: params.requestId,
+        component: "miniapp-bridge",
+        stage: `bridge.tool.${params.status}`,
+        status: params.status,
+        channel: params.sender.startsWith("miniapp:") ? "api" : "wechat",
+        instanceId: params.instanceId,
+        toolName: params.toolName,
+        requestId: params.requestId,
+        errorCode: params.status === "failed" ? "BRIDGE_TOOL_FAILED" : "",
+        details: {},
+      }),
+    });
+  } catch {
+    console.warn(`miniapp bridge trace report failed traceId=${params.traceId} stage=bridge.tool.${params.status}`);
+  }
+}
 
 const DATE = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Date in yyyy-MM-dd format" });
 const DATE_TIME = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$", description: "Date-time in yyyy-MM-dd HH:mm:ss format" });
@@ -185,16 +239,25 @@ export async function callDomainBridge(domain: string, input: DomainInput, ctx: 
   if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
   const mapped = mapDomainOperation(domain, input);
   const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
-  const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/actions/${encodeURIComponent(mapped.actionKey)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ instanceId, requesterSenderId: sender, parameters: mapped.parameters, requestId }),
-  });
-  const text = await response.text();
-  let body: unknown;
-  try { body = text ? JSON.parse(text) : {}; } catch { body = { message: text }; }
-  if (!response.ok) throw new Error(`miniapp bridge request failed (${response.status}): ${text.slice(0, 500)}`);
-  return body;
+  const cmTraceId = await resolveCmTraceId(ctx, env);
+  const trace = { baseUrl, token, instanceId, traceId: cmTraceId, requestId, sender, toolName: `miniapp_${domain}`, fetcher };
+  await reportBridgeTool({ ...trace, status: "started" });
+  try {
+    const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/actions/${encodeURIComponent(mapped.actionKey)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId },
+      body: JSON.stringify({ instanceId, requesterSenderId: sender, parameters: mapped.parameters, requestId, cmTraceId }),
+    });
+    const text = await response.text();
+    let body: unknown;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { message: text }; }
+    if (!response.ok) throw new Error(`miniapp bridge request failed (${response.status}): ${text.slice(0, 500)}`);
+    await reportBridgeTool({ ...trace, status: "completed" });
+    return body;
+  } catch (error) {
+    await reportBridgeTool({ ...trace, status: "failed" });
+    throw error;
+  }
 }
 
 export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
@@ -206,33 +269,43 @@ export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
   const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
   if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
   const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
-  let response: Response;
-  if (input.operation === "publish_html") {
-    response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/html`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, title: input.title, contentKey: input.contentKey, htmlContent: input.htmlContent }),
-    });
-  } else if (input.operation === "publish_image") {
-    const image = await validatedImage(input.localPath ?? "", env.OPENCLAW_ARTIFACT_DIRS);
-    const form = new FormData();
-    form.set("instanceId", instanceId);
-    form.set("requesterSenderId", sender);
-    form.set("requestId", requestId);
-    if (input.title) form.set("title", input.title);
-    if (input.description) form.set("description", input.description);
-    form.set("image", new Blob([image.bytes], { type: image.mime }), path.basename(image.path));
-    response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/images`, {
-      method: "POST", headers: { authorization: `Bearer ${token}` }, body: form,
-    });
-  } else {
-    throw new Error("unsupported miniapp artifact operation");
+  const cmTraceId = await resolveCmTraceId(ctx, env);
+  const trace = { baseUrl, token, instanceId, traceId: cmTraceId, requestId, sender, toolName: "miniapp_artifact", fetcher };
+  await reportBridgeTool({ ...trace, status: "started" });
+  try {
+    let response: Response;
+    if (input.operation === "publish_html") {
+      response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/html`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId },
+        body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, cmTraceId, title: input.title, contentKey: input.contentKey, htmlContent: input.htmlContent }),
+      });
+    } else if (input.operation === "publish_image") {
+      const image = await validatedImage(input.localPath ?? "", env.OPENCLAW_ARTIFACT_DIRS);
+      const form = new FormData();
+      form.set("instanceId", instanceId);
+      form.set("requesterSenderId", sender);
+      form.set("requestId", requestId);
+      form.set("cmTraceId", cmTraceId);
+      if (input.title) form.set("title", input.title);
+      if (input.description) form.set("description", input.description);
+      form.set("image", new Blob([image.bytes], { type: image.mime }), path.basename(image.path));
+      response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/images`, {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId }, body: form,
+      });
+    } else {
+      throw new Error("unsupported miniapp artifact operation");
+    }
+    const text = await response.text();
+    let body: unknown;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { message: text }; }
+    if (!response.ok) throw new Error(`miniapp artifact request failed (${response.status}): ${text.slice(0, 500)}`);
+    await reportBridgeTool({ ...trace, status: "completed" });
+    return body;
+  } catch (error) {
+    await reportBridgeTool({ ...trace, status: "failed" });
+    throw error;
   }
-  const text = await response.text();
-  let body: unknown;
-  try { body = text ? JSON.parse(text) : {}; } catch { body = { message: text }; }
-  if (!response.ok) throw new Error(`miniapp artifact request failed (${response.status}): ${text.slice(0, 500)}`);
-  return body;
 }
 
 export async function callImageGeneration(input: ImageGenerationInput, ctx: ToolContext,
@@ -244,14 +317,25 @@ export async function callImageGeneration(input: ImageGenerationInput, ctx: Tool
   const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
   if (!baseUrl || !token || !instanceId) throw new Error("miniapp bridge runtime configuration missing");
   const requestId = `mbreq_${randomUUID().replaceAll("-", "")}`;
-  const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/image-generation`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, prompt: input.prompt, size: input.size, quality: input.quality }),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`image generation request failed (${response.status}): ${text.slice(0, 300)}`);
-  try { return text ? JSON.parse(text) : {}; } catch { throw new Error("image generation service returned invalid JSON"); }
+  const cmTraceId = await resolveCmTraceId(ctx, env);
+  const trace = { baseUrl, token, instanceId, traceId: cmTraceId, requestId, sender, toolName: "image_generate", fetcher };
+  await reportBridgeTool({ ...trace, status: "started" });
+  try {
+    const response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/image-generation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId },
+      body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, cmTraceId, prompt: input.prompt, size: input.size, quality: input.quality }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`image generation request failed (${response.status}): ${text.slice(0, 300)}`);
+    let body: unknown;
+    try { body = text ? JSON.parse(text) : {}; } catch { throw new Error("image generation service returned invalid JSON"); }
+    await reportBridgeTool({ ...trace, status: "completed" });
+    return body;
+  } catch (error) {
+    await reportBridgeTool({ ...trace, status: "failed" });
+    throw error;
+  }
 }
 
 async function validatedImage(localPath: string, configuredRoots?: string) {

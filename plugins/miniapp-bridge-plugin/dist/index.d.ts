@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 type ToolContext = {
     requesterSenderId?: string;
+    sessionKey?: string;
 };
 type DomainInput = {
     operation: string;

@@ -46,6 +46,7 @@ public class SecurityConfig {
                 "/api/external/**",
                 "/api/internal/openviking/**",
                 "/api/internal/miniapp-bridge/**",
+                "/api/internal/integration-traces/**",
                 "/api/public/wechat-bind-links/**",
                 "/error",
                 "/actuator/health",

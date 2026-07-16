@@ -1,6 +1,6 @@
 {
   "id": "miniapp-bridge",
-  "version": "2026.7.18",
+  "version": "2026.7.19",
   "contracts": {
     "tools": [
       "miniapp_daily_task",

@@ -1,6 +1,8 @@
 package com.clawbotforall.miniapp;
 
 import com.clawbotforall.web.ApiException;
+import com.clawbotforall.trace.IntegrationTraceEventRequest;
+import com.clawbotforall.trace.IntegrationTraceService;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.LinkedHashMap;
@@ -24,38 +26,63 @@ public class MiniappArtifactService {
   private final RestClient restClient;
   private final String baseUrl;
   private final Clock clock;
+  private final IntegrationTraceService traces;
 
   @Autowired
   public MiniappArtifactService(MiniappUserBindingMapper bindingMapper, MiniappUserKeyMapper keyMapper,
-      RestClient.Builder builder, @Value("${clawbot.miniapp-open-api-base-url:}") String baseUrl) {
-    this(bindingMapper, keyMapper, builder, baseUrl, Clock.systemUTC());
+      RestClient.Builder builder, @Value("${clawbot.miniapp-open-api-base-url:}") String baseUrl, IntegrationTraceService traces) {
+    this(bindingMapper, keyMapper, builder, baseUrl, Clock.systemUTC(), traces);
   }
 
   MiniappArtifactService(MiniappUserBindingMapper bindingMapper, MiniappUserKeyMapper keyMapper,
       RestClient.Builder builder, String baseUrl, Clock clock) {
+    this(bindingMapper, keyMapper, builder, baseUrl, clock, null);
+  }
+
+  MiniappArtifactService(MiniappUserBindingMapper bindingMapper, MiniappUserKeyMapper keyMapper,
+      RestClient.Builder builder, String baseUrl, Clock clock, IntegrationTraceService traces) {
     this.bindingMapper = bindingMapper;
     this.keyMapper = keyMapper;
     this.restClient = builder.build();
     this.baseUrl = baseUrl == null ? "" : baseUrl.trim().replaceFirst("/+$", "");
     this.clock = clock;
+    this.traces = traces;
   }
 
   public Map<String, Object> publishHtml(MiniappArtifactHtmlRequest request) {
-    Identity identity = identity(request.instanceId(), request.requesterSenderId());
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("htmlContent", required(request.htmlContent(), "HTML 内容不能为空。"));
-    if (!blank(request.title())) payload.put("title", request.title().trim());
-    if (!blank(request.contentKey())) payload.put("contentKey", request.contentKey().trim());
-    Map<String, Object> data = postJson("/open-api/html-content", payload, identity, request.requestId());
-    keyMapper.updateLastUsed(identity.binding().getOpenidHash(), clock.instant().toString());
-    return Map.of("artifact", artifact("html_report", request.title(), data, Map.of()));
+    event(request.cmTraceId(), request.instanceId(), request.requestId(), "artifact.html.create.started", "started", null, Map.of());
+    try {
+      Identity identity = identity(request.instanceId(), request.requesterSenderId());
+      event(request.cmTraceId(), request.instanceId(), request.requestId(), "artifact.identity.resolved", "completed", null, Map.of());
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("htmlContent", required(request.htmlContent(), "HTML 内容不能为空。"));
+      if (!blank(request.title())) payload.put("title", request.title().trim());
+      if (!blank(request.contentKey())) payload.put("contentKey", request.contentKey().trim());
+      Map<String, Object> data = postJson("/open-api/html-content", payload, identity, request.requestId(), request.cmTraceId());
+      event(request.cmTraceId(), request.instanceId(), request.requestId(), "artifact.html.create.completed", "completed", null, Map.of("contentKey", data.getOrDefault("contentKey", "")));
+      keyMapper.updateLastUsed(identity.binding().getOpenidHash(), clock.instant().toString());
+      return Map.of("artifact", artifact("html_report", request.title(), data, Map.of()));
+    } catch (RuntimeException error) {
+      event(request.cmTraceId(), request.instanceId(), request.requestId(), "artifact.html.create.failed", "failed", status(error), Map.of());
+      throw error;
+    }
   }
 
   public Map<String, Object> publishImage(String instanceId, String requesterSenderId, String requestId,
       String title, String description, MultipartFile image) {
-    Identity identity = identity(instanceId, requesterSenderId);
-    if (image == null || image.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "图片不能为空。");
+    return publishImage(instanceId, requesterSenderId, requestId, "", title, description, image);
+  }
+
+  public Map<String, Object> publishImage(String instanceId, String requesterSenderId, String requestId, String cmTraceId,
+      String title, String description, MultipartFile image) {
+    event(cmTraceId, instanceId, requestId, "bridge.publish_image.started", "started", null, Map.of());
+    String phase = "identity";
     try {
+      Identity identity = identity(instanceId, requesterSenderId);
+      event(cmTraceId, instanceId, requestId, "artifact.identity.resolved", "completed", null, Map.of());
+      if (image == null || image.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "图片不能为空。");
+      phase = "upload";
+      event(cmTraceId, instanceId, requestId, "artifact.image.upload.started", "started", null, Map.of());
       MultipartBodyBuilder multipart = new MultipartBodyBuilder();
       byte[] bytes = image.getBytes();
       multipart.part("image", new ByteArrayResource(bytes) {
@@ -67,28 +94,41 @@ public class MiniappArtifactService {
           .header("X-Open-Api-Openid", identity.key().getOpenid())
           .header(HttpHeaders.AUTHORIZATION, "Bearer " + identity.key().getUserKey())
           .header("X-CM-Bridge-Request-Id", safe(requestId))
+          .header("X-CM-Trace-Id", safeTrace(cmTraceId))
           .body(multipart.build()).retrieve().toEntity(Object.class);
       Map<String, Object> imageData = businessData(response.getBody());
+      event(cmTraceId, instanceId, requestId, "artifact.image.upload.completed", "completed", response.getStatusCode().value(), Map.of("imageId", imageData.getOrDefault("imageId", "")));
       String imageUrl = String.valueOf(imageData.getOrDefault("url", ""));
       if (imageUrl.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "图片接口未返回访问地址。");
+      phase = "html";
+      event(cmTraceId, instanceId, requestId, "artifact.html.create.started", "started", null, Map.of());
       String html = imageHtml(title, description, imageUrl);
       Map<String, Object> htmlData = postJson("/open-api/html-content", Map.of(
-          "title", blank(title) ? "AI 生成图片" : title.trim(), "htmlContent", html), identity, requestId);
+          "title", blank(title) ? "AI 生成图片" : title.trim(), "htmlContent", html), identity, requestId, cmTraceId);
+      event(cmTraceId, instanceId, requestId, "artifact.html.create.completed", "completed", null, Map.of("contentKey", htmlData.getOrDefault("contentKey", "")));
+      event(cmTraceId, instanceId, requestId, "bridge.publish_image.completed", "completed", null, Map.of("imageId", imageData.getOrDefault("imageId", ""), "contentKey", htmlData.getOrDefault("contentKey", "")));
       keyMapper.updateLastUsed(identity.binding().getOpenidHash(), clock.instant().toString());
       return Map.of("artifact", artifact("image_report", title, htmlData, Map.of(
           "imageId", imageData.getOrDefault("imageId", ""), "imageUrl", imageUrl)));
-    } catch (ApiException error) {
-      throw error;
+    } catch (RuntimeException error) {
+      if ("upload".equals(phase)) event(cmTraceId, instanceId, requestId, "artifact.image.upload.failed", "failed", status(error), Map.of());
+      if ("html".equals(phase)) event(cmTraceId, instanceId, requestId, "artifact.html.create.failed", "failed", status(error), Map.of());
+      event(cmTraceId, instanceId, requestId, "bridge.publish_image.failed", "failed", status(error), Map.of());
+      if (error instanceof ApiException apiError) throw apiError;
+      throw new ApiException(HttpStatus.BAD_GATEWAY, "发布图片失败: " + error.getMessage());
     } catch (Exception error) {
+      event(cmTraceId, instanceId, requestId, "artifact.image.upload.failed", "failed", null, Map.of());
+      event(cmTraceId, instanceId, requestId, "bridge.publish_image.failed", "failed", null, Map.of());
       throw new ApiException(HttpStatus.BAD_GATEWAY, "发布图片失败: " + error.getMessage());
     }
   }
 
-  private Map<String, Object> postJson(String path, Map<String, Object> payload, Identity identity, String requestId) {
+  private Map<String, Object> postJson(String path, Map<String, Object> payload, Identity identity, String requestId, String cmTraceId) {
     ResponseEntity<Object> response = restClient.post().uri(baseUrl + path)
         .header("X-Open-Api-Openid", identity.key().getOpenid())
         .header(HttpHeaders.AUTHORIZATION, "Bearer " + identity.key().getUserKey())
         .header("X-CM-Bridge-Request-Id", safe(requestId))
+        .header("X-CM-Trace-Id", safeTrace(cmTraceId))
         .contentType(MediaType.APPLICATION_JSON).body(payload).retrieve().toEntity(Object.class);
     return businessData(response.getBody());
   }
@@ -140,5 +180,11 @@ public class MiniappArtifactService {
   private static String required(String value, String message) { if (blank(value)) throw new ApiException(HttpStatus.BAD_REQUEST, message); return value; }
   private static boolean blank(String value) { return value == null || value.isBlank(); }
   private static String safe(String value) { return value == null || value.isBlank() ? "mbreq_unknown" : value.substring(0, Math.min(100, value.length())); }
+  private static String safeTrace(String value) { return value == null || value.isBlank() ? "cmtrace_unknown" : value.substring(0, Math.min(96, value.length())); }
+  private static Integer status(RuntimeException error) { return error instanceof ApiException apiError ? apiError.getStatus().value() : null; }
+  private void event(String traceId, String instanceId, String requestId, String stage, String status, Integer httpStatus, Map<String,Object> details) {
+    if (traces == null || traceId == null || traceId.isBlank()) return;
+    try { traces.record(new IntegrationTraceEventRequest(traceId, requestId, "claw-manager", stage, status, "internal", instanceId, "", "", "miniapp_artifact", requestId, httpStatus, null, null, "", "", details), traceId); } catch (RuntimeException ignored) { }
+  }
   private record Identity(MiniappUserBindingEntity binding, MiniappUserKeyEntity key) {}
 }

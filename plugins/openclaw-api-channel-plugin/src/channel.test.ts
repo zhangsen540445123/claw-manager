@@ -9,6 +9,8 @@ import {
   resolveApiDynamicAgentId,
   handleApiAssistantAgentEvent,
   monitorApiQueue,
+  reportApiTrace,
+  requestsImageGeneration,
   registerApiAgentEventStream,
   resetApiAgentEventStreamsForTest,
   writeApiQueueHeartbeat,
@@ -16,6 +18,35 @@ import {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("API trace reporting", () => {
+  it("marks image requests without retaining request text", () => {
+    expect(requestsImageGeneration("随机添加待办后生成一张图片")).toBe(true);
+    expect(requestsImageGeneration("新增一个待办")).toBe(false);
+  });
+  it("uses the broker token without including user identity fields", async () => {
+    const fetcher = vi.fn(async () => new Response("{\"accepted\":true}", { status: 200 }));
+
+    await reportApiTrace({
+      traceId: "cmtrace_api123",
+      requestId: "req-1",
+      stage: "api.request.received",
+      status: "completed",
+      env: {
+        CLAW_MANAGER_INTERNAL_BASE_URL: "http://claw-manager-api:8080",
+        OPENVIKING_BROKER_TOKEN: "broker-secret",
+        OPENVIKING_OPENCLAW_INSTANCE_ID: "inst-1",
+      },
+      fetcher: fetcher as typeof fetch,
+    });
+
+    const [url, init] = fetcher.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain("/api/internal/integration-traces/events");
+    expect(init.headers).toMatchObject({ authorization: "Bearer broker-secret", "X-CM-Trace-Id": "cmtrace_api123" });
+    expect(String(init.body)).not.toContain("openid");
+    expect(JSON.parse(String(init.body))).toMatchObject({ component: "api-channel", stage: "api.request.received", channel: "api" });
+  });
 });
 
 function makeRuntime(overrides: {

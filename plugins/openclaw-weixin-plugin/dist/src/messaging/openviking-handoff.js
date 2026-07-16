@@ -67,6 +67,7 @@ export async function writeOpenVikingSenderHandoff(params) {
     const file = await readHandoffFile(filePath);
     file.entries[key] = {
         ...derived,
+        cmTraceId: trimString(params.cmTraceId),
         updatedAt: new Date().toISOString(),
     };
     const tempPath = `${filePath}.${process.pid}.tmp`;

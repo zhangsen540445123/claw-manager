@@ -88,6 +88,7 @@ async function writeOpenVikingHandoffForTurn(params: {
   sessionKey?: string;
   senderId: string;
   log: (msg: string) => void;
+  cmTraceId?: string;
 }): Promise<void> {
   const secret = process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "";
   if (!secret || !params.sessionKey || !params.senderId.trim()) {
@@ -98,6 +99,7 @@ async function writeOpenVikingHandoffForTurn(params: {
       sessionKey: params.sessionKey,
       senderId: params.senderId,
       secret,
+      cmTraceId: params.cmTraceId,
     });
     if (wrote) {
       params.log("[openviking] sender handoff written");
@@ -105,6 +107,40 @@ async function writeOpenVikingHandoffForTurn(params: {
   } catch (err) {
     params.log(`[openviking] sender handoff write failed: ${String(err)}`);
   }
+}
+
+export async function reportWechatTrace(params: {
+  traceId: string;
+  stage: string;
+  status: "started" | "completed" | "failed";
+  requestId?: string;
+  elapsedMs?: number;
+  errorMessage?: string;
+  details?: Record<string, unknown>;
+  env?: NodeJS.ProcessEnv;
+  fetcher?: typeof fetch;
+}): Promise<void> {
+  const env = params.env ?? process.env;
+  const baseUrl = (env.CLAW_MANAGER_INTERNAL_BASE_URL ?? "").replace(/\/+$/, "");
+  const token = env.OPENVIKING_BROKER_TOKEN ?? "";
+  const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
+  if (!baseUrl || !token || !instanceId) return;
+  try {
+    const response = await (params.fetcher ?? fetch)(`${baseUrl}/api/internal/integration-traces/events`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": params.traceId }, body: JSON.stringify({ traceId: params.traceId, component: "wechat-plugin", stage: params.stage, status: params.status, channel: "wechat", instanceId, requestId: params.requestId, elapsedMs: params.elapsedMs, errorCode: params.status === "failed" ? "WECHAT_STAGE_FAILED" : "", errorMessage: sanitizeTraceError(params.errorMessage), details: params.details ?? {} }) });
+    if (!response.ok) logger.warn(`trace report rejected traceId=${params.traceId} stage=${params.stage} status=${response.status}`);
+  } catch (error) { logger.warn(`trace report failed traceId=${params.traceId}: ${String(error)}`); }
+}
+
+function sanitizeTraceError(value?: string): string {
+  return (value ?? "")
+    .replace(/Bearer\s+\S+/gi, "Bearer ***")
+    .replace(/cm_user_[A-Za-z0-9_-]+/g, "cm_user_***")
+    .replace(/sk-[A-Za-z0-9_-]+/g, "sk-***")
+    .slice(0, 500);
+}
+
+export function requestsImageGeneration(message: string): boolean {
+  return /(生图|生成.*(图|海报|卡片)|图片|海报|九宫格|image|poster)/i.test(message);
 }
 
 /**
@@ -144,6 +180,10 @@ export async function processOneMessage(
       return;
     }
   }
+  const runId = randomUUID();
+  const cmTraceId = `cmtrace_${runId.replaceAll("-", "")}`;
+  await reportWechatTrace({ traceId: cmTraceId, stage: "wechat.inbound.received", status: "completed", requestId: runId,
+    details: { imageRequested: requestsImageGeneration(textBody) } });
 
   if (debug) {
     const itemTypes = full.item_list?.map((i) => i.type).join(",") ?? "none";
@@ -276,6 +316,7 @@ export async function processOneMessage(
       `resolveAgentRoute: no agentId resolved for peer=${senderForLog} accountId=${deps.accountId} — message will not be dispatched`,
     );
   }
+  await reportWechatTrace({ traceId: cmTraceId, stage: "wechat.route.resolved", status: route.agentId ? "completed" : "failed", requestId: runId });
 
   if (debug) {
     debugTrace.push(
@@ -297,6 +338,7 @@ export async function processOneMessage(
     sessionKey: route.sessionKey,
     senderId,
     log: deps.log,
+    cmTraceId,
   });
 
   logger.info(
@@ -324,7 +366,6 @@ export async function processOneMessage(
   if (contextToken) {
     setContextToken(deps.accountId, full.from_user_id ?? "", contextToken);
   }
-  const runId = randomUUID();
   const replyProgressSender = resolveReplyProgressMessagesEnabled(deps.config)
     ? new WeixinReplyProgressSender({
         runId,
@@ -411,6 +452,12 @@ export async function processOneMessage(
         }
         text = sendingResult.text;
 
+        const supportedMedia = Boolean(mediaUrl && (
+          !mediaUrl.includes("://") || mediaUrl.startsWith("file://") || mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")
+        ));
+        const deliveryStage = supportedMedia ? "wechat.media.send" : "wechat.text.send";
+        const deliveryStartedAt = Date.now();
+        await reportWechatTrace({ traceId: cmTraceId, stage: `${deliveryStage}.started`, status: "started", requestId: runId });
         try {
           if (mediaUrl) {
             let filePath: string;
@@ -440,6 +487,7 @@ export async function processOneMessage(
               }});
               emitWeixinMessageSent({ to: ctx.To, content: text, success: true, accountId: deps.accountId, runId });
               logger.info(`outbound: text sent to=${senderForLog}`);
+              await reportWechatTrace({ traceId: cmTraceId, stage: "wechat.text.send.completed", status: "completed", requestId: runId, elapsedMs: Date.now() - deliveryStartedAt });
               return;
             }
             await sendWeixinMediaFile({
@@ -462,11 +510,13 @@ export async function processOneMessage(
             emitWeixinMessageSent({ to: ctx.To, content: text, success: true, accountId: deps.accountId, runId });
             logger.info(`outbound: text sent OK to=${senderForLog}`);
           }
+          await reportWechatTrace({ traceId: cmTraceId, stage: `${deliveryStage}.completed`, status: "completed", requestId: runId, elapsedMs: Date.now() - deliveryStartedAt });
         } catch (err) {
           emitWeixinMessageSent({ to: ctx.To, content: text, success: false, error: String(err), accountId: deps.accountId, runId });
           logger.error(
             `outbound: FAILED to=${senderForLog} mediaUrl=${mediaUrl ?? "none"} err=${String(err)} stack=${(err as Error).stack ?? ""}`,
           );
+          await reportWechatTrace({ traceId: cmTraceId, stage: `${deliveryStage}.failed`, status: "failed", requestId: runId, elapsedMs: Date.now() - deliveryStartedAt, errorMessage: String(err) });
           throw err;
         }
       },
@@ -498,6 +548,7 @@ export async function processOneMessage(
     });
 
   logger.debug(`dispatchReplyFromConfig: starting agentId=${route.agentId ?? "(none)"}`);
+  await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.started", status: "started", requestId: runId });
   try {
     await deps.channelRuntime.reply.withReplyDispatcher({
       dispatcher,
@@ -514,10 +565,12 @@ export async function processOneMessage(
         }),
     });
     logger.debug(`dispatchReplyFromConfig: done agentId=${route.agentId ?? "(none)"}`);
+    await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.completed", status: "completed", requestId: runId });
   } catch (err) {
     logger.error(
       `dispatchReplyFromConfig: error agentId=${route.agentId ?? "(none)"} err=${String(err)}`,
     );
+    await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.failed", status: "failed", requestId: runId, errorMessage: String(err) });
     throw err;
   } finally {
     markDispatchIdle();

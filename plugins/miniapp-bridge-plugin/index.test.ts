@@ -8,6 +8,11 @@ const env = {
   OPENVIKING_OPENCLAW_INSTANCE_ID: "inst-1",
 };
 
+type FetchCall = [string | URL | Request, RequestInit];
+function fetchCalls(fetcher: ReturnType<typeof vi.fn>): FetchCall[] {
+  return fetcher.mock.calls as unknown as FetchCall[];
+}
+
 const expectedTools = [
   "miniapp_daily_task",
   "miniapp_goal",
@@ -76,7 +81,7 @@ describe("miniapp bridge", () => {
   it("calls image generation without exposing identity parameters", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ localPath: "/workspace/media/generated/img.png" }), { status: 200 }));
     const result = await callImageGeneration({ prompt: "极简红色圆形" }, { requesterSenderId: "sender" }, env, fetcher as typeof fetch);
-    const [, init] = fetcher.mock.calls[0]! as unknown as [string, RequestInit];
+    const [, init] = fetchCalls(fetcher).find(call => String(call[0]).includes("/image-generation"))!;
     expect(result).toMatchObject({ localPath: "/workspace/media/generated/img.png" });
     expect(String(init.body)).not.toContain("openid");
     expect(String(init.body)).not.toContain("cm_user");
@@ -103,13 +108,29 @@ describe("miniapp bridge", () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ result: { code: 200 } }), { status: 200 }));
     await callDomainBridge("daily_task", { operation: "get_checklist", date: "2026-07-12" },
       { requesterSenderId: "wechat-user-1" }, env, fetcher as typeof fetch);
-    const [url, init] = fetcher.mock.calls[0]! as unknown as [string, RequestInit];
+    const [url, init] = fetchCalls(fetcher).find(call => String(call[0]).includes("/actions/"))!;
     expect(url).toContain("/actions/daily_checklist");
     const body = JSON.parse(String(init?.body));
     expect(body.instanceId).toBe("inst-1");
     expect(body.requesterSenderId).toBe("wechat-user-1");
     expect(body.parameters).toEqual({ date: "2026-07-12" });
     expect(JSON.stringify(body)).not.toContain("cm_user_");
+  });
+
+  it("reports bridge tool lifecycle without blocking the business call", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("/integration-traces/events")) return new Response("{\"accepted\":true}", { status: 200 });
+      return new Response("{\"result\":{\"code\":200}}", { status: 200 });
+    });
+
+    await callDomainBridge("daily_task", { operation: "get_checklist" },
+      { requesterSenderId: "wechat-user-1" }, env, fetcher as typeof fetch);
+
+    const events = fetchCalls(fetcher)
+      .filter(call => String(call[0]).includes("/integration-traces/events"))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(events.map(event => event.stage)).toEqual(["bridge.tool.started", "bridge.tool.completed"]);
+    expect(events.every(event => event.toolName === "miniapp_daily_task")).toBe(true);
   });
 
   it("keeps goal category for Claw Manager normalization", () => {
@@ -168,7 +189,7 @@ describe("miniapp bridge", () => {
       { operation: "publish_html", htmlContent: "<html>原文</html>", title: "周报" },
       { requesterSenderId: "wechat-user-1" }, env, fetcher as typeof fetch,
     );
-    const [url, init] = fetcher.mock.calls[0]! as unknown as [string, RequestInit];
+    const [url, init] = fetchCalls(fetcher).find(call => String(call[0]).includes("/artifacts/html"))!;
     expect(url).toContain("/artifacts/html");
     expect(JSON.parse(String(init.body))).toMatchObject({
       instanceId: "inst-1", requesterSenderId: "wechat-user-1", htmlContent: "<html>原文</html>", title: "周报",
@@ -177,13 +198,13 @@ describe("miniapp bridge", () => {
   });
 
   it("rejects image paths outside configured media roots before network access", async () => {
-    const fetcher = vi.fn();
+    const fetcher = vi.fn(async () => new Response("{\"accepted\":true}", { status: 200 }));
     await expect(callArtifactBridge(
       { operation: "publish_image", localPath: "C:/Windows/System32/logo.png" },
       { requesterSenderId: "wechat-user-1" },
       { ...env, OPENCLAW_ARTIFACT_DIRS: "D:/allowed/media" },
       fetcher as typeof fetch,
     )).rejects.toThrow("allowed media directories");
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetchCalls(fetcher).some(call => String(call[0]).includes("/artifacts/images"))).toBe(false);
   });
 });

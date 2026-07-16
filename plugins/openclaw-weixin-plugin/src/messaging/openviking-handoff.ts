@@ -6,6 +6,7 @@ import path from "node:path";
 export type OpenVikingSenderHandoff = {
   openVikingUserId: string;
   senderHash: string;
+  cmTraceId?: string;
   updatedAt: string;
 };
 
@@ -81,6 +82,7 @@ export async function writeOpenVikingSenderHandoff(params: {
   sessionKey?: string;
   senderId?: string;
   secret?: string;
+  cmTraceId?: string;
 }): Promise<boolean> {
   const derived = deriveSenderHandoff(params.senderId ?? "", params.secret ?? "");
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
@@ -93,6 +95,7 @@ export async function writeOpenVikingSenderHandoff(params: {
   const file = await readHandoffFile(filePath);
   file.entries[key] = {
     ...derived,
+    cmTraceId: trimString(params.cmTraceId),
     updatedAt: new Date().toISOString(),
   };
   const tempPath = `${filePath}.${process.pid}.tmp`;

@@ -10,6 +10,7 @@ import {
   PlusSquare,
   QrCode,
   Server,
+  Workflow,
   SlidersHorizontal,
   WandSparkles,
   UsersRound,
@@ -32,6 +33,7 @@ type ShellNavKey =
   | "wechatUsers"
   | "miniappClients"
   | "ops"
+  | "traces"
   | "account";
 
 const props = defineProps<{
@@ -79,7 +81,8 @@ const navGroups = computed(() => {
     {
       label: "运维",
       items: [
-        { key: "ops" as const, label: "系统运维", desc: "日志与镜像", icon: Server }
+        { key: "ops" as const, label: "系统运维", desc: "日志与镜像", icon: Server },
+        { key: "traces" as const, label: "链路追踪", desc: "消息与工具诊断", icon: Workflow }
       ]
     }
   ];
@@ -98,6 +101,7 @@ const routeTitles: Record<string, string> = {
   wechatUsers: "用户中心",
   miniappClients: "小程序接入",
   ops: "系统运维",
+  traces: "链路追踪",
   account: "账号设置"
 };
 

@@ -3,6 +3,8 @@ package com.clawbotforall.image;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.web.ApiException;
+import com.clawbotforall.trace.IntegrationTraceEventRequest;
+import com.clawbotforall.trace.IntegrationTraceService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.awt.image.BufferedImage;
@@ -31,22 +33,27 @@ public class ImageGenerationService {
   private final InstanceFileService files;
   private final ObjectMapper objectMapper;
   private final HttpClient httpClient;
+  private final IntegrationTraceService traces;
 
   public ImageGenerationService(ImageGenerationSettingsProvider settingsProvider, InstanceFileService files,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper, IntegrationTraceService traces) {
     this.settingsProvider = settingsProvider;
     this.files = files;
     this.objectMapper = objectMapper;
+    this.traces = traces;
     this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
   }
 
-  public Map<String, Object> generate(String instanceId, String prompt, String size, String quality) {
+  public Map<String, Object> generate(String instanceId, String prompt, String size, String quality, String traceId, String requestId) {
     ImageGenerationSettings settings = settingsProvider.current();
     if (!settings.configured() || settings.baseUrl().isBlank()) {
+      event(traceId, instanceId, requestId, "image.config.validated", "failed", null, "IMAGE_CONFIG_INVALID", Map.of());
       throw new ApiException(HttpStatus.CONFLICT, "图片生成尚未配置或未启用。");
     }
     if (prompt == null || prompt.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "图片提示词不能为空。");
     long started = System.nanoTime();
+    event(traceId, instanceId, requestId, "image.config.validated", "completed", null, null, Map.of("modelId", settings.modelId()));
+    event(traceId, instanceId, requestId, "bridge.image_generate.started", "started", null, null, Map.of());
     try {
       Map<String, Object> requestBody = new LinkedHashMap<>();
       requestBody.put("model", settings.modelId());
@@ -61,40 +68,64 @@ public class ImageGenerationService {
           .header("Content-Type", "application/json")
           .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
           .build();
+      event(traceId, instanceId, requestId, "image.provider.request.started", "started", null, null, Map.of("modelId", settings.modelId()));
       HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        event(traceId, instanceId, requestId, "image.provider.request.failed", "failed", response.statusCode(), "HTTP_" + response.statusCode(), Map.of("modelId", settings.modelId()));
         throw new ApiException(HttpStatus.BAD_GATEWAY, "图片生成服务返回 HTTP " + response.statusCode() + "。");
       }
+      event(traceId, instanceId, requestId, "image.provider.request.completed", "completed", response.statusCode(), null, Map.of("modelId", settings.modelId()));
       JsonNode item = objectMapper.readTree(response.body()).path("data").path(0);
       byte[] bytes;
       if (item.hasNonNull("b64_json")) {
         try { bytes = Base64.getDecoder().decode(item.get("b64_json").asText()); }
-        catch (IllegalArgumentException error) { throw new ApiException(HttpStatus.BAD_GATEWAY, "图片生成服务返回了非法 Base64。"); }
+        catch (IllegalArgumentException error) {
+          event(traceId, instanceId, requestId, "image.response.decoded", "failed", null, "INVALID_BASE64", Map.of());
+          throw new ApiException(HttpStatus.BAD_GATEWAY, "图片生成服务返回了非法 Base64。");
+        }
       } else if (item.hasNonNull("url")) {
         bytes = downloadImage(item.get("url").asText());
       } else {
+        event(traceId, instanceId, requestId, "image.response.decoded", "failed", null, "IMAGE_RESULT_MISSING", Map.of());
         throw new ApiException(HttpStatus.BAD_GATEWAY, "图片生成服务未返回图片。");
       }
-      ImageInfo info = inspect(bytes);
+      ImageInfo info;
+      try {
+        info = inspect(bytes);
+      } catch (ApiException error) {
+        event(traceId, instanceId, requestId, "image.response.decoded", "failed", error.getStatus().value(), "IMAGE_DECODE_FAILED", Map.of());
+        throw error;
+      }
+      event(traceId, instanceId, requestId, "image.response.decoded", "completed", null, null, Map.of("mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length));
       InstancePaths paths = files.paths(instanceId);
       Path directory = paths.workspaceDir().resolve("media").resolve("generated");
-      Files.createDirectories(directory);
-      String id = "img_" + UUID.randomUUID().toString().replace("-", "");
-      Path temporary = Files.createTempFile(directory, "." + id + "-", ".tmp");
-      Path target = directory.resolve(id + info.extension());
       try {
-        Files.write(temporary, bytes);
-        Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-      } finally {
-        Files.deleteIfExists(temporary);
+        Files.createDirectories(directory);
+        String id = "img_" + UUID.randomUUID().toString().replace("-", "");
+        Path temporary = Files.createTempFile(directory, "." + id + "-", ".tmp");
+        Path target = directory.resolve(id + info.extension());
+        try {
+          Files.write(temporary, bytes);
+          Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+          Files.deleteIfExists(temporary);
+        }
+        event(traceId, instanceId, requestId, "image.file.written", "completed", null, null, Map.of("imageId", id, "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length));
+        event(traceId, instanceId, requestId, "image.generation.completed", "completed", null, null, Map.of("imageId", id));
+        event(traceId, instanceId, requestId, "bridge.image_generate.completed", "completed", null, null, Map.of("imageId", id));
+        return Map.of("imageId", id, "localPath", "/workspace/media/generated/" + target.getFileName(),
+            "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length,
+            "elapsedMs", (System.nanoTime() - started) / 1_000_000);
+      } catch (IOException error) {
+        event(traceId, instanceId, requestId, "image.file.written", "failed", null, "IMAGE_FILE_WRITE_FAILED", Map.of());
+        throw error;
       }
-      return Map.of("imageId", id, "localPath", "/workspace/media/generated/" + target.getFileName(),
-          "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length,
-          "elapsedMs", (System.nanoTime() - started) / 1_000_000);
     } catch (ApiException error) {
+      event(traceId, instanceId, requestId, "bridge.image_generate.failed", "failed", error.getStatus().value(), "IMAGE_GENERATION_FAILED", Map.of());
       throw error;
     } catch (IOException | InterruptedException error) {
       if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+      event(traceId, instanceId, requestId, "image.generation.failed", "failed", null, error.getClass().getSimpleName(), Map.of());
       throw new ApiException(HttpStatus.BAD_GATEWAY, "图片生成服务调用失败。");
     }
   }
@@ -130,5 +161,10 @@ public class ImageGenerationService {
   }
 
   private String endpoint(String baseUrl) { return baseUrl.replaceAll("/+$", "") + "/images/generations"; }
+  private void event(String traceId, String instanceId, String requestId, String stage, String status, Integer httpStatus, String errorCode, Map<String,Object> details) {
+    if (traceId == null || traceId.isBlank()) return;
+    try { traces.record(new IntegrationTraceEventRequest(traceId, requestId, "claw-manager", stage, status, "internal", instanceId, "", "", "image_generate", requestId, httpStatus, null, null, errorCode, "", details), traceId); }
+    catch (RuntimeException ignored) { }
+  }
   private record ImageInfo(String mime, int width, int height, String extension) {}
 }

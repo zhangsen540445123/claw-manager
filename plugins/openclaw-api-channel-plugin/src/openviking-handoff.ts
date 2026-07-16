@@ -6,6 +6,7 @@ import path from "node:path";
 export type ApiOpenVikingHandoff = {
   openVikingUserId: string;
   senderHash: string;
+  cmTraceId?: string;
   updatedAt: string;
 };
 
@@ -68,6 +69,7 @@ export async function writeApiOpenVikingHandoff(params: {
   openVikingUserId?: string;
   senderHash?: string;
   secret?: string;
+  cmTraceId?: string;
 }): Promise<boolean> {
   const write = handoffWriteChain
     .catch(() => undefined)
@@ -82,6 +84,7 @@ async function writeApiOpenVikingHandoffLocked(params: {
   openVikingUserId?: string;
   senderHash?: string;
   secret?: string;
+  cmTraceId?: string;
 }): Promise<boolean> {
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
   const openVikingUserId = trimString(params.openVikingUserId);
@@ -96,6 +99,7 @@ async function writeApiOpenVikingHandoffLocked(params: {
   file.entries[key] = {
     openVikingUserId,
     senderHash,
+    cmTraceId: trimString(params.cmTraceId),
     updatedAt: new Date().toISOString(),
   };
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;

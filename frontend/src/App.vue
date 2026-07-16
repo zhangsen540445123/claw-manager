@@ -37,7 +37,8 @@ const adminRoutePaths = {
   wechatPlugins: "/admin/wechat-plugins",
   wechatUsers: "/admin/wechat-users",
   miniappClients: "/admin/miniapp-clients",
-  ops: "/admin/ops"
+  ops: "/admin/ops",
+  traces: "/admin/integration-traces"
 } as const;
 
 async function redirectUnauthenticated() {
@@ -104,7 +105,7 @@ async function logout() {
 }
 
 async function navigate(
-  routeName: "overview" | "presets" | "imageGeneration" | "skills" | "create" | "instances" | "openVikingSettings" | "wechat" | "wechatPlugins" | "wechatUsers" | "miniappClients" | "ops" | "account"
+  routeName: "overview" | "presets" | "imageGeneration" | "skills" | "create" | "instances" | "openVikingSettings" | "wechat" | "wechatPlugins" | "wechatUsers" | "miniappClients" | "ops" | "traces" | "account"
 ) {
   if (routeName === "account") {
     void router.push("/change-password");

@@ -33,7 +33,7 @@ public class MiniappBridgeInternalController {
   public Map<String, Object> generateImage(@RequestBody MiniappImageGenerationRequest request,
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
     requireToken(authorization);
-    return imageGenerationService.generate(request.instanceId(), request.prompt(), request.size(), request.quality());
+    return imageGenerationService.generate(request.instanceId(), request.prompt(), request.size(), request.quality(), request.cmTraceId(), request.requestId());
   }
 
   @PostMapping("/api/internal/miniapp-bridge/artifacts/html")
@@ -47,10 +47,11 @@ public class MiniappBridgeInternalController {
   public Map<String, Object> publishImage(
       @RequestParam String instanceId, @RequestParam String requesterSenderId,
       @RequestParam(required = false) String requestId, @RequestParam(required = false) String title,
+      @RequestParam(required = false) String cmTraceId,
       @RequestParam(required = false) String description, @RequestParam("image") MultipartFile image,
       @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
     requireToken(authorization);
-    return artifactService.publishImage(instanceId, requesterSenderId, requestId, title, description, image);
+    return artifactService.publishImage(instanceId, requesterSenderId, requestId, cmTraceId, title, description, image);
   }
 
   private void requireToken(String authorization) {

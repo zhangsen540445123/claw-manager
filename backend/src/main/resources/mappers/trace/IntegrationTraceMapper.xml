@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.trace.IntegrationTraceMapper">
+  <resultMap id="event" type="com.clawbotforall.trace.IntegrationTraceEvent">
+    <constructor>
+      <arg column="id" javaType="string"/><arg column="trace_id" javaType="string"/>
+      <arg column="parent_request_id" javaType="string"/><arg column="component" javaType="string"/>
+      <arg column="stage" javaType="string"/><arg column="status" javaType="string"/>
+      <arg column="channel" javaType="string"/><arg column="instance_id" javaType="string"/>
+      <arg column="sender_hash" javaType="string"/><arg column="session_key_hash" javaType="string"/>
+      <arg column="tool_name" javaType="string"/><arg column="request_id" javaType="string"/>
+      <arg column="http_status" javaType="java.lang.Integer"/><arg column="business_code" javaType="java.lang.Integer"/>
+      <arg column="elapsed_ms" javaType="java.lang.Long"/><arg column="error_code" javaType="string"/>
+      <arg column="error_message" javaType="string"/><arg column="detail_json" javaType="string"/>
+      <arg column="created_at" javaType="string"/>
+    </constructor>
+  </resultMap>
+  <insert id="insert">
+    INSERT INTO integration_trace_events(id,trace_id,parent_request_id,component,stage,status,channel,instance_id,
+      sender_hash,session_key_hash,tool_name,request_id,http_status,business_code,elapsed_ms,error_code,error_message,detail_json,created_at)
+    VALUES(#{id},#{traceId},#{parentRequestId},#{component},#{stage},#{status},#{channel},#{instanceId},#{senderHash},
+      #{sessionKeyHash},#{toolName},#{requestId},#{httpStatus},#{businessCode},#{elapsedMs},#{errorCode},#{errorMessage},
+      CAST(#{detailJson} AS JSON),#{createdAt})
+  </insert>
+  <select id="listEvents" resultMap="event">
+    SELECT * FROM integration_trace_events
+    <where>
+      <if test="instanceId != null and instanceId != ''">instance_id=#{instanceId}</if>
+      <if test="channel != null and channel != ''">AND channel=#{channel}</if>
+      <if test="status != null and status != ''">AND status=#{status}</if>
+      <if test="stage != null and stage != ''">AND stage=#{stage}</if>
+      <if test="from != null and from != ''">AND created_at &gt;= #{from}</if>
+      <if test="to != null and to != ''">AND created_at &lt;= #{to}</if>
+    </where>
+    ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+  <select id="findByTraceId" resultMap="event">
+    SELECT * FROM integration_trace_events WHERE trace_id=#{traceId} ORDER BY created_at ASC
+  </select>
+  <delete id="deleteBefore">DELETE FROM integration_trace_events WHERE created_at &lt; #{cutoff}</delete>
+</mapper>

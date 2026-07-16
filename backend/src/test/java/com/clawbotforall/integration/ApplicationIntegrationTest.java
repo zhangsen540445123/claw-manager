@@ -18,11 +18,14 @@ import com.clawbotforall.runtime.ProxyTarget;
 import com.clawbotforall.runtime.RunnerImageStatus;
 import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
+import com.clawbotforall.trace.IntegrationTraceEventRequest;
+import com.clawbotforall.trace.IntegrationTraceService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -64,6 +67,9 @@ class ApplicationIntegrationTest {
   @Autowired
   JdbcTemplate jdbcTemplate;
 
+  @Autowired
+  IntegrationTraceService integrationTraceService;
+
   @MockBean
   OpenClawRuntime openClawRuntime;
 
@@ -87,7 +93,7 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
-        .isEqualTo(3);
+        .isEqualTo(4);
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admins", Long.class))
         .isEqualTo(1);
     assertThat(jdbcTemplate.queryForObject(
@@ -227,6 +233,22 @@ class ApplicationIntegrationTest {
             .cookie(sessionCookie))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.ok").value(true));
+  }
+
+  @Test
+  void persistsAndReadsIntegrationTraceEventsWithRealMySql() {
+    integrationTraceService.record(new IntegrationTraceEventRequest(
+        "cmtrace_integration123", "parent_1", "claw-manager", "image.file.written", "completed", "internal",
+        "inst_trace", "sender_hash", "session_hash", "image_generate", "req_trace", 200, 200, 18L,
+        "", "", Map.of("imageId", "img_trace", "mime", "image/png", "width", 1024, "height", 1024)), "");
+
+    Map<String, Object> detail = integrationTraceService.detail("cmtrace_integration123");
+
+    assertThat(((Map<?, ?>) detail.get("summary")).get("traceId")).isEqualTo("cmtrace_integration123");
+    assertThat((List<?>) detail.get("timeline")).hasSize(1);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM integration_trace_events WHERE trace_id = ?", Long.class, "cmtrace_integration123"))
+        .isEqualTo(1L);
   }
 
   @Test

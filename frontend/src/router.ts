@@ -7,6 +7,7 @@ import ModelPresetsView from "./views/admin/ModelPresetsView.vue";
 import ImageGenerationSettingsView from "./views/admin/ImageGenerationSettingsView.vue";
 import OpenVikingSettingsView from "./views/admin/OpenVikingSettingsView.vue";
 import OpsView from "./views/admin/OpsView.vue";
+import IntegrationTracesView from "./views/admin/IntegrationTracesView.vue";
 import SkillManagementView from "./views/admin/SkillManagementView.vue";
 import WechatLinksView from "./views/admin/WechatLinksView.vue";
 import WechatPluginsView from "./views/admin/WechatPluginsView.vue";
@@ -32,6 +33,7 @@ export const router = createRouter({
     { path: "/admin/wechat-users", name: "admin-wechat-users", component: WechatUsersView, meta: { shellKey: "wechatUsers", title: "用户中心" } },
     { path: "/admin/miniapp-clients", name: "admin-miniapp-clients", component: MiniappClientsView, meta: { shellKey: "miniappClients", title: "小程序接入" } },
     { path: "/admin/ops", name: "admin-ops", component: OpsView, meta: { shellKey: "ops", title: "系统运维" } },
+    { path: "/admin/integration-traces", name: "admin-integration-traces", component: IntegrationTracesView, meta: { shellKey: "traces", title: "链路追踪" } },
     { path: "/login", name: "login", component: LoginView },
     { path: "/change-password", name: "change-password", component: ChangePasswordView },
     { path: "/bind/:token", name: "bind", component: BindView }

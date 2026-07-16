@@ -100,6 +100,57 @@ const API_HEARTBEAT_INTERVAL_MS = 1000;
 const API_STATUS_FILE = "status.json";
 const API_DYNAMIC_AGENT_PREFIX = "api-";
 
+function apiTraceId(requestId: string): string {
+  return `cmtrace_${requestId.replaceAll("-", "")}`;
+}
+
+export async function reportApiTrace(params: {
+  traceId: string;
+  requestId: string;
+  stage: string;
+  status: "started" | "completed" | "failed";
+  elapsedMs?: number;
+  errorCode?: string;
+  details?: Record<string, unknown>;
+  env?: NodeJS.ProcessEnv;
+  fetcher?: typeof fetch;
+}): Promise<void> {
+  const env = params.env ?? process.env;
+  const baseUrl = trim(env.CLAW_MANAGER_INTERNAL_BASE_URL).replace(/\/+$/, "");
+  const token = trim(env.OPENVIKING_BROKER_TOKEN);
+  const instanceId = trim(env.OPENVIKING_OPENCLAW_INSTANCE_ID);
+  if (!baseUrl || !token || !instanceId) return;
+  try {
+    const response = await (params.fetcher ?? fetch)(`${baseUrl}/api/internal/integration-traces/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "X-CM-Trace-Id": params.traceId,
+      },
+      body: JSON.stringify({
+        traceId: params.traceId,
+        component: "api-channel",
+        stage: params.stage,
+        status: params.status,
+        channel: "api",
+        instanceId,
+        requestId: params.requestId,
+        elapsedMs: params.elapsedMs,
+        errorCode: params.errorCode ?? "",
+        details: params.details ?? {},
+      }),
+    });
+    if (!response.ok) console.warn(`api trace report rejected traceId=${params.traceId} stage=${params.stage} status=${response.status}`);
+  } catch {
+    console.warn(`api trace report failed traceId=${params.traceId} stage=${params.stage}`);
+  }
+}
+
+export function requestsImageGeneration(message: string): boolean {
+  return /(生图|生成.*(图|海报|卡片)|图片|海报|九宫格|image|poster)/i.test(message);
+}
+
 type ApiQueueMonitorState = {
   activeUsers: Set<string>;
   activeTasks: Set<Promise<void>>;
@@ -284,6 +335,7 @@ async function writeOpenVikingHandoffForTurn(params: {
   openVikingUserId?: string;
   senderHash?: string;
   log?: ApiLogSink;
+  cmTraceId?: string;
 }): Promise<void> {
   const secret = trim(process.env.OPENVIKING_IDENTITY_HASH_SECRET);
   if (!secret) {
@@ -296,6 +348,7 @@ async function writeOpenVikingHandoffForTurn(params: {
       openVikingUserId: params.openVikingUserId,
       senderHash: params.senderHash,
       secret,
+      cmTraceId: params.cmTraceId,
     });
     if (wrote) {
       params.log?.info?.(`[${API_ACCOUNT_ID}] openviking handoff written user=${params.openVikingUserId}`);
@@ -550,11 +603,14 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   const finalized = runtime.reply.finalizeInboundContext(
     inbound as Parameters<typeof runtime.reply.finalizeInboundContext>[0],
   ) as unknown as ApiMsgContext & { CommandAuthorized: boolean };
+  const requestId = trim(ctx.requestId) || randomUUID();
+  const cmTraceId = apiTraceId(requestId);
   await writeOpenVikingHandoffForTurn({
     sessionKey,
     openVikingUserId: inbound.openVikingUserId,
     senderHash: trim(ctx.senderHash),
     log: ctx.log,
+    cmTraceId,
   });
   await runtime.session.recordInboundSession({
     storePath,
@@ -569,7 +625,6 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     onRecordError: (error: unknown) => ctx.log?.error?.(`recordInboundSession: ${String(error)}`),
   });
 
-  const requestId = trim(ctx.requestId) || randomUUID();
   const runId = requestId;
   let replyText = "";
   const streamState = registerApiAgentEventStream({
@@ -602,6 +657,8 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     },
   });
 
+  const dispatchStartedAt = Date.now();
+  await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.dispatch.started", status: "started" });
   try {
     await runtime.reply.withReplyDispatcher({
       dispatcher,
@@ -617,6 +674,10 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
         }),
     });
     await streamState?.writeChain;
+    await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.dispatch.completed", status: "completed", elapsedMs: Date.now() - dispatchStartedAt });
+  } catch (error) {
+    await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.dispatch.failed", status: "failed", elapsedMs: Date.now() - dispatchStartedAt, errorCode: "API_DISPATCH_FAILED" });
+    throw error;
   } finally {
     markDispatchIdle();
     unregisterApiAgentEventStream(sessionKey, streamState);
@@ -810,6 +871,9 @@ async function processApiRequestFile(
     await safeUnlink(streamPath);
     request = JSON.parse(await fs.readFile(processingPath, "utf8")) as ApiSendMessageParams;
     requestId = trim(request.requestId) || requestId;
+    const cmTraceId = apiTraceId(requestId);
+    await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.request.received", status: "completed",
+      details: { imageRequested: requestsImageGeneration(trim(request.message)) } });
     ctx.log?.info?.(`[${API_ACCOUNT_ID}] api request received requestId=${requestId} user=${trim(request.openVikingUserId) || trim(request.openvikingUserId) || "missing"}`);
     ctx.setStatus?.({
       accountId: API_ACCOUNT_ID,
@@ -825,9 +889,13 @@ async function processApiRequestFile(
       configRuntime: ctx.configRuntime,
       log: ctx.log,
       onDelta: async (text) => writeStreamEvent({ type: "delta", text }),
-      onArtifact: async (artifact) => writeStreamEvent({ type: "artifact", artifact }),
+      onArtifact: async (artifact) => {
+        await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.artifact.emitted", status: "completed" });
+        await writeStreamEvent({ type: "artifact", artifact });
+      },
     });
     await writeStreamEvent({ type: "done", messageId: result.messageId });
+    await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.stream.completed", status: "completed" });
     await writeQueueResponse(responsePath, {
       ok: true,
       requestId,

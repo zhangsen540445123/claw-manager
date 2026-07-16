@@ -7,6 +7,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.clawbotforall.trace.IntegrationTraceService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestClient;
 class MiniappArtifactServiceTest {
   @Mock MiniappUserBindingMapper bindingMapper;
   @Mock MiniappUserKeyMapper keyMapper;
+  @Mock IntegrationTraceService traces;
   private MockRestServiceServer server;
   private MiniappArtifactService service;
 
@@ -33,7 +35,7 @@ class MiniappArtifactServiceTest {
     RestClient.Builder builder = RestClient.builder();
     server = MockRestServiceServer.bindTo(builder).build();
     service = new MiniappArtifactService(bindingMapper, keyMapper, builder, "https://miniapp.example/api",
-        Clock.fixed(Instant.parse("2026-07-13T00:00:00Z"), ZoneOffset.UTC));
+        Clock.fixed(Instant.parse("2026-07-13T00:00:00Z"), ZoneOffset.UTC), traces);
     lenient().when(bindingMapper.findByWechatUserId("wechat-1")).thenReturn(binding());
     when(keyMapper.findByOpenidHash("hash-1")).thenReturn(key());
   }
@@ -42,12 +44,14 @@ class MiniappArtifactServiceTest {
   void uploadsImageThenCreatesHtmlWrapperAndReturnsTrustedArtifact() {
     server.expect(requestTo("https://miniapp.example/api/open-api/media/images"))
         .andExpect(header("X-Open-Api-Openid", "openid-1"))
+        .andExpect(header("X-CM-Trace-Id", "cmtrace_artifact123"))
         .andRespond(withSuccess("{\"code\":200,\"data\":{\"imageId\":\"img-1\",\"url\":\"https://cdn.example/img.png\"}}", MediaType.APPLICATION_JSON));
     server.expect(requestTo("https://miniapp.example/api/open-api/html-content"))
+        .andExpect(header("X-CM-Trace-Id", "cmtrace_artifact123"))
         .andRespond(withSuccess("{\"code\":200,\"data\":{\"contentKey\":\"content-1\",\"viewUrl\":\"https://miniapp.example/view\",\"miniappPath\":\"/pages/html-viewer/index?contentKey=content-1\",\"miniappScheme\":\"weixin://x\"}}", MediaType.APPLICATION_JSON));
 
     Map<String, Object> result = service.publishImage(
-        "instance-1", "wechat-1", "mbreq-1", "周报", "说明",
+        "instance-1", "wechat-1", "mbreq-1", "cmtrace_artifact123", "周报", "说明",
         new MockMultipartFile("image", "report.png", "image/png", new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47})
     );
 
@@ -56,6 +60,18 @@ class MiniappArtifactServiceTest {
         .containsEntry("type", "image_report")
         .containsEntry("imageId", "img-1")
         .containsEntry("miniappPath", "/pages/html-viewer/index?contentKey=content-1");
+    server.verify();
+  }
+
+  @Test
+  void forwardsTraceIdWhenPublishingHtml() {
+    server.expect(requestTo("https://miniapp.example/api/open-api/html-content"))
+        .andExpect(header("X-CM-Trace-Id", "cmtrace_html123"))
+        .andRespond(withSuccess("{\"code\":200,\"data\":{\"contentKey\":\"content-2\",\"viewUrl\":\"https://miniapp.example/view\",\"miniappPath\":\"/pages/html-viewer/index?contentKey=content-2\"}}", MediaType.APPLICATION_JSON));
+
+    service.publishHtml(new MiniappArtifactHtmlRequest(
+        "instance-1", "wechat-1", "mbreq-2", "cmtrace_html123", "报告", "", "<p>原文</p>"));
+
     server.verify();
   }
 
