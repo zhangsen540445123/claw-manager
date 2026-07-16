@@ -52,6 +52,10 @@ button {
   width: 256px;
   height: 100vh;
   padding: 24px 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
   border-right: 1px solid var(--border);
   background: #ffffff;
   color: var(--text);
