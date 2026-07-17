@@ -110,10 +110,10 @@ public class ImageGenerationService {
         } finally {
           Files.deleteIfExists(temporary);
         }
-        event(traceId, instanceId, requestId, "image.file.written", "completed", null, null, Map.of("imageId", id, "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length));
-        event(traceId, instanceId, requestId, "image.generation.completed", "completed", null, null, Map.of("imageId", id));
-        event(traceId, instanceId, requestId, "bridge.image_generate.completed", "completed", null, null, Map.of("imageId", id));
-        return Map.of("imageId", id, "localPath", "/workspace/media/generated/" + target.getFileName(),
+        event(traceId, instanceId, requestId, "image.file.written", "completed", null, null, Map.of("generatedImageId", id, "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length));
+        event(traceId, instanceId, requestId, "image.generation.completed", "completed", null, null, Map.of("generatedImageId", id));
+        event(traceId, instanceId, requestId, "bridge.image_generate.completed", "completed", null, null, Map.of("generatedImageId", id));
+        return Map.of("generatedImageId", id, "localPath", "/workspace/media/generated/" + target.getFileName(),
             "mime", info.mime(), "width", info.width(), "height", info.height(), "fileSize", bytes.length,
             "elapsedMs", (System.nanoTime() - started) / 1_000_000);
       } catch (IOException error) {

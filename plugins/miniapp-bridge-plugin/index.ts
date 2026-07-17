@@ -1,6 +1,6 @@
 import { Type, type TSchema } from "@sinclair/typebox";
 import { createHmac, randomUUID } from "node:crypto";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
@@ -9,7 +9,7 @@ type ToolContext = { requesterSenderId?: string; sessionKey?: string };
 type Domain = "daily_task" | "goal" | "subtask" | "habit_checkin" | "html_content";
 type DomainInput = { operation: string; [key: string]: unknown };
 type BridgeInput = { actionKey: string; parameters: Record<string, unknown> };
-type ArtifactInput = { operation: "publish_image" | "publish_html"; localPath?: string; htmlContent?: string; title?: string; description?: string; contentKey?: string };
+type ArtifactInput = { operation: "publish_image" | "publish_html"; generatedImageId?: string; htmlContent?: string; title?: string; description?: string; contentKey?: string };
 type ImageGenerationInput = { prompt: string; size?: string; quality?: string };
 
 async function resolveCmTraceId(ctx: ToolContext, env: NodeJS.ProcessEnv): Promise<string> {
@@ -36,6 +36,8 @@ async function reportBridgeTool(params: {
   sender: string;
   toolName: string;
   status: "started" | "completed" | "failed";
+  errorCode?: string;
+  errorMessage?: string;
   fetcher: typeof fetch;
 }): Promise<void> {
   try {
@@ -56,7 +58,8 @@ async function reportBridgeTool(params: {
         instanceId: params.instanceId,
         toolName: params.toolName,
         requestId: params.requestId,
-        errorCode: params.status === "failed" ? "BRIDGE_TOOL_FAILED" : "",
+        errorCode: params.status === "failed" ? (params.errorCode ?? "BRIDGE_TOOL_FAILED") : "",
+        errorMessage: params.status === "failed" ? sanitizeTraceError(params.errorMessage) : "",
         details: {},
       }),
     });
@@ -181,7 +184,7 @@ const htmlContentSchema = Type.Union([
 ]);
 
 const artifactSchema = Type.Union([
-  strictObject({ operation: Type.Literal("publish_image"), localPath: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), description: Type.Optional(Type.String({ maxLength: 1000 })) }),
+  strictObject({ operation: Type.Literal("publish_image"), generatedImageId: Type.String({ pattern: "^img_[a-f0-9]{32}$" }), title: Type.Optional(Type.String({ maxLength: 200 })), description: Type.Optional(Type.String({ maxLength: 1000 })) }),
   strictObject({ operation: Type.Literal("publish_html"), htmlContent: Type.String({ minLength: 1 }), title: Type.Optional(Type.String({ maxLength: 200 })), contentKey: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }),
 ]);
 const imageGenerationSchema = strictObject({
@@ -255,7 +258,7 @@ export async function callDomainBridge(domain: string, input: DomainInput, ctx: 
     await reportBridgeTool({ ...trace, status: "completed" });
     return body;
   } catch (error) {
-    await reportBridgeTool({ ...trace, status: "failed" });
+    await reportBridgeTool({ ...trace, status: "failed", errorMessage: errorMessage(error) });
     throw error;
   }
 }
@@ -281,17 +284,11 @@ export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
         body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, cmTraceId, title: input.title, contentKey: input.contentKey, htmlContent: input.htmlContent }),
       });
     } else if (input.operation === "publish_image") {
-      const image = await validatedImage(input.localPath ?? "", env.OPENCLAW_ARTIFACT_DIRS);
-      const form = new FormData();
-      form.set("instanceId", instanceId);
-      form.set("requesterSenderId", sender);
-      form.set("requestId", requestId);
-      form.set("cmTraceId", cmTraceId);
-      if (input.title) form.set("title", input.title);
-      if (input.description) form.set("description", input.description);
-      form.set("image", new Blob([image.bytes], { type: image.mime }), path.basename(image.path));
-      response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/images`, {
-        method: "POST", headers: { authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId }, body: form,
+      response = await fetcher(`${baseUrl}/api/internal/miniapp-bridge/artifacts/generated-images`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": cmTraceId },
+        body: JSON.stringify({ instanceId, requesterSenderId: sender, requestId, cmTraceId,
+          generatedImageId: input.generatedImageId, title: input.title, description: input.description }),
       });
     } else {
       throw new Error("unsupported miniapp artifact operation");
@@ -303,7 +300,7 @@ export async function callArtifactBridge(input: ArtifactInput, ctx: ToolContext,
     await reportBridgeTool({ ...trace, status: "completed" });
     return body;
   } catch (error) {
-    await reportBridgeTool({ ...trace, status: "failed" });
+    await reportBridgeTool({ ...trace, status: "failed", errorMessage: errorMessage(error) });
     throw error;
   }
 }
@@ -333,35 +330,21 @@ export async function callImageGeneration(input: ImageGenerationInput, ctx: Tool
     await reportBridgeTool({ ...trace, status: "completed" });
     return body;
   } catch (error) {
-    await reportBridgeTool({ ...trace, status: "failed" });
+    await reportBridgeTool({ ...trace, status: "failed", errorMessage: errorMessage(error) });
     throw error;
   }
 }
 
-async function validatedImage(localPath: string, configuredRoots?: string) {
-  const requested = path.resolve(localPath);
-  const roots = (configuredRoots?.split(path.delimiter) ?? ["/tmp/openclaw", "/workspace/.openclaw/media", "/workspace/media"])
-    .map(value => path.resolve(value.trim())).filter(Boolean);
-  if (!roots.some(root => requested === root || requested.startsWith(root + path.sep))) {
-    throw new Error("image path is outside allowed media directories");
-  }
-  const resolved = await realpath(requested);
-  if (!roots.some(root => resolved === root || resolved.startsWith(root + path.sep))) {
-    throw new Error("image real path is outside allowed media directories");
-  }
-  const info = await stat(resolved);
-  if (!info.isFile() || info.size <= 0 || info.size > 10 * 1024 * 1024) throw new Error("image file size is invalid");
-  const bytes = await readFile(resolved);
-  const mime = detectImageMime(bytes);
-  if (!mime) throw new Error("unsupported image content; expected PNG, JPEG, or WebP");
-  return { path: resolved, bytes, mime };
+function sanitizeTraceError(value?: string): string {
+  return (value ?? "")
+    .replace(/Bearer\s+\S+/gi, "Bearer ***")
+    .replace(/cm_user_[A-Za-z0-9_-]+/g, "cm_user_***")
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
+    .slice(0, 500);
 }
 
-function detectImageMime(bytes: Uint8Array): string | null {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
-  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
-  return null;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function registerTool(api: OpenClawPluginApi, domain: Domain, name: string, label: string, description: string, parameters: TSchema) {

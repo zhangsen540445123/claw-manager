@@ -3,6 +3,7 @@ package com.clawbotforall.trace;
 import com.clawbotforall.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class IntegrationTraceService {
+  private static final Duration DISPATCH_TIMEOUT = Duration.ofMinutes(10);
   private static final Set<String> STATUSES = Set.of("started", "completed", "failed");
   private static final Set<String> CHANNELS = Set.of("wechat", "api", "internal");
   private static final Set<String> COMPONENTS = Set.of("wechat-plugin", "api-channel", "miniapp-bridge", "claw-manager", "time-manager");
@@ -34,7 +36,7 @@ public class IntegrationTraceService {
       "artifact.image.upload.failed", "artifact.html.create.started", "artifact.html.create.completed",
       "artifact.html.create.failed", "api.request.received", "api.dispatch.started", "api.dispatch.completed",
       "api.dispatch.failed", "api.artifact.emitted", "api.stream.completed");
-  private static final Set<String> DETAIL_KEYS = Set.of("modelId", "mime", "width", "height", "fileSize", "imageId", "contentKey", "imageRequested");
+  private static final Set<String> DETAIL_KEYS = Set.of("modelId", "mime", "width", "height", "fileSize", "imageId", "generatedImageId", "contentKey", "imageRequested");
   private final IntegrationTraceMapper mapper;
   private final ObjectMapper json;
 
@@ -72,6 +74,7 @@ public class IntegrationTraceService {
         .filter(events -> value(component).isBlank() || events.stream().anyMatch(event -> value(component).equals(event.component())))
         .filter(events -> value(stage).isBlank() || events.stream().anyMatch(event -> value(stage).equals(event.stage())))
         .filter(events -> value(diagnosisCode).isBlank() || value(diagnosisCode).equals(diagnosis(events).get("code")))
+        .sorted(Comparator.comparing((List<IntegrationTraceEvent> events) -> events.getFirst().createdAt()).reversed())
         .toList();
     List<Map<String, Object>> summaries = filtered.stream().skip((long) Math.max(0, page - 1) * safeSize).limit(safeSize).map(this::summary).toList();
     return Map.of("items", summaries, "page", Math.max(1, page), "size", safeSize, "hasMore", filtered.size() > page * safeSize);
@@ -97,7 +100,7 @@ public class IntegrationTraceService {
     for (IntegrationTraceEvent event : events) {
       Object details = read(event.detailJson());
       if (!(details instanceof Map<?, ?> map)) continue;
-      for (String key : List.of("imageId", "contentKey", "mime", "width", "height", "fileSize")) {
+      for (String key : List.of("imageId", "generatedImageId", "contentKey", "mime", "width", "height", "fileSize")) {
         Object value = map.get(key);
         if (value != null && !String.valueOf(value).isBlank()) artifact.put(key, value);
       }
@@ -134,20 +137,75 @@ public class IntegrationTraceService {
     if (failed(events, "image.response.decoded")) return d("IMAGE_DECODE_FAILED", "图片响应解码或格式校验失败");
     if (failed(events, "image.provider.request.failed")) return d("IMAGE_PROVIDER_FAILED", "图片服务请求失败");
     if (failed(events, "image.config.validated")) return d("IMAGE_TOOL_FAILED", "图片生成配置未启用或配置不完整");
+    if (failed(events, "image.generation.failed")) return d("IMAGE_TOOL_FAILED", "图片生成执行失败");
     if (failed(events, "bridge.image_generate.failed")) return d("IMAGE_TOOL_FAILED", "image_generate 工具执行失败");
-    if (has(events, "bridge.image_generate.started") && !has(events, "image.provider.request.started")) return d("IMAGE_PROVIDER_NOT_CALLED", "image_generate 已调用，但图片 Provider 未收到请求");
-    if (has(events, "image.file.written") && !has(events, "bridge.publish_image.started")) return d("ARTIFACT_NOT_CALLED", "图片已生成，但没有调用 publish_image");
-    if (imageRequested(events) && has(events, "openclaw.dispatch.completed") && !has(events, "bridge.image_generate.started")) return d("NO_IMAGE_TOOL_CALL", "OpenClaw 已回复，但没有调用 image_generate");
-    if (has(events, "wechat.inbound.received") && !has(events, "openclaw.dispatch.started")) return d("NO_OPENCLAW_DISPATCH", "微信已收到消息，但没有进入 OpenClaw");
-    if (has(events, "artifact.html.create.completed") && (has(events, "wechat.media.send.completed") || has(events, "api.artifact.emitted"))) return d("COMPLETE", "生图与发布链路完成");
+    if (failed(events, "bridge.publish_image.failed")) return d("ARTIFACT_TOOL_FAILED", "miniapp_artifact 工具执行失败");
+    if (failedTool(events, "miniapp_artifact")) return d("ARTIFACT_TOOL_FAILED", "miniapp_artifact 工具执行失败");
+    if (failedTool(events, "image_generate")) return d("IMAGE_TOOL_FAILED", "image_generate 工具执行失败");
+    if (events.stream().anyMatch(e -> "failed".equals(e.status()))) return d("FAILED", "链路执行失败，请查看最后一个失败阶段");
+    if (imageRequested(events) && apiImageCompleted(events)) return d("COMPLETE", "生图与发布链路完成");
+    if (imageRequested(events) && wechatImageCompleted(events)) return d("COMPLETE", "生图与发布链路完成");
+    if (!imageRequested(events) && has(events, "api.stream.completed")) return d("COMPLETE", "消息处理链路完成");
     if (!imageRequested(events) && has(events, "openclaw.dispatch.completed")
-        && (has(events, "wechat.text.send.completed") || has(events, "api.stream.completed"))) return d("COMPLETE", "消息处理链路完成");
-    return d(hasFailed(events) ? "FAILED" : "IN_PROGRESS", hasFailed(events) ? "链路执行失败，请查看最后一个失败阶段" : "链路尚未完成");
+        && (has(events, "wechat.text.send.completed") || has(events, "wechat.media.send.completed"))) {
+      return d("COMPLETE", "消息处理链路完成");
+    }
+    if (dispatchStarted(events) && !dispatchTerminal(events) && timedOut(events, dispatchStart(events))) {
+      return d("DISPATCH_TIMEOUT", "OpenClaw 调度超过 10 分钟仍未结束");
+    }
+    if (requestReceived(events) && !dispatchStarted(events) && !dispatchTerminal(events)
+        && timedOut(events, events.getFirst().createdAt())) {
+      return d("NO_OPENCLAW_DISPATCH", "请求已收到，但没有进入 OpenClaw");
+    }
+    if (imageRequested(events) && dispatchCompleted(events) && !has(events, "bridge.image_generate.started")) {
+      return d("NO_IMAGE_TOOL_CALL", "OpenClaw 已回复，但没有调用 image_generate");
+    }
+    if (has(events, "bridge.image_generate.started") && dispatchCompleted(events) && !has(events, "image.provider.request.started")) {
+      return d("IMAGE_PROVIDER_NOT_CALLED", "image_generate 已调用，但图片 Provider 未收到请求");
+    }
+    if (has(events, "image.file.written") && dispatchCompleted(events) && !startedTool(events, "miniapp_artifact")) {
+      return d("ARTIFACT_NOT_CALLED", "图片已生成，但没有调用 publish_image");
+    }
+    if (imageRequested(events) && has(events, "api.stream.completed") && !apiImageCompleted(events)) {
+      return d("ARTIFACT_TOOL_FAILED", "API 流已结束，但 Artifact 发布未完成");
+    }
+    return d("IN_PROGRESS", "链路尚未完成");
   }
 
   private boolean has(List<IntegrationTraceEvent> events, String stage) { return events.stream().anyMatch(e -> stage.equals(e.stage())); }
   private boolean failed(List<IntegrationTraceEvent> events, String stage) { return events.stream().anyMatch(e -> stage.equals(e.stage()) && "failed".equals(e.status())); }
-  private boolean hasFailed(List<IntegrationTraceEvent> events) { return events.stream().anyMatch(e -> "failed".equals(e.status())); }
+  private boolean startedTool(List<IntegrationTraceEvent> events, String toolName) {
+    return events.stream().anyMatch(e -> "bridge.tool.started".equals(e.stage()) && toolName.equals(e.toolName()));
+  }
+  private boolean failedTool(List<IntegrationTraceEvent> events, String toolName) {
+    return events.stream().anyMatch(e -> "bridge.tool.failed".equals(e.stage()) && toolName.equals(e.toolName()));
+  }
+  private boolean dispatchStarted(List<IntegrationTraceEvent> events) {
+    return has(events, "openclaw.dispatch.started") || has(events, "api.dispatch.started");
+  }
+  private boolean requestReceived(List<IntegrationTraceEvent> events) {
+    return has(events, "wechat.inbound.received") || has(events, "api.request.received");
+  }
+  private boolean dispatchCompleted(List<IntegrationTraceEvent> events) {
+    return has(events, "openclaw.dispatch.completed") || has(events, "api.dispatch.completed");
+  }
+  private boolean dispatchTerminal(List<IntegrationTraceEvent> events) {
+    return dispatchCompleted(events) || has(events, "openclaw.dispatch.failed") || has(events, "api.dispatch.failed");
+  }
+  private String dispatchStart(List<IntegrationTraceEvent> events) {
+    return events.stream().filter(e -> "openclaw.dispatch.started".equals(e.stage()) || "api.dispatch.started".equals(e.stage()))
+        .map(IntegrationTraceEvent::createdAt).min(String::compareTo).orElse(events.getFirst().createdAt());
+  }
+  private boolean apiImageCompleted(List<IntegrationTraceEvent> events) {
+    return has(events, "artifact.html.create.completed") && has(events, "api.artifact.emitted") && has(events, "api.stream.completed");
+  }
+  private boolean wechatImageCompleted(List<IntegrationTraceEvent> events) {
+    return has(events, "artifact.html.create.completed") && has(events, "wechat.media.send.completed") && has(events, "openclaw.dispatch.completed");
+  }
+  private boolean timedOut(List<IntegrationTraceEvent> events, String startedAt) {
+    try { return Instant.parse(startedAt).plus(DISPATCH_TIMEOUT).isBefore(Instant.now()); }
+    catch (RuntimeException ignored) { return false; }
+  }
   private boolean imageRequested(List<IntegrationTraceEvent> events) {
     for (IntegrationTraceEvent event : events) {
       Object details = read(event.detailJson());
@@ -156,11 +214,13 @@ public class IntegrationTraceService {
     return false;
   }
   private String traceStatus(List<IntegrationTraceEvent> events) {
-    if (hasFailed(events)) return "failed";
-    return "COMPLETE".equals(diagnosis(events).get("code")) ? "completed" : "in_progress";
+    String code = diagnosis(events).get("code");
+    if ("COMPLETE".equals(code)) return "completed";
+    return "IN_PROGRESS".equals(code) ? "in_progress" : "failed";
   }
   private Map<String, String> d(String code, String message) { return Map.of("code", code, "message", message); }
-  private String sanitize(String s) { return clip(value(s).replaceAll("(?i)Bearer\\s+\\S+", "Bearer ***").replaceAll("cm_user_[A-Za-z0-9_-]+", "cm_user_***"), 500); }
+  private String sanitize(String s) { return clip(value(s).replaceAll("(?i)Bearer\\s+\\S+", "Bearer ***")
+      .replaceAll("cm_user_[A-Za-z0-9_-]+", "cm_user_***").replaceAll("sk-[A-Za-z0-9_-]{8,}", "sk-***"), 500); }
   private String write(Object value) { try { return json.writeValueAsString(value); } catch (Exception e) { return "{}"; } }
   private Object read(String value) { try { return json.readValue(value == null ? "{}" : value, Object.class); } catch (Exception e) { return Map.of(); } }
   private String preview(String s) { String v=value(s); return v.length() <= 12 ? v : v.substring(0, 6) + "..." + v.substring(v.length()-4); }

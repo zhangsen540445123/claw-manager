@@ -53,26 +53,31 @@ const sidebarCollapsed = ref(localStorage.getItem("claw-manager-sidebar-collapse
 const navGroups = computed(() => {
   return [
     {
-      label: "运行",
+      label: "总览",
       items: [
-        { key: "overview" as const, label: "运行总览", desc: "全局状态", icon: Activity },
-        { key: "instances" as const, label: "实例管理", desc: "容器与 Gateway", icon: Boxes }
+        { key: "overview" as const, label: "运行总览", desc: "全局状态", icon: Activity }
       ]
     },
     {
-      label: "配置",
+      label: "预设配置",
       items: [
-        { key: "create" as const, label: "创建实例", desc: "新建 OpenClaw", icon: PlusSquare },
-        { key: "presets" as const, label: "模型预设", desc: "模型供应商", icon: SlidersHorizontal },
-        { key: "imageGeneration" as const, label: "图片生成", desc: "多模态模型", icon: WandSparkles },
+        { key: "presets" as const, label: "LLM 模型预设", desc: "模型供应商", icon: SlidersHorizontal },
+        { key: "imageGeneration" as const, label: "生图预设", desc: "多模态模型", icon: WandSparkles },
+        { key: "openVikingSettings" as const, label: "记忆预设", desc: "记忆服务", icon: Database },
+        { key: "create" as const, label: "创建实例", desc: "新建 OpenClaw", icon: PlusSquare }
+      ]
+    },
+    {
+      label: "运行时配置",
+      items: [
         { key: "skills" as const, label: "Skill 管理", desc: "本地能力", icon: WandSparkles },
-        { key: "openVikingSettings" as const, label: "OpenViking预设", desc: "记忆服务", icon: Database }
+        { key: "wechatPlugins" as const, label: "插件管理", desc: "运行时插件", icon: PackageCheck },
+        { key: "instances" as const, label: "实例管理", desc: "容器与 Gateway", icon: Boxes }
       ]
     },
     {
       label: "渠道",
       items: [
-        { key: "wechatPlugins" as const, label: "插件管理", desc: "渠道插件", icon: PackageCheck },
         { key: "wechat" as const, label: "扫码链接", desc: "微信接入", icon: QrCode },
         { key: "wechatUsers" as const, label: "用户中心", desc: "微信与 API", icon: UsersRound },
         { key: "miniappClients" as const, label: "小程序接入", desc: "AK / SK", icon: KeyRound }
@@ -90,12 +95,12 @@ const navGroups = computed(() => {
 
 const routeTitles: Record<string, string> = {
   overview: "运行总览",
-  presets: "模型预设",
-  imageGeneration: "图片生成",
+  presets: "LLM 模型预设",
+  imageGeneration: "生图预设",
   skills: "Skill 管理",
   create: "创建实例",
   instances: "实例管理",
-  openVikingSettings: "OpenViking预设",
+  openVikingSettings: "记忆预设",
   wechat: "扫码链接",
   wechatPlugins: "插件管理",
   wechatUsers: "用户中心",

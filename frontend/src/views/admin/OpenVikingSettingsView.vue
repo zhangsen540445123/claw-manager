@@ -108,7 +108,7 @@ async function saveSettings() {
 
 <template>
   <section class="workspace openviking-page">
-    <PageHeader title="OpenViking预设" description="配置所有 OpenClaw 实例共享的 OpenViking 服务端和插件安装预置。">
+    <PageHeader title="记忆预设" description="配置所有 OpenClaw 实例共享的 OpenViking 服务端和插件安装预置。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="loading" @click="loadSettings">刷新</el-button>
       </template>

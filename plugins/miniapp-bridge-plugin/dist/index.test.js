@@ -69,12 +69,16 @@ describe("miniapp bridge", () => {
         expect(schemas).not.toContain("openid");
         expect(schemas).not.toContain("Authorization");
         expect(schemas).not.toContain("userKey");
+        const artifactSchema = JSON.stringify(registered.find(item => item.name === "miniapp_artifact")
+            .factory({ requesterSenderId: "sender" }).parameters);
+        expect(artifactSchema).toContain("generatedImageId");
+        expect(artifactSchema).not.toContain("localPath");
     });
     it("calls image generation without exposing identity parameters", async () => {
-        const fetcher = vi.fn(async () => new Response(JSON.stringify({ localPath: "/workspace/media/generated/img.png" }), { status: 200 }));
+        const fetcher = vi.fn(async () => new Response(JSON.stringify({ generatedImageId: "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", localPath: "/workspace/media/generated/img.png" }), { status: 200 }));
         const result = await callImageGeneration({ prompt: "极简红色圆形" }, { requesterSenderId: "sender" }, env, fetcher);
         const [, init] = fetchCalls(fetcher).find(call => String(call[0]).includes("/image-generation"));
-        expect(result).toMatchObject({ localPath: "/workspace/media/generated/img.png" });
+        expect(result).toMatchObject({ generatedImageId: "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", localPath: "/workspace/media/generated/img.png" });
         expect(String(init.body)).not.toContain("openid");
         expect(String(init.body)).not.toContain("cm_user");
     });
@@ -169,9 +173,38 @@ describe("miniapp bridge", () => {
         });
         expect(result).toMatchObject({ artifact: { type: "html_report" } });
     });
-    it("rejects image paths outside configured media roots before network access", async () => {
-        const fetcher = vi.fn(async () => new Response("{\"accepted\":true}", { status: 200 }));
-        await expect(callArtifactBridge({ operation: "publish_image", localPath: "C:/Windows/System32/logo.png" }, { requesterSenderId: "wechat-user-1" }, { ...env, OPENCLAW_ARTIFACT_DIRS: "D:/allowed/media" }, fetcher)).rejects.toThrow("allowed media directories");
-        expect(fetchCalls(fetcher).some(call => String(call[0]).includes("/artifacts/images"))).toBe(false);
+    it("publishes a generated image by opaque server-side image id", async () => {
+        const fetcher = vi.fn(async (url) => {
+            if (String(url).includes("/integration-traces/events"))
+                return new Response("{\"accepted\":true}", { status: 200 });
+            return new Response(JSON.stringify({ artifact: { type: "image_report", imageId: "uploaded-1" } }), { status: 200 });
+        });
+        const result = await callArtifactBridge({ operation: "publish_image", generatedImageId: "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", title: "海报" }, { requesterSenderId: "wechat-user-1" }, env, fetcher);
+        const [url, init] = fetchCalls(fetcher).find(call => String(call[0]).includes("/artifacts/generated-images"));
+        expect(url).toContain("/artifacts/generated-images");
+        expect(JSON.parse(String(init.body))).toMatchObject({
+            instanceId: "inst-1",
+            requesterSenderId: "wechat-user-1",
+            generatedImageId: "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            title: "海报",
+        });
+        expect(result).toMatchObject({ artifact: { type: "image_report", imageId: "uploaded-1" } });
+    });
+    it("reports a sanitized artifact tool error", async () => {
+        const fetcher = vi.fn(async (url) => {
+            if (String(url).includes("/integration-traces/events"))
+                return new Response("{\"accepted\":true}", { status: 200 });
+            return new Response("{\"message\":\"generated image missing\"}", { status: 404 });
+        });
+        await expect(callArtifactBridge({ operation: "publish_image", generatedImageId: "img_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, { requesterSenderId: "wechat-user-1" }, env, fetcher)).rejects.toThrow("miniapp artifact request failed (404)");
+        const events = fetchCalls(fetcher).filter(call => String(call[0]).includes("/integration-traces/events"))
+            .map(call => JSON.parse(String(call[1].body)));
+        expect(events.at(-1)).toMatchObject({
+            stage: "bridge.tool.failed",
+            toolName: "miniapp_artifact",
+            errorCode: "BRIDGE_TOOL_FAILED",
+        });
+        expect(events.at(-1).errorMessage).toContain("miniapp artifact request failed (404)");
+        expect(JSON.stringify(events.at(-1))).not.toContain("broker-secret");
     });
 });

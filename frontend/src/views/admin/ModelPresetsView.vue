@@ -181,7 +181,7 @@ function isPositiveInteger(value: unknown) {
 
 <template>
   <section class="workspace presets-page">
-    <PageHeader title="模型预设" description="维护实例创建和运行时使用的模型供应商配置。">
+    <PageHeader title="LLM 模型预设" description="维护实例创建和运行时使用的模型供应商配置。">
       <template #actions>
         <el-button type="primary" :icon="Plus" @click="openCreatePreset">新增预设</el-button>
       </template>

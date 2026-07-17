@@ -8,17 +8,18 @@ import { api } from "../../api/http";
 
 type Summary = { traceId:string; channel:string; instanceId:string; senderHashPreview:string; startedAt:string; finishedAt:string; elapsedMs:number; status:string; lastStage:string; diagnosisCode:string; diagnosisMessage:string };
 type Event = { component:string; stage:string; status:string; requestId:string; toolName:string; httpStatus:number; businessCode:number; elapsedMs:number; errorCode:string; errorMessage:string; details:Record<string,unknown>; createdAt:string };
-type Detail = { timeline:Event[]; relatedRequestIds:string[]; artifact:Record<string,unknown>; diagnosis:{code:string;message:string} };
+type Detail = { summary:Summary; timeline:Event[]; relatedRequestIds:string[]; artifact:Record<string,unknown>; diagnosis:{code:string;message:string} };
 
 const diagnosisOptions = [
   "NO_OPENCLAW_DISPATCH", "NO_IMAGE_TOOL_CALL", "IMAGE_TOOL_FAILED", "IMAGE_PROVIDER_NOT_CALLED",
   "IMAGE_PROVIDER_FAILED", "IMAGE_DECODE_FAILED", "IMAGE_FILE_WRITE_FAILED", "ARTIFACT_NOT_CALLED",
-  "ARTIFACT_UPLOAD_FAILED", "ARTIFACT_HTML_FAILED", "WECHAT_MEDIA_FAILED", "COMPLETE"
+  "ARTIFACT_TOOL_FAILED", "ARTIFACT_UPLOAD_FAILED", "ARTIFACT_HTML_FAILED", "WECHAT_MEDIA_FAILED",
+  "DISPATCH_TIMEOUT", "COMPLETE"
 ];
 const loading=ref(false), detailLoading=ref(false), drawer=ref(false), hasMore=ref(false);
 const items=ref<Summary[]>([]), timeline=ref<Event[]>([]), selected=ref<Summary|null>(null), related=ref<string[]>([]);
 const artifact=ref<Record<string,unknown>>({}), page=ref(1), size=ref(20);
-const filters=reactive<{channel:string;status:string;instanceId:string;component:string;diagnosisCode:string;range:[Date,Date]|null}>({ channel:"", status:"", instanceId:"", component:"", diagnosisCode:"", range:null });
+const filters=reactive<{traceId:string;channel:string;status:string;instanceId:string;component:string;diagnosisCode:string;range:[Date,Date]|null}>({ traceId:"", channel:"", status:"", instanceId:"", component:"", diagnosisCode:"", range:null });
 const paginationTotal=computed(()=>(page.value-1)*size.value+items.value.length+(hasMore.value?1:0));
 const completedCount=computed(()=>items.value.filter((item)=>item.status==="completed").length);
 const failedCount=computed(()=>items.value.filter((item)=>item.status==="failed").length);
@@ -28,6 +29,11 @@ async function load(reset=false){
   if(reset) page.value=1;
   loading.value=true;
   try {
+    const traceId=filters.traceId.trim();
+    if(traceId){
+      const result=await api<Detail>(`/api/admin/integration-traces/${encodeURIComponent(traceId)}`);
+      items.value=[result.summary];hasMore.value=false;return;
+    }
     const q=new URLSearchParams({page:String(page.value),size:String(size.value)});
     for(const key of ["channel","status","instanceId","component","diagnosisCode"] as const) if(filters[key])q.set(key,filters[key]);
     if(filters.range){q.set("from",filters.range[0].toISOString());q.set("to",filters.range[1].toISOString());}
@@ -58,11 +64,12 @@ onMounted(()=>load());
     </PageHeader>
     <section class="metric-grid compact-metric-grid">
       <MetricCard label="当前页链路" :value="items.length" />
-      <MetricCard label="已完成" :value="completedCount" tone="success" />
-      <MetricCard label="失败" :value="failedCount" tone="danger" />
-      <MetricCard label="需要诊断" :value="imageIssueCount" tone="warning" />
+      <MetricCard label="本页已完成" :value="completedCount" tone="success" />
+      <MetricCard label="本页失败" :value="failedCount" tone="danger" />
+      <MetricCard label="本页需诊断" :value="imageIssueCount" tone="warning" />
     </section>
     <div class="toolbar-row">
+      <el-input v-model="filters.traceId" placeholder="Trace ID（精确查询）" clearable />
       <el-date-picker v-model="filters.range" type="datetimerange" start-placeholder="开始时间" end-placeholder="结束时间" />
       <el-input v-model="filters.instanceId" placeholder="实例 ID" clearable />
       <el-select v-model="filters.channel" placeholder="渠道" clearable><el-option label="微信" value="wechat"/><el-option label="API" value="api"/></el-select>
@@ -89,9 +96,15 @@ onMounted(()=>load());
       <el-timeline v-loading="detailLoading">
         <el-timeline-item v-for="event in timeline" :key="event.createdAt+event.stage+event.requestId" :timestamp="formatTime(event.createdAt)" :type="tag(event.status)">
           <div class="event-title"><strong>{{event.stage}}</strong><el-tag size="small" :type="tag(event.status)">{{statusText(event.status)}}</el-tag></div>
-          <div class="event-meta">{{event.component}} · {{event.requestId || '-'}}<template v-if="event.elapsedMs"> · {{event.elapsedMs}} ms</template></div>
+          <div class="event-meta">
+            {{event.component}} · {{event.requestId || '-'}}
+            <template v-if="event.toolName"> · 工具 {{event.toolName}}</template>
+            <template v-if="event.httpStatus"> · HTTP {{event.httpStatus}}</template>
+            <template v-if="event.businessCode"> · 业务码 {{event.businessCode}}</template>
+            <template v-if="event.elapsedMs"> · {{event.elapsedMs}} ms</template>
+          </div>
           <div v-if="hasDetails(event)" class="event-details"><span v-for="(value,key) in event.details" :key="key"><b>{{key}}</b> {{value}}</span></div>
-          <el-alert v-if="event.errorMessage" :title="event.errorMessage" type="error" :closable="false"/>
+          <el-alert v-if="event.errorCode || event.errorMessage" :title="[event.errorCode,event.errorMessage].filter(Boolean).join(' · ')" type="error" :closable="false"/>
         </el-timeline-item>
       </el-timeline>
       <div v-if="related.length"><h4>相关 Request ID</h4><div v-for="id in related" :key="id" class="request-id"><span class="mono">{{id}}</span><el-button link :icon="Copy" title="复制 Request ID" @click="copy(id)"/></div></div>
@@ -100,5 +113,5 @@ onMounted(()=>load());
 </template>
 
 <style scoped>
-.toolbar-row{display:grid;grid-template-columns:minmax(320px,1.5fr) minmax(150px,.8fr) 110px 110px 150px minmax(190px,1fr) auto;gap:8px;margin-bottom:12px;align-items:center}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.secondary,.event-meta{color:#667085;font-size:12px;margin-top:4px}.diagnosis-code{font-size:12px}.pager{display:flex;justify-content:flex-end;padding-top:12px}.trace-summary,.artifact-summary{display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:16px}.trace-summary>div{display:flex;align-items:center;gap:8px}.artifact-summary span,.event-details span{display:inline-flex;gap:5px;margin-right:12px;font-size:12px}.event-title{display:flex;gap:8px;align-items:center}.event-details{padding:7px 9px;background:#f6f7f9;border:1px solid #e7e9ee;margin:6px 0}.request-id{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0}@media(max-width:1200px){.toolbar-row{grid-template-columns:repeat(3,minmax(0,1fr))}.toolbar-row>:first-child{grid-column:span 2}}@media(max-width:700px){.toolbar-row{grid-template-columns:1fr}.toolbar-row>:first-child{grid-column:auto}.pager{justify-content:center}}
+.toolbar-row{display:grid;grid-template-columns:minmax(230px,1fr) minmax(320px,1.5fr) minmax(150px,.8fr) 110px 110px 150px minmax(190px,1fr) auto;gap:8px;margin-bottom:12px;align-items:center}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.secondary,.event-meta{color:#667085;font-size:12px;margin-top:4px}.diagnosis-code{font-size:12px}.pager{display:flex;justify-content:flex-end;padding-top:12px}.trace-summary,.artifact-summary{display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:16px}.trace-summary>div{display:flex;align-items:center;gap:8px}.artifact-summary span,.event-details span{display:inline-flex;gap:5px;margin-right:12px;font-size:12px}.event-title{display:flex;gap:8px;align-items:center}.event-details{padding:7px 9px;background:#f6f7f9;border:1px solid #e7e9ee;margin:6px 0}.request-id{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0}@media(max-width:1200px){.toolbar-row{grid-template-columns:repeat(3,minmax(0,1fr))}.toolbar-row>:nth-child(2){grid-column:span 2}}@media(max-width:700px){.toolbar-row{grid-template-columns:1fr}.toolbar-row>:nth-child(2){grid-column:auto}.pager{justify-content:center}}
 </style>

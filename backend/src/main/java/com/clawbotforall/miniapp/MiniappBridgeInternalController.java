@@ -54,6 +54,13 @@ public class MiniappBridgeInternalController {
     return artifactService.publishImage(instanceId, requesterSenderId, requestId, cmTraceId, title, description, image);
   }
 
+  @PostMapping("/api/internal/miniapp-bridge/artifacts/generated-images")
+  public Map<String, Object> publishGeneratedImage(@RequestBody MiniappGeneratedArtifactRequest request,
+      @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+    requireToken(authorization);
+    return artifactService.publishGeneratedImage(request);
+  }
+
   private void requireToken(String authorization) {
     String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer\\s+", "").trim();
     if (!tokenService.matches(token)) throw new ApiException(HttpStatus.UNAUTHORIZED, "Miniapp Bridge token 无效。");

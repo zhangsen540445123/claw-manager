@@ -13,7 +13,7 @@ type BridgeInput = {
 };
 type ArtifactInput = {
     operation: "publish_image" | "publish_html";
-    localPath?: string;
+    generatedImageId?: string;
     htmlContent?: string;
     title?: string;
     description?: string;
