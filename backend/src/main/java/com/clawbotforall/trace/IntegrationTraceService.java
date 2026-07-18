@@ -38,7 +38,7 @@ public class IntegrationTraceService {
       "api.dispatch.failed", "api.artifact.emitted", "api.stream.completed");
   private static final Set<String> DETAIL_KEYS = Set.of(
       "modelId", "mime", "width", "height", "fileSize", "imageId", "generatedImageId", "contentKey", "imageRequested",
-      "streamMode", "agentEventDeltaCount", "deliverDeltaCount", "deltaCount", "firstDeltaMs");
+      "imageIntentReason", "streamMode", "agentEventDeltaCount", "deliverDeltaCount", "deltaCount", "firstDeltaMs");
   private final IntegrationTraceMapper mapper;
   private final ObjectMapper json;
 
@@ -116,12 +116,26 @@ public class IntegrationTraceService {
     IntegrationTraceEvent first = events.getFirst();
     IntegrationTraceEvent last = events.getLast();
     Map<String, String> diagnosis = diagnosis(events);
-    long elapsed = Math.max(0, Instant.parse(last.createdAt()).toEpochMilli() - Instant.parse(first.createdAt()).toEpochMilli());
-    return Map.ofEntries(Map.entry("traceId", first.traceId()), Map.entry("channel", first.channel()),
-        Map.entry("instanceId", first.instanceId()), Map.entry("senderHashPreview", preview(first.senderHash())),
-        Map.entry("startedAt", first.createdAt()), Map.entry("finishedAt", last.createdAt()), Map.entry("elapsedMs", elapsed),
-        Map.entry("status", traceStatus(events)), Map.entry("lastStage", last.stage()),
-        Map.entry("diagnosisCode", diagnosis.get("code")), Map.entry("diagnosisMessage", diagnosis.get("message")));
+    Instant diagnosedAt = Instant.now();
+    boolean terminal = dispatchTerminal(events) || has(events, "api.stream.completed")
+        || has(events, "wechat.text.send.completed") || has(events, "wechat.media.send.completed");
+    Instant elapsedEnd = terminal ? Instant.parse(last.createdAt()) : diagnosedAt;
+    long elapsed = Math.max(0, elapsedEnd.toEpochMilli() - Instant.parse(first.createdAt()).toEpochMilli());
+    LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+    summary.put("traceId", first.traceId());
+    summary.put("channel", first.channel());
+    summary.put("instanceId", first.instanceId());
+    summary.put("senderHashPreview", preview(first.senderHash()));
+    summary.put("startedAt", first.createdAt());
+    summary.put("finishedAt", terminal ? last.createdAt() : "");
+    summary.put("lastEventAt", last.createdAt());
+    summary.put("diagnosedAt", diagnosedAt.toString());
+    summary.put("elapsedMs", elapsed);
+    summary.put("status", traceStatus(events));
+    summary.put("lastStage", last.stage());
+    summary.put("diagnosisCode", diagnosis.get("code"));
+    summary.put("diagnosisMessage", diagnosis.get("message"));
+    return Map.copyOf(summary);
   }
 
   private Map<String, Object> publicEvent(IntegrationTraceEvent e) {
@@ -144,6 +158,9 @@ public class IntegrationTraceService {
     if (failed(events, "bridge.publish_image.failed")) return d("ARTIFACT_TOOL_FAILED", "miniapp_artifact 工具执行失败");
     if (failedTool(events, "miniapp_artifact")) return d("ARTIFACT_TOOL_FAILED", "miniapp_artifact 工具执行失败");
     if (failedTool(events, "image_generate")) return d("IMAGE_TOOL_FAILED", "image_generate 工具执行失败");
+    if (hasRecoveredToolRetry(events) && completedChannel(events)) {
+      return d("RECOVERED_AFTER_RETRY", "工具首次调用失败，后续重试成功");
+    }
     if (events.stream().anyMatch(e -> "failed".equals(e.status()))) return d("FAILED", "链路执行失败，请查看最后一个失败阶段");
     if (imageRequested(events) && apiImageCompleted(events)) return d("COMPLETE", "生图与发布链路完成");
     if (imageRequested(events) && wechatImageCompleted(events)) return d("COMPLETE", "生图与发布链路完成");
@@ -159,7 +176,7 @@ public class IntegrationTraceService {
         && timedOut(events, events.getFirst().createdAt())) {
       return d("NO_OPENCLAW_DISPATCH", "请求已收到，但没有进入 OpenClaw");
     }
-    if (imageRequested(events) && dispatchCompleted(events) && !has(events, "bridge.image_generate.started")) {
+    if (imageRequested(events) && imageRequestFinished(events) && !has(events, "bridge.image_generate.started")) {
       return d("NO_IMAGE_TOOL_CALL", "OpenClaw 已回复，但没有调用 image_generate");
     }
     if (has(events, "bridge.image_generate.started") && dispatchCompleted(events) && !has(events, "image.provider.request.started")) {
@@ -182,11 +199,33 @@ public class IntegrationTraceService {
   private boolean failedTool(List<IntegrationTraceEvent> events, String toolName) {
     return events.stream().anyMatch(e -> "bridge.tool.failed".equals(e.stage()) && toolName.equals(e.toolName()));
   }
+  private boolean hasRecoveredToolRetry(List<IntegrationTraceEvent> events) {
+    for (int failedIndex = 0; failedIndex < events.size(); failedIndex++) {
+      IntegrationTraceEvent failed = events.get(failedIndex);
+      if (!"bridge.tool.failed".equals(failed.stage()) || failed.toolName().isBlank()) continue;
+      for (int completedIndex = failedIndex + 1; completedIndex < events.size(); completedIndex++) {
+        IntegrationTraceEvent completed = events.get(completedIndex);
+        if ("bridge.tool.completed".equals(completed.stage()) && failed.toolName().equals(completed.toolName())) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  private boolean completedChannel(List<IntegrationTraceEvent> events) {
+    return has(events, "api.stream.completed")
+        || (has(events, "openclaw.dispatch.completed")
+            && (has(events, "wechat.text.send.completed") || has(events, "wechat.media.send.completed")));
+  }
   private boolean dispatchStarted(List<IntegrationTraceEvent> events) {
     return has(events, "openclaw.dispatch.started") || has(events, "api.dispatch.started");
   }
   private boolean requestReceived(List<IntegrationTraceEvent> events) {
     return has(events, "wechat.inbound.received") || has(events, "api.request.received");
+  }
+  private boolean imageRequestFinished(List<IntegrationTraceEvent> events) {
+    if (has(events, "api.request.received")) return has(events, "api.stream.completed");
+    return has(events, "openclaw.dispatch.completed");
   }
   private boolean dispatchCompleted(List<IntegrationTraceEvent> events) {
     return has(events, "openclaw.dispatch.completed") || has(events, "api.dispatch.completed");
@@ -217,7 +256,7 @@ public class IntegrationTraceService {
   }
   private String traceStatus(List<IntegrationTraceEvent> events) {
     String code = diagnosis(events).get("code");
-    if ("COMPLETE".equals(code)) return "completed";
+    if ("COMPLETE".equals(code) || "RECOVERED_AFTER_RETRY".equals(code)) return "completed";
     return "IN_PROGRESS".equals(code) ? "in_progress" : "failed";
   }
   private Map<String, String> d(String code, String message) { return Map.of("code", code, "message", message); }

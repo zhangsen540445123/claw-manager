@@ -6,7 +6,7 @@ import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { api } from "../../api/http";
 
-type Summary = { traceId:string; channel:string; instanceId:string; senderHashPreview:string; startedAt:string; finishedAt:string; elapsedMs:number; status:string; lastStage:string; diagnosisCode:string; diagnosisMessage:string };
+type Summary = { traceId:string; channel:string; instanceId:string; senderHashPreview:string; startedAt:string; finishedAt:string; lastEventAt:string; diagnosedAt:string; elapsedMs:number; status:string; lastStage:string; diagnosisCode:string; diagnosisMessage:string };
 type Event = { component:string; stage:string; status:string; requestId:string; toolName:string; httpStatus:number; businessCode:number; elapsedMs:number; errorCode:string; errorMessage:string; details:Record<string,unknown>; createdAt:string };
 type Detail = { summary:Summary; timeline:Event[]; relatedRequestIds:string[]; artifact:Record<string,unknown>; diagnosis:{code:string;message:string} };
 
@@ -14,7 +14,7 @@ const diagnosisOptions = [
   "NO_OPENCLAW_DISPATCH", "NO_IMAGE_TOOL_CALL", "IMAGE_TOOL_FAILED", "IMAGE_PROVIDER_NOT_CALLED",
   "IMAGE_PROVIDER_FAILED", "IMAGE_DECODE_FAILED", "IMAGE_FILE_WRITE_FAILED", "ARTIFACT_NOT_CALLED",
   "ARTIFACT_TOOL_FAILED", "ARTIFACT_UPLOAD_FAILED", "ARTIFACT_HTML_FAILED", "WECHAT_MEDIA_FAILED",
-  "DISPATCH_TIMEOUT", "COMPLETE"
+  "DISPATCH_TIMEOUT", "RECOVERED_AFTER_RETRY", "COMPLETE"
 ];
 const loading=ref(false), detailLoading=ref(false), drawer=ref(false), hasMore=ref(false);
 const items=ref<Summary[]>([]), timeline=ref<Event[]>([]), selected=ref<Summary|null>(null), related=ref<string[]>([]);
@@ -53,6 +53,8 @@ function tag(status:string){return status==="failed"?"danger":status==="complete
 function statusText(status:string){return status==="failed"?"失败":status==="completed"?"完成":"进行中";}
 function channelText(channel:string){return channel==="wechat"?"微信":channel==="api"?"API":"内部";}
 function formatTime(value:string){return value?new Date(value).toLocaleString("zh-CN",{hour12:false}):"-";}
+function formatElapsed(row:Summary){return `${row.finishedAt?"":"未结束，已耗时 "}${row.elapsedMs} ms`;}
+function diagnosisTag(code:string){return code==="COMPLETE"?"success":code==="RECOVERED_AFTER_RETRY"?"warning":"danger";}
 function hasDetails(event:Event){return Object.keys(event.details??{}).length>0;}
 onMounted(()=>load());
 </script>
@@ -83,10 +85,10 @@ onMounted(()=>load());
       <el-table-column label="Trace ID" min-width="245"><template #default="{row}"><span class="mono">{{row.traceId}}</span><el-button link :icon="Copy" title="复制 Trace ID" @click="copy(row.traceId)"/></template></el-table-column>
       <el-table-column label="渠道" width="80"><template #default="{row}">{{channelText(row.channel)}}</template></el-table-column>
       <el-table-column prop="instanceId" label="实例" min-width="150"/>
-      <el-table-column label="总耗时" width="105"><template #default="{row}">{{row.elapsedMs}} ms</template></el-table-column>
+      <el-table-column label="总耗时" width="150"><template #default="{row}">{{formatElapsed(row)}}</template></el-table-column>
       <el-table-column prop="lastStage" label="最后阶段" min-width="210"/>
       <el-table-column label="状态" width="90"><template #default="{row}"><el-tag :type="tag(row.status)">{{statusText(row.status)}}</el-tag></template></el-table-column>
-      <el-table-column label="自动诊断" min-width="280"><template #default="{row}"><strong class="diagnosis-code">{{row.diagnosisCode}}</strong><div class="secondary">{{row.diagnosisMessage}}</div></template></el-table-column>
+      <el-table-column label="自动诊断" min-width="280"><template #default="{row}"><el-tag size="small" :type="diagnosisTag(row.diagnosisCode)">{{row.diagnosisCode}}</el-tag><div class="secondary">{{row.diagnosisMessage}}</div></template></el-table-column>
       <el-table-column label="操作" width="86" fixed="right"><template #default="{row}"><el-button link type="primary" @click="open(row)">详情</el-button></template></el-table-column>
     </el-table>
     <div class="pager"><el-pagination v-model:current-page="page" :page-size="size" :total="paginationTotal" layout="prev, pager, next" @current-change="load()"/></div>

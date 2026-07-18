@@ -227,15 +227,19 @@ public class ExternalApiQueueService {
     StreamReadState streamState = new StreamReadState();
     while (System.nanoTime() < absoluteDeadline) {
       StreamReadResult streamRead = readStreamEvents(streamPath, streamState, onDelta, onArtifact);
+      if (streamRead.active()) {
+        idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
+      }
       if (streamRead.progressed()) {
         sawProgress = true;
-        idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
       }
       if (Files.exists(responsePath)) {
         streamRead = readStreamEvents(streamPath, streamState, onDelta, onArtifact);
+        if (streamRead.active()) {
+          idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
+        }
         if (streamRead.progressed()) {
           sawProgress = true;
-          idleDeadline = System.nanoTime() + timeouts.idleTimeout().toNanos();
         }
         Map<String, Object> response = objectMapper.readValue(responsePath.toFile(), MAP_TYPE);
         Files.deleteIfExists(responsePath);
@@ -260,7 +264,7 @@ public class ExternalApiQueueService {
   private StreamReadResult readStreamEvents(Path streamPath, StreamReadState state, StreamDeltaConsumer onDelta,
       StreamArtifactConsumer onArtifact) throws IOException {
     if (!Files.exists(streamPath)) {
-      return new StreamReadResult(false);
+      return new StreamReadResult(false, false);
     }
     long size = Files.size(streamPath);
     if (size < state.offset) {
@@ -268,7 +272,7 @@ public class ExternalApiQueueService {
       state.pending.setLength(0);
     }
     if (size <= state.offset) {
-      return new StreamReadResult(false);
+      return new StreamReadResult(false, false);
     }
     byte[] bytes;
     try (var input = Files.newInputStream(streamPath)) {
@@ -277,7 +281,8 @@ public class ExternalApiQueueService {
     }
     state.offset = size;
     state.pending.append(new String(bytes, StandardCharsets.UTF_8));
-    boolean progressed = bytes.length > 0;
+    boolean active = bytes.length > 0;
+    boolean progressed = false;
     int newlineIndex;
     while ((newlineIndex = indexOfNewline(state.pending)) >= 0) {
       String line = state.pending.substring(0, newlineIndex).trim();
@@ -298,9 +303,11 @@ public class ExternalApiQueueService {
       if ("delta".equals(type)) {
         String text = valueString(event.get("text"));
         if (!text.isBlank()) {
+          progressed = true;
           onDelta.accept(text);
         }
       } else if ("artifact".equals(type) && event.get("artifact") instanceof Map<?, ?> rawArtifact) {
+        progressed = true;
         Map<String, Object> artifact = new LinkedHashMap<>();
         rawArtifact.forEach((key, value) -> artifact.put(String.valueOf(key), value));
         onArtifact.accept(Map.copyOf(artifact));
@@ -308,7 +315,7 @@ public class ExternalApiQueueService {
         throw new IllegalStateException("API Channel 处理失败：" + valueString(event.get("error")));
       }
     }
-    return new StreamReadResult(progressed);
+    return new StreamReadResult(active, progressed);
   }
 
   private static int indexOfNewline(StringBuilder builder) {
@@ -392,5 +399,5 @@ public class ExternalApiQueueService {
       Duration pollInterval
   ) {}
 
-  private record StreamReadResult(boolean progressed) {}
+  private record StreamReadResult(boolean active, boolean progressed) {}
 }

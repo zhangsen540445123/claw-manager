@@ -85,7 +85,7 @@ type ApiArtifactSink = (artifact: Record<string, unknown>) => Promise<void> | vo
 
 type ApiQueueStreamEvent = {
   seq: number;
-  type: "delta" | "artifact" | "done" | "error";
+  type: "delta" | "artifact" | "heartbeat" | "done" | "error";
   text?: string;
   messageId?: string;
   error?: string;
@@ -97,6 +97,7 @@ const API_CHANNEL_ID = "claw-manager-api";
 const API_ACCOUNT_ID = "global";
 const API_QUEUE_POLL_MS = 200;
 const API_HEARTBEAT_INTERVAL_MS = 1000;
+const API_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 const API_STATUS_FILE = "status.json";
 const API_DYNAMIC_AGENT_PREFIX = "api-";
 
@@ -148,7 +149,39 @@ export async function reportApiTrace(params: {
 }
 
 export function requestsImageGeneration(message: string): boolean {
-  return /(生图|生成.*(图|海报|卡片)|图片|海报|九宫格|image|poster)/i.test(message);
+  return imageRequestIntentReason(message) === "explicit_request";
+}
+
+export function imageRequestIntentReason(message: string): "explicit_request" | "negated" | "capability_question" | "none" {
+  const normalized = trim(message);
+  if (!normalized) return "none";
+  if (/(不要|不用|无需|别|禁止).{0,8}(生图|生成|制作|画).{0,6}(图|图片|海报|卡片)/i.test(normalized)) {
+    return "negated";
+  }
+  if (/^(你|系统|这个助手).{0,8}(支持|能否支持|是否支持).{0,8}(图片|生图).*[?？]?$/i.test(normalized)) {
+    return "capability_question";
+  }
+  return /(生图|(?:生成|制作|画|绘制|设计|给我|来一张).{0,16}(图片|图像|海报|卡片|九宫格|图)|(?:图片|海报|卡片).{0,6}(生成|制作)|generate.{0,16}(image|poster)|create.{0,16}(image|poster))/i.test(normalized)
+    ? "explicit_request"
+    : "none";
+}
+
+export function startApiStreamHeartbeat(
+  writer: () => Promise<void> | void,
+  intervalMs = API_STREAM_HEARTBEAT_INTERVAL_MS,
+  onError?: (error: unknown) => void,
+): () => Promise<void> {
+  let writeChain = Promise.resolve();
+  const timer = setInterval(() => {
+    writeChain = writeChain
+      .catch(() => undefined)
+      .then(() => Promise.resolve(writer()))
+      .catch((error) => onError?.(error));
+  }, intervalMs);
+  return async () => {
+    clearInterval(timer);
+    await writeChain.catch(() => undefined);
+  };
 }
 
 type ApiQueueMonitorState = {
@@ -654,7 +687,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     }),
     deliver: async (payload: { text?: string }) => {
       const text = payload.text ?? "";
-      replyText += text;
+      replyText = mergeDeliveredText(replyText, text);
       if (text && streamState) {
         await emitDeliveredDelta(streamState, replyText);
       }
@@ -707,7 +740,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
 }
 
 async function emitDeliveredDelta(state: ApiAgentEventStreamState, candidate: string): Promise<void> {
-  const delta = trimOverlappingDelta(state.emittedText, candidate);
+  const delta = unemittedSuffix(state.emittedText, candidate);
   if (!delta) return;
   state.emittedText += delta;
   state.deliverDeltaCount += 1;
@@ -899,13 +932,18 @@ async function processApiRequestFile(
   let request: ApiSendMessageParams = {};
   let requestId = path.basename(processingPath, ".json");
   let streamSeq = 0;
+  let streamWriteChain = Promise.resolve();
   const writeStreamEvent = async (event: Omit<ApiQueueStreamEvent, "seq" | "createdAt">) => {
-    streamSeq += 1;
-    await writeQueueStreamEvent(streamPath, {
-      seq: streamSeq,
-      createdAt: new Date().toISOString(),
-      ...event,
+    const write = streamWriteChain.catch(() => undefined).then(async () => {
+      streamSeq += 1;
+      await writeQueueStreamEvent(streamPath, {
+        seq: streamSeq,
+        createdAt: new Date().toISOString(),
+        ...event,
+      });
     });
+    streamWriteChain = write.then(() => undefined, () => undefined);
+    await write;
   };
   try {
     await safeUnlink(streamPath);
@@ -913,7 +951,10 @@ async function processApiRequestFile(
     requestId = trim(request.requestId) || requestId;
     const cmTraceId = apiTraceId(requestId);
     await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.request.received", status: "completed",
-      details: { imageRequested: requestsImageGeneration(trim(request.message)) } });
+      details: {
+        imageRequested: requestsImageGeneration(trim(request.message)),
+        imageIntentReason: imageRequestIntentReason(trim(request.message)),
+      } });
     ctx.log?.info?.(`[${API_ACCOUNT_ID}] api request received requestId=${requestId} user=${trim(request.openVikingUserId) || trim(request.openvikingUserId) || "missing"}`);
     ctx.setStatus?.({
       accountId: API_ACCOUNT_ID,
@@ -921,19 +962,29 @@ async function processApiRequestFile(
       lastInboundAt: Date.now(),
       lastEventAt: Date.now(),
     });
-    const result = await dispatchApiMessage({
-      ...request,
-      requestId,
-      cfg: ctx.cfg,
-      channelRuntime: ctx.channelRuntime,
-      configRuntime: ctx.configRuntime,
-      log: ctx.log,
-      onDelta: async (text) => writeStreamEvent({ type: "delta", text }),
-      onArtifact: async (artifact) => {
-        await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.artifact.emitted", status: "completed" });
-        await writeStreamEvent({ type: "artifact", artifact });
-      },
-    });
+    const stopStreamHeartbeat = startApiStreamHeartbeat(
+      () => writeStreamEvent({ type: "heartbeat" }),
+      API_STREAM_HEARTBEAT_INTERVAL_MS,
+      (error) => ctx.log?.warn?.(`[${API_ACCOUNT_ID}] api stream heartbeat failed requestId=${requestId}: ${errorMessage(error)}`),
+    );
+    let result: Awaited<ReturnType<typeof dispatchApiMessage>>;
+    try {
+      result = await dispatchApiMessage({
+        ...request,
+        requestId,
+        cfg: ctx.cfg,
+        channelRuntime: ctx.channelRuntime,
+        configRuntime: ctx.configRuntime,
+        log: ctx.log,
+        onDelta: async (text) => writeStreamEvent({ type: "delta", text }),
+        onArtifact: async (artifact) => {
+          await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.artifact.emitted", status: "completed" });
+          await writeStreamEvent({ type: "artifact", artifact });
+        },
+      });
+    } finally {
+      await stopStreamHeartbeat();
+    }
     await writeStreamEvent({ type: "done", messageId: result.messageId });
     await reportApiTrace({
       traceId: cmTraceId,
@@ -1135,6 +1186,20 @@ function trimOverlappingDelta(previous: string, delta: string): string {
     }
   }
   return delta;
+}
+
+function mergeDeliveredText(previous: string, candidate: string): string {
+  if (!candidate) return previous;
+  if (!previous || candidate.startsWith(previous)) return candidate;
+  if (candidate.length > 1 && previous.startsWith(candidate)) return previous;
+  return previous + candidate;
+}
+
+function unemittedSuffix(previous: string, candidate: string): string {
+  if (!candidate || previous === candidate || previous.startsWith(candidate)) return "";
+  if (!previous) return candidate;
+  if (candidate.startsWith(previous)) return candidate.slice(previous.length);
+  return trimOverlappingDelta(previous, candidate);
 }
 
 function shouldPreferExplicitAgentDelta(previous: string, suffix: string, explicit: string): boolean {

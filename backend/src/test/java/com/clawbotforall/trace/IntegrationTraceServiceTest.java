@@ -187,6 +187,39 @@ class IntegrationTraceServiceTest {
   }
 
   @Test
+  void treatsFailedToolAttemptFollowedBySuccessfulRetryAsRecovered() {
+    when(mapper.findByTraceId("cmtrace_test123")).thenReturn(List.of(
+        event("api.request.received", "completed", "2026-07-16T00:00:00Z"),
+        event("api.dispatch.started", "started", "2026-07-16T00:00:01Z"),
+        event("bridge.tool.started", "started", "2026-07-16T00:00:02Z", "{}", "miniapp_goal"),
+        event("bridge.tool.failed", "failed", "2026-07-16T00:00:03Z", "{}", "miniapp_goal"),
+        event("bridge.tool.started", "started", "2026-07-16T00:00:04Z", "{}", "miniapp_goal"),
+        event("bridge.tool.completed", "completed", "2026-07-16T00:00:05Z", "{}", "miniapp_goal"),
+        event("api.dispatch.completed", "completed", "2026-07-16T00:00:06Z"),
+        event("api.stream.completed", "completed", "2026-07-16T00:00:07Z")));
+
+    Map<String, Object> detail = service.detail("cmtrace_test123");
+
+    assertThat(((Map<?, ?>) detail.get("diagnosis")).get("code")).isEqualTo("RECOVERED_AFTER_RETRY");
+    assertThat(((Map<?, ?>) detail.get("summary")).get("status")).isEqualTo("completed");
+  }
+
+  @Test
+  void reportsObservedElapsedTimeForTimedOutDispatchWithoutTerminalEvent() {
+    String startedAt = Instant.now().minus(11, ChronoUnit.MINUTES).toString();
+    when(mapper.findByTraceId("cmtrace_test123")).thenReturn(List.of(
+        event("api.request.received", "completed", startedAt),
+        event("api.dispatch.started", "started", startedAt)));
+
+    Map<String, Object> detail = service.detail("cmtrace_test123");
+    Map<?, ?> summary = (Map<?, ?>) detail.get("summary");
+
+    assertThat(summary.get("diagnosisCode")).isEqualTo("DISPATCH_TIMEOUT");
+    assertThat((Long) summary.get("elapsedMs")).isGreaterThan(10 * 60 * 1000L);
+    assertThat(summary.get("finishedAt")).isEqualTo("");
+  }
+
+  @Test
   void recordWhitelistsDetailsAndRedactsCredentials() {
     service.record(new IntegrationTraceEventRequest(
         "cmtrace_test123", "parent", "wechat-plugin", "wechat.inbound.received", "completed", "wechat",

@@ -8,11 +8,13 @@ import {
   dispatchApiMessage,
   resolveApiDynamicAgentId,
   handleApiAssistantAgentEvent,
+  imageRequestIntentReason,
   monitorApiQueue,
   reportApiTrace,
   requestsImageGeneration,
   registerApiAgentEventStream,
   resetApiAgentEventStreamsForTest,
+  startApiStreamHeartbeat,
   writeApiQueueHeartbeat,
 } from "./channel.js";
 
@@ -24,6 +26,30 @@ describe("API trace reporting", () => {
   it("marks image requests without retaining request text", () => {
     expect(requestsImageGeneration("随机添加待办后生成一张图片")).toBe(true);
     expect(requestsImageGeneration("新增一个待办")).toBe(false);
+    expect(requestsImageGeneration("不要生成图片，只给我文字建议")).toBe(false);
+    expect(requestsImageGeneration("你支持图片吗？")).toBe(false);
+    expect(requestsImageGeneration("帮我制定这个月的目标九宫格")).toBe(false);
+    expect(imageRequestIntentReason("不要生成图片，只给我文字建议")).toBe("negated");
+    expect(imageRequestIntentReason("生成一张目标海报")).toBe("explicit_request");
+  });
+
+  it("writes internal stream heartbeats until stopped", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const stop = startApiStreamHeartbeat(async () => {
+        events.push("heartbeat");
+      }, 1000);
+
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(events).toEqual(["heartbeat", "heartbeat"]);
+
+      await stop();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(events).toEqual(["heartbeat", "heartbeat"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("uses the broker token without including user identity fields", async () => {
     const fetcher = vi.fn(async () => new Response("{\"accepted\":true}", { status: 200 }));
@@ -51,6 +77,7 @@ describe("API trace reporting", () => {
 
 function makeRuntime(overrides: {
   dispatchReplyFromConfig?: ReturnType<typeof vi.fn>;
+  createReplyDispatcherWithTyping?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
     routing: {
@@ -67,7 +94,7 @@ function makeRuntime(overrides: {
     reply: {
       finalizeInboundContext: vi.fn((ctx) => ctx),
       resolveHumanDelayConfig: vi.fn(() => ({})),
-      createReplyDispatcherWithTyping: vi.fn(() => ({
+      createReplyDispatcherWithTyping: overrides.createReplyDispatcherWithTyping ?? vi.fn(() => ({
         dispatcher: {},
         replyOptions: {},
         markDispatchIdle: vi.fn(),
@@ -1076,5 +1103,35 @@ describe("buildApiInboundContext", () => {
         }),
       }),
     );
+  });
+
+  it("deduplicates cumulative deliver payloads and returns the canonical transcript", async () => {
+    const chunks: string[] = [];
+    let deliverReply: ((payload: { text?: string }) => Promise<void>) | undefined;
+    const runtime = makeRuntime({
+      dispatchReplyFromConfig: vi.fn(async () => {
+        await deliverReply?.({ text: "已把计划整理好。" });
+        await deliverReply?.({ text: "已把计划整理好。\n查看链接：https://example.test/view" });
+        await deliverReply?.({ text: "已把计划整理好。\n查看链接：https://example.test/view\n可以继续调整。" });
+      }),
+      createReplyDispatcherWithTyping: vi.fn((opts) => {
+        deliverReply = opts.deliver;
+        return { dispatcher: {}, replyOptions: {}, markDispatchIdle: vi.fn() };
+      }),
+    });
+
+    const result = await dispatchApiMessage({
+      requestId: "req-cumulative-deliver",
+      message: "hello",
+      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      senderHash: "f9db8c63722f76a920d852d85f502177",
+      conversationHash: "convhash",
+      cfg: { session: {} } as any,
+      channelRuntime: runtime as any,
+      onDelta: async (text) => chunks.push(text),
+    });
+
+    expect(chunks.join("")).toBe("已把计划整理好。\n查看链接：https://example.test/view\n可以继续调整。");
+    expect(result.text).toBe("已把计划整理好。\n查看链接：https://example.test/view\n可以继续调整。");
   });
 });

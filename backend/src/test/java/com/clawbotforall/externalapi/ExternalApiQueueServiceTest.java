@@ -189,6 +189,43 @@ class ExternalApiQueueServiceTest {
   }
 
   @Test
+  void heartbeatRefreshesIdleDeadlineWithoutBecomingAssistantDelta() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    Path homeDir = tempDir.resolve("home");
+    when(fileService.paths("inst_1")).thenReturn(new InstancePaths(
+        tempDir, homeDir, tempDir.resolve("workspace"), tempDir.resolve("logs")));
+    Path root = homeDir.resolve(".openclaw").resolve("claw-manager-api");
+    writeRecentHeartbeat(root);
+    ExternalApiQueueService service = new ExternalApiQueueService(
+        fileService, objectMapper, gatewayRpcService,
+        new ExternalApiQueueService.QueueTimeouts(
+            Duration.ofSeconds(1), Duration.ofMillis(250), Duration.ofSeconds(3), Duration.ofMillis(25)));
+    List<String> deltas = new ArrayList<>();
+
+    CompletableFuture<Map<String, Object>> result = CompletableFuture.supplyAsync(() ->
+        service.streamApiChannelMessage(instance, Map.of("requestId", "req_stream_heartbeat"), deltas::add));
+
+    waitUntilExists(root.resolve("requests").resolve("req_stream_heartbeat.json"));
+    Path streamPath = root.resolve("streams").resolve("req_stream_heartbeat.jsonl");
+    Files.createDirectories(streamPath.getParent());
+    Files.writeString(streamPath, "{\"seq\":1,\"type\":\"delta\",\"text\":\"开始\"}\n");
+    waitUntil(() -> deltas.size() == 1);
+
+    for (int seq = 2; seq <= 9; seq++) {
+      Files.writeString(streamPath,
+          "{\"seq\":" + seq + ",\"type\":\"heartbeat\"}\n",
+          java.nio.file.StandardOpenOption.APPEND);
+      Thread.sleep(75);
+    }
+    objectMapper.writeValue(root.resolve("responses").resolve("req_stream_heartbeat.json").toFile(), Map.of(
+        "ok", true, "requestId", "req_stream_heartbeat", "messageId", "msg_stream_heartbeat", "text", "开始"));
+
+    assertThat(result.get(2, TimeUnit.SECONDS).get("text")).isEqualTo("开始");
+    assertThat(deltas).containsExactly("开始");
+  }
+
+  @Test
   void streamsArtifactEventsBeforeFinalQueueResponse() throws Exception {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
