@@ -1,0 +1,52 @@
+{
+  "name": "@claw-manager/workspace-file-plugin",
+  "version": "2026.7.1",
+  "description": "Workspace-scoped file operations for OpenClaw agents",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "dist/",
+    "!dist/index.test.*",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "build": "node node_modules/typescript/bin/tsc",
+    "prepublishOnly": "npm run test && npm run typecheck && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.12"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.33"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "openclaw": "2026.5.12",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "install": {
+      "npmSpec": "@claw-manager/workspace-file-plugin",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.5.12"
+    }
+  }
+}
