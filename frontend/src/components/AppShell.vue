@@ -28,6 +28,7 @@ type ShellNavKey =
   | "create"
   | "instances"
   | "openVikingSettings"
+  | "agentWorkspacePreset"
   | "wechat"
   | "wechatPlugins"
   | "wechatUsers"
@@ -64,6 +65,7 @@ const navGroups = computed(() => {
         { key: "presets" as const, label: "LLM 模型预设", desc: "模型供应商", icon: SlidersHorizontal },
         { key: "imageGeneration" as const, label: "生图预设", desc: "多模态模型", icon: WandSparkles },
         { key: "openVikingSettings" as const, label: "记忆预设", desc: "记忆服务", icon: Database },
+        { key: "agentWorkspacePreset" as const, label: "Agent 工作区预设", desc: "人格与工作区", icon: Workflow },
         { key: "create" as const, label: "创建实例", desc: "新建 OpenClaw", icon: PlusSquare }
       ]
     },
@@ -101,6 +103,7 @@ const routeTitles: Record<string, string> = {
   create: "创建实例",
   instances: "实例管理",
   openVikingSettings: "记忆预设",
+  agentWorkspacePreset: "Agent 工作区预设",
   wechat: "扫码链接",
   wechatPlugins: "插件管理",
   wechatUsers: "用户中心",

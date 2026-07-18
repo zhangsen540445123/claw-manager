@@ -10,6 +10,7 @@ Claw Manager 通过后台插件管理为 OpenClaw 实例安装插件。当前重
 | API Channel 插件 | `@claw-manager/openclaw-api-channel` | `claw-manager-api` | 接收 Claw Manager 外部聊天请求，转发后端确定的 `openVikingUserId`，写 handoff 并输出 SSE delta |
 | OpenViking 插件 | `@claw-manager/openviking-openclaw-plugin` | `openviking` | 基于 OpenViking 官方 OpenClaw 示例插件二开，接入 broker 和用户级记忆隔离 |
 | 小程序 Bridge 插件 | `@claw-manager/miniapp-bridge-plugin` | `miniapp-bridge` | 在单个插件中注册待办、目标、子任务、习惯打卡、HTML 五个 sender-scoped 强类型工具，通过 Claw Manager 安全调用当前用户的小程序业务接口 |
+| 工作区文件插件 | `@claw-manager/workspace-file-plugin` | `workspace-file` | 只允许 Agent 通过当前 `workspaceDir` 对自己的工作区执行列出、读取、写入、建目录和删除操作 |
 
 ## 安装方式
 
@@ -38,3 +39,5 @@ Claw Manager 通过后台插件管理为 OpenClaw 实例安装插件。当前重
 - API Channel 插件负责把 OpenClaw assistant 增量输出写入 `.openclaw/claw-manager-api/streams/{requestId}.jsonl`，并把最终结果写入 `responses/{requestId}.json`，后端据此转发 SSE。
 - OpenViking 插件缺少显式身份或 handoff 时必须跳过用户记忆能力，不能回退默认用户。
 - 小程序 Bridge 只接受固定 `actionKey` 和业务参数。openid、`cm_user_...` 和目标 URL 必须由 Claw Manager 根据 `requesterSenderId` 解析，模型和 Skill 不得提供或覆盖。
+- 工作区文件插件只从 OpenClaw 工具上下文取得工作区根目录；绝对路径、盘符、UNC、`..` 越界和指向工作区外的符号链接都会被拒绝。工作区内部不设置保留文件名，用户可以自行维护 `AGENTS.md`、`SOUL.md`、`MEMORY.md` 和其他文件。
+- 对动态 `wechat_*` Agent，插件还通过官方 `before_tool_call` 钩子限制原生 `read`：只允许读取当前 Agent 工作区和实例共享 `workspace/skills`，其他宿主机路径会被拒绝。

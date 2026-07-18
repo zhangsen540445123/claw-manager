@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class OpenClawRunnerEntrypointTest {
 
   @Test
-  void entrypointDoesNotInstallOpenVikingPluginAutomatically() throws Exception {
+  void entrypointStartsGatewayWithoutInstallingManagedPlugins() throws Exception {
     String script = Files.readString(Path.of("..", "containers", "openclaw-runner", "entrypoint.sh"));
 
     assertThat(script).doesNotContain("OPENVIKING_PLUGIN_PACKAGE");

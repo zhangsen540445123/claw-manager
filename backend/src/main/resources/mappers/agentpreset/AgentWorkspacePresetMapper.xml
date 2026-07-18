@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.agentpreset.AgentWorkspacePresetMapper">
+  <resultMap id="PresetMap" type="com.clawbotforall.agentpreset.AgentWorkspacePresetEntity">
+    <id property="id" column="id"/>
+    <result property="version" column="version"/>
+    <result property="agentsMd" column="agents_md"/>
+    <result property="soulMd" column="soul_md"/>
+    <result property="identityMd" column="identity_md"/>
+    <result property="toolsMd" column="tools_md"/>
+    <result property="heartbeatMd" column="heartbeat_md"/>
+    <result property="userMd" column="user_md"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+  <select id="findGlobal" resultMap="PresetMap">
+    SELECT * FROM agent_workspace_presets WHERE id = 'global' LIMIT 1
+  </select>
+  <insert id="upsert">
+    INSERT INTO agent_workspace_presets
+      (id, version, agents_md, soul_md, identity_md, tools_md, heartbeat_md, user_md, updated_at)
+    VALUES
+      (#{id}, #{version}, #{agentsMd}, #{soulMd}, #{identityMd}, #{toolsMd}, #{heartbeatMd}, #{userMd}, #{updatedAt})
+    ON DUPLICATE KEY UPDATE version=VALUES(version), agents_md=VALUES(agents_md), soul_md=VALUES(soul_md),
+      identity_md=VALUES(identity_md), tools_md=VALUES(tools_md), heartbeat_md=VALUES(heartbeat_md),
+      user_md=VALUES(user_md), updated_at=VALUES(updated_at)
+  </insert>
+</mapper>

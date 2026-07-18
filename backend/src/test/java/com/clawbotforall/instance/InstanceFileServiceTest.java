@@ -32,8 +32,11 @@ class InstanceFileServiceTest {
 
     Path instanceDir = tempDir.resolve("instances").resolve(draft.instance().getId());
     assertThat(instanceDir.resolve("README.txt")).exists();
-    assertThat(instanceDir.resolve("workspace").resolve("MEMORY.md")).exists();
+    assertThat(instanceDir.resolve("workspace").resolve("MEMORY.md")).doesNotExist();
+    assertThat(instanceDir.resolve("workspace").resolve("memory")).doesNotExist();
     assertThat(instanceDir.resolve("home").resolve(".openclaw").resolve("agents").resolve("main").resolve("agent").resolve("models.json"))
+        .exists();
+    assertThat(instanceDir.resolve("home").resolve(".openclaw").resolve("claw-manager").resolve("workspace-preset.json"))
         .exists();
 
     Map<String, Object> config = objectMapper.readValue(
@@ -41,6 +44,18 @@ class InstanceFileServiceTest {
         new TypeReference<>() {}
     );
     assertThat(config).containsKeys("gateway", "agents", "models", "plugins", "session");
+
+    @SuppressWarnings("unchecked")
+    Map<String, Object> agents = (Map<String, Object>) config.get("agents");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> defaults = (Map<String, Object>) agents.get("defaults");
+    assertThat(defaults).containsEntry("workspace", "/workspace");
+    assertThat(defaults).containsEntry("skipBootstrap", true);
+    assertThat(defaults.get("compaction"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("memoryFlush")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("enabled", false);
 
     @SuppressWarnings("unchecked")
     Map<String, Object> gateway = (Map<String, Object>) config.get("gateway");
@@ -80,6 +95,9 @@ class InstanceFileServiceTest {
     assertThat(plugins.get("entries"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
         .isEmpty();
+    assertThat(plugins.get("slots"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("memory", "none");
     assertThat(config).doesNotContainKey("channels");
 
     @SuppressWarnings("unchecked")
@@ -230,7 +248,8 @@ class InstanceFileServiceTest {
     Map<String, Object> plugins = (Map<String, Object>) config.get("plugins");
     assertThat(plugins.get("slots"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
-        .containsEntry("contextEngine", "openviking");
+        .containsEntry("contextEngine", "openviking")
+        .containsEntry("memory", "none");
   }
 
   private ClawbotProperties testProperties() {

@@ -211,7 +211,7 @@ async function loadWorkspacePreset(homeDir: string): Promise<typeof DEFAULT_WORK
 
 function isValidPreset(value: Record<string, unknown>): value is typeof DEFAULT_WORKSPACE_PRESET & { version: number } {
   const version = value.version;
-  return typeof version === "number" && Number.isInteger(version) && version > 0 &&
+  return typeof version === "number" && Number.isInteger(version) && version >= 0 &&
     ["agentsMd", "soulMd", "identityMd", "toolsMd", "heartbeatMd", "userMd"]
       .every((key) => typeof value[key] === "string" && String(value[key]).length > 0);
 }

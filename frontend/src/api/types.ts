@@ -41,6 +41,17 @@ export interface PublicImageGenerationSettings {
   updatedAt: string;
 }
 
+export interface PublicAgentWorkspacePreset {
+  version: number;
+  agentsMd: string;
+  soulMd: string;
+  identityMd: string;
+  toolsMd: string;
+  heartbeatMd: string;
+  userMd: string;
+  updatedAt: string;
+}
+
 export interface ModelProviderDefinition {
   key: string;
   label: string;

@@ -8,6 +8,7 @@ import type {
   ModelProviderDefinition,
   PublicApiChannelPluginStatus,
   PublicApiChannelPluginVersions,
+  PublicAgentWorkspacePreset,
   PublicMiniappClient,
   PublicOpenVikingPluginStatus,
   PublicOpenVikingPluginVersions,
@@ -87,6 +88,7 @@ export const useAdminStore = defineStore("admin", {
     instances: [] as PublicInstance[],
     presets: [] as PublicModelPreset[],
     imageGenerationSettings: null as PublicImageGenerationSettings | null,
+    agentWorkspacePreset: null as PublicAgentWorkspacePreset | null,
     providers: [] as ModelProviderDefinition[],
     runnerImage: null as RunnerImageStatus | null,
     serverLogs: "",
@@ -104,6 +106,8 @@ export const useAdminStore = defineStore("admin", {
     apiChannelPluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     miniappBridgePluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
     miniappBridgePluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
+    workspaceFilePluginStatusByInstanceId: {} as Record<string, PublicApiChannelPluginStatus>,
+    workspaceFilePluginVersions: { latest: "", versions: [] } as PublicApiChannelPluginVersions,
     wechatBindLinkByToken: {} as Record<string, PublicWechatBindLink>,
     wsConnected: false,
     catalogLoaded: false,
@@ -257,6 +261,19 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<{ settings: PublicImageGenerationSettings }>("/api/admin/image-generation-settings");
       this.imageGenerationSettings = response.settings;
       return response.settings;
+    },
+    async loadAgentWorkspacePreset() {
+      const response = await api<{ preset: PublicAgentWorkspacePreset }>('/api/admin/agent-workspace-preset');
+      this.agentWorkspacePreset = response.preset;
+      return response.preset;
+    },
+    async saveAgentWorkspacePreset(payload: Record<string, unknown>) {
+      const response = await api<{ preset: PublicAgentWorkspacePreset }>('/api/admin/agent-workspace-preset', {
+        method: 'PUT',
+        ...jsonBody(payload)
+      });
+      this.agentWorkspacePreset = response.preset;
+      return response.preset;
     },
     async saveImageGenerationSettings(payload: Record<string, unknown>) {
       const response = await api<{ settings: PublicImageGenerationSettings; syncedInstanceIds: string[]; restartRequired: boolean }>(
@@ -629,6 +646,51 @@ export const useAdminStore = defineStore("admin", {
       }
       this.miniappBridgePluginStatusByInstanceId = next;
     },
+    async loadWorkspaceFilePluginStatus(instanceId: string, checkLatest = false) {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/workspace-file-plugin?checkLatest=${checkLatest ? "true" : "false"}`
+      );
+      this.workspaceFilePluginStatusByInstanceId = {
+        ...this.workspaceFilePluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.workspaceFilePluginVersions)
+      };
+      return this.workspaceFilePluginStatusByInstanceId[instanceId];
+    },
+    async loadWorkspaceFilePluginVersions(forceRefresh = false) {
+      const response = await api<{ versions: PublicApiChannelPluginVersions }>(
+        `/api/admin/workspace-file-plugins/versions${forceRefresh ? "?forceRefresh=true" : ""}`
+      );
+      this.workspaceFilePluginVersions = response.versions;
+      this.applyWorkspaceFilePluginVersions(response.versions);
+      return response.versions;
+    },
+    async operateWorkspaceFilePlugin(instanceId: string, action: "install" | "uninstall" | "upgrade" | "reinstall", version = "") {
+      const response = await api<{ plugin: PublicApiChannelPluginStatus }>(
+        `/api/admin/instances/${instanceId}/workspace-file-plugin/${action}`,
+        { method: "POST", ...jsonBody({ version }) }
+      );
+      this.workspaceFilePluginStatusByInstanceId = {
+        ...this.workspaceFilePluginStatusByInstanceId,
+        [instanceId]: withPluginVersion(response.plugin, this.workspaceFilePluginVersions)
+      };
+      return this.workspaceFilePluginStatusByInstanceId[instanceId];
+    },
+    async batchWorkspaceFilePlugins(action: "check" | "install" | "uninstall" | "upgrade" | "reinstall", instanceIds: string[], version = "") {
+      const response = await api<{ plugins: MiniappBridgePluginBatchItem[] }>(`/api/admin/workspace-file-plugins/${action}`, {
+        method: "POST", ...jsonBody({ instanceIds, version })
+      });
+      const next = { ...this.workspaceFilePluginStatusByInstanceId };
+      for (const item of response.plugins) next[item.instanceId] = withPluginVersion(item.plugin, this.workspaceFilePluginVersions);
+      this.workspaceFilePluginStatusByInstanceId = next;
+      return response.plugins;
+    },
+    applyWorkspaceFilePluginVersions(versions: PublicApiChannelPluginVersions) {
+      const next = { ...this.workspaceFilePluginStatusByInstanceId };
+      for (const [instanceId, plugin] of Object.entries(next)) {
+        next[instanceId] = withPluginVersion(plugin, versions);
+      }
+      this.workspaceFilePluginStatusByInstanceId = next;
+    },
     async installWechatPlugin(instanceId: string, version = "") {
       const response = await api<{ plugin: PublicWechatPluginStatus }>(
         `/api/admin/instances/${instanceId}/wechat-plugin/install`,
@@ -815,6 +877,13 @@ export const useAdminStore = defineStore("admin", {
         this.miniappBridgePluginStatusByInstanceId = {
           ...this.miniappBridgePluginStatusByInstanceId,
           [payload.instanceId]: withPluginVersion(payload.plugin, this.miniappBridgePluginVersions)
+        };
+      }
+      if (event.type === "workspace.file.plugin.updated") {
+        const payload = event.payload as { instanceId: string; plugin: PublicApiChannelPluginStatus };
+        this.workspaceFilePluginStatusByInstanceId = {
+          ...this.workspaceFilePluginStatusByInstanceId,
+          [payload.instanceId]: withPluginVersion(payload.plugin, this.workspaceFilePluginVersions)
         };
       }
       if (event.type === "wechat.bindLink.updated") {

@@ -20,6 +20,15 @@ type WorkspaceFileResult = {
   [key: string]: unknown;
 };
 
+type NativeReadEvent = {
+  toolName: string;
+  params: Record<string, unknown>;
+};
+
+type NativeReadContext = {
+  agentId?: string;
+};
+
 class WorkspaceFileError extends Error {
   readonly workspaceFileError = true;
 }
@@ -77,6 +86,62 @@ async function existingAncestor(candidate: string): Promise<string> {
       current = parent;
     }
   }
+}
+
+async function allowedRoot(root: unknown): Promise<string | undefined> {
+  if (typeof root !== "string" || !root.trim()) return undefined;
+  try {
+    const resolved = await realpath(root);
+    return (await lstat(resolved)).isDirectory() ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function nativeReadPath(params: Record<string, unknown>): string | undefined {
+  for (const key of ["path", "file_path", "filePath"]) {
+    const value = params[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+export async function guardNativeRead(
+  config: Record<string, any>,
+  event: NativeReadEvent,
+  ctx: NativeReadContext,
+): Promise<{ block: true; blockReason: string } | undefined> {
+  if (event.toolName !== "read" || !ctx.agentId?.startsWith("wechat_")) return undefined;
+
+  const agents = config?.agents && typeof config.agents === "object" ? config.agents : {};
+  const list = Array.isArray(agents.list) ? agents.list : [];
+  const agent = list.find((item: unknown) =>
+    Boolean(item) && typeof item === "object" && (item as Record<string, unknown>).id === ctx.agentId);
+  const workspace = agent && typeof agent.workspace === "string" ? agent.workspace : undefined;
+  const requestedPath = nativeReadPath(event.params);
+  if (!workspace || !requestedPath || requestedPath.includes("\0")) {
+    return { block: true, blockReason: "read path is outside the current Agent workspace" };
+  }
+
+  const roots = [
+    await allowedRoot(workspace),
+    await allowedRoot(
+      typeof agents.defaults?.workspace === "string"
+        ? path.join(agents.defaults.workspace, "skills")
+        : undefined,
+    ),
+  ].filter((value): value is string => Boolean(value));
+  const candidate = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(workspace, requestedPath);
+  let target: string;
+  try {
+    target = await realpath(candidate).catch(() => existingAncestor(candidate));
+  } catch {
+    return { block: true, blockReason: "read path is outside the current Agent workspace" };
+  }
+  if (roots.some((root) => isInside(root, target))) return undefined;
+  return { block: true, blockReason: "read path is outside the current Agent workspace" };
 }
 
 async function resolveWorkspacePath(workspaceDir: string, inputPath: string): Promise<{ root: string; absolute: string; relative: string }> {
@@ -224,6 +289,11 @@ const plugin = {
   name: "OpenClaw Workspace File",
   description: "Workspace-scoped file operations for the current OpenClaw agent.",
   register(api: OpenClawPluginApi) {
+    const hookApi = api as OpenClawPluginApi & {
+      on?: (event: string, handler: (event: NativeReadEvent, ctx: NativeReadContext) => unknown) => void;
+    };
+    hookApi.on?.("before_tool_call", (event, ctx) =>
+      guardNativeRead(api.runtime.config.current() as Record<string, any>, event, ctx));
     api.registerTool((ctx: OpenClawPluginToolContext) => {
       if (!ctx.workspaceDir) return null;
       return {

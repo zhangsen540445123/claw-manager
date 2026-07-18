@@ -149,6 +149,30 @@ describe("Weixin dynamic agent", () => {
     }
   });
 
+  it("accepts the built-in seed snapshot version zero", async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
+    const workspace = path.join(homeDir, ".openclaw", "workspace-wechat-zero");
+    try {
+      const presetDir = path.join(homeDir, ".openclaw", "claw-manager");
+      await import("node:fs/promises").then(({ mkdir }) => mkdir(presetDir, { recursive: true }));
+      await writeFile(path.join(presetDir, "workspace-preset.json"), JSON.stringify({
+        agentsMd: "# Seed agents\n",
+        soulMd: "# Seed soul\n",
+        identityMd: "# Seed identity\n",
+        toolsMd: "# Seed tools\n",
+        heartbeatMd: "# Seed heartbeat\n",
+        userMd: "# Seed user\n",
+        version: 0,
+      }), "utf8");
+
+      await ensureWeixinAgentWorkspace(workspace, { homeDir });
+
+      await expect(readFile(path.join(workspace, "AGENTS.md"), "utf8")).resolves.toBe("# Seed agents\n");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("falls back to safe defaults when the workspace preset is invalid", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
     const workspace = path.join(homeDir, ".openclaw", "workspace-wechat-default");

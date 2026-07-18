@@ -4,6 +4,13 @@
 
 This project follows the [Keep a Changelog](https://keepachangelog.com/) format.
 
+## [2026.6.28] - 2026-07-19
+
+### Added
+
+- Creates a sender-scoped Agent and workspace on a user's first Weixin message; the same user reuses it across bot accounts.
+- Serializes official `mutateConfigFile` updates for `agents.list` and `bindings`, and loads the Claw Manager workspace preset snapshot.
+
 ## [2.4.5] - 2026-06-22
 
 ### Added

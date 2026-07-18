@@ -94,6 +94,16 @@ public class InstanceEventPublisher {
     );
   }
 
+  public void publishWorkspaceFilePluginUpdated(String instanceId, PublicApiChannelPluginStatus plugin) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("instanceId", instanceId);
+    payload.put("plugin", plugin);
+    appEventPublisher.sendToTopic(
+        ADMIN_WECHAT_TOPIC,
+        AppEvent.of("workspace.file.plugin.updated", traceId(), payload)
+    );
+  }
+
   public void publishWechatBindLinkUpdated(String token, PublicWechatBindLink link) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("token", token);

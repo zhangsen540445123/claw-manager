@@ -1,6 +1,9 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.config.ClawbotProperties;
+import com.clawbotforall.agentpreset.AgentWorkspacePreset;
+import com.clawbotforall.agentpreset.AgentWorkspacePresetProvider;
+import com.clawbotforall.agentpreset.AgentWorkspacePresetSnapshotWriter;
 import com.clawbotforall.image.ImageGenerationSettings;
 import com.clawbotforall.image.ImageGenerationSettingsProvider;
 import com.clawbotforall.runtime.InstancePaths;
@@ -12,14 +15,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 为实例数据目录写入和维护 OpenClaw 配置文件。
@@ -36,15 +38,31 @@ public class InstanceFileService {
   private final ClawbotProperties properties;
   private final ObjectMapper objectMapper;
   private final ImageGenerationSettingsProvider imageGenerationSettingsProvider;
+  private final AgentWorkspacePresetProvider agentWorkspacePresetProvider;
+  private final AgentWorkspacePresetSnapshotWriter presetSnapshotWriter;
 
   public InstanceFileService(
       ClawbotProperties properties,
       ObjectMapper objectMapper,
       ImageGenerationSettingsProvider imageGenerationSettingsProvider
   ) {
+    this(properties, objectMapper, imageGenerationSettingsProvider,
+        () -> AgentWorkspacePreset.defaults(), new AgentWorkspacePresetSnapshotWriter(Path.of(properties.paths().dataDir())));
+  }
+
+  @Autowired
+  public InstanceFileService(
+      ClawbotProperties properties,
+      ObjectMapper objectMapper,
+      ImageGenerationSettingsProvider imageGenerationSettingsProvider,
+      AgentWorkspacePresetProvider agentWorkspacePresetProvider,
+      AgentWorkspacePresetSnapshotWriter presetSnapshotWriter
+  ) {
     this.properties = properties;
     this.objectMapper = objectMapper.copy().enable(SerializationFeature.INDENT_OUTPUT);
     this.imageGenerationSettingsProvider = imageGenerationSettingsProvider;
+    this.agentWorkspacePresetProvider = agentWorkspacePresetProvider;
+    this.presetSnapshotWriter = presetSnapshotWriter;
   }
 
   /**
@@ -62,6 +80,7 @@ public class InstanceFileService {
       Map<String, Object> config = buildOpenClawConfig(instance, models, providers, readExistingConfig(paths));
       objectMapper.writeValue(paths.homeDir().resolve("openclaw.json").toFile(), config);
       writeAgentModels(paths, providers);
+      presetSnapshotWriter.writeForInstance(instance.getId(), agentWorkspacePresetProvider.current());
       writeReadme(instance, paths);
       return paths;
     } catch (IOException error) {
@@ -89,19 +108,6 @@ public class InstanceFileService {
     Files.createDirectories(paths.workspaceDir());
     Files.createDirectories(paths.logsDir());
 
-    Path memoryDir = paths.workspaceDir().resolve("memory");
-    Files.createDirectories(memoryDir);
-    LocalDate today = LocalDate.now(ZoneOffset.UTC);
-    List<Path> memoryFiles = List.of(
-        paths.workspaceDir().resolve("MEMORY.md"),
-        memoryDir.resolve(today + ".md"),
-        memoryDir.resolve(today.minusDays(1) + ".md")
-    );
-    for (Path file : memoryFiles) {
-      if (!Files.exists(file)) {
-        Files.writeString(file, "", StandardCharsets.UTF_8);
-      }
-    }
   }
 
   private Map<String, Object> buildOpenClawConfig(
@@ -162,6 +168,10 @@ public class InstanceFileService {
   private Map<String, Object> agentsConfig(List<InstanceModelEntity> models) {
     Map<String, Object> defaults = new LinkedHashMap<>();
     defaults.put("workspace", "/workspace");
+    defaults.put("skipBootstrap", true);
+    defaults.put("compaction", Map.of(
+        "memoryFlush", Map.of("enabled", false)
+    ));
     if (!models.isEmpty()) {
       InstanceModelEntity primary = models.getFirst();
       Map<String, Object> model = new LinkedHashMap<>();
@@ -312,9 +322,12 @@ public class InstanceFileService {
     Map<String, Object> plugins = new LinkedHashMap<>();
     plugins.put("allow", allow);
     plugins.put("entries", entries);
+    Map<String, Object> slots = new LinkedHashMap<>();
+    slots.put("memory", "none");
     if (allow.contains(OPENVIKING_PLUGIN_ID)) {
-      plugins.put("slots", Map.of("contextEngine", OPENVIKING_PLUGIN_ID));
+      slots.put("contextEngine", OPENVIKING_PLUGIN_ID);
     }
+    plugins.put("slots", slots);
     return plugins;
   }
 

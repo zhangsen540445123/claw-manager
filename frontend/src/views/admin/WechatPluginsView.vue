@@ -8,7 +8,7 @@ import { useAdminStore } from "../../stores/admin";
 import type { PublicInstance, PublicWechatPluginStatus } from "../../api/types";
 import { formatDateTime } from "../../utils/adminUi";
 
-type PluginKind = "wechat" | "openviking" | "api" | "miniapp-bridge";
+type PluginKind = "wechat" | "openviking" | "api" | "miniapp-bridge" | "workspace-file";
 type PluginAction = "check" | "install" | "uninstall" | "upgrade" | "reinstall";
 
 const admin = useAdminStore();
@@ -54,7 +54,7 @@ const pluginMeta = computed(() => {
     refreshFailed: "API Channel 插件版本读取失败",
     operationFailed: "API Channel 插件操作失败"
   };
-  return {
+  if (activePlugin.value === "miniapp-bridge") return {
     title: "小程序 Bridge 插件",
     description: "为微信和小程序 AI 提供 sender-scoped 小程序业务工具调用。",
     installConfirm: "卸载会移除 Bridge 工具和启用配置，不删除用户绑定或业务数据。",
@@ -62,6 +62,15 @@ const pluginMeta = computed(() => {
     refreshSuccess: "小程序 Bridge 插件版本已刷新。",
     refreshFailed: "小程序 Bridge 插件版本读取失败",
     operationFailed: "小程序 Bridge 插件操作失败"
+  };
+  return {
+    title: "工作区文件插件",
+    description: "为每个用户 Agent 提供只限当前工作区的文件读写、建目录和删除工具。",
+    installConfirm: "卸载会移除 workspace_file 工具和启用配置，不删除任何用户工作区文件。",
+    reinstallConfirm: "重新安装会覆盖工作区文件插件包，不修改用户工作区内容。",
+    refreshSuccess: "工作区文件插件版本已刷新。",
+    refreshFailed: "工作区文件插件版本读取失败",
+    operationFailed: "工作区文件插件操作失败"
   };
 });
 
@@ -71,7 +80,8 @@ const currentVersions = computed(() => {
   if (activePlugin.value === "wechat") return admin.wechatPluginVersions;
   if (activePlugin.value === "openviking") return admin.openVikingPluginVersions;
   if (activePlugin.value === "api") return admin.apiChannelPluginVersions;
-  return admin.miniappBridgePluginVersions;
+  if (activePlugin.value === "miniapp-bridge") return admin.miniappBridgePluginVersions;
+  return admin.workspaceFilePluginVersions;
 });
 const versionOptions = computed(() => {
   const latest = currentVersions.value.latest;
@@ -130,7 +140,9 @@ async function refreshVersions(showMessage = true) {
         ? await admin.loadOpenVikingPluginVersions(showMessage)
         : activePlugin.value === "api"
           ? await admin.loadApiChannelPluginVersions(showMessage)
-          : await admin.loadMiniappBridgePluginVersions(showMessage);
+          : activePlugin.value === "miniapp-bridge"
+            ? await admin.loadMiniappBridgePluginVersions(showMessage)
+            : await admin.loadWorkspaceFilePluginVersions(showMessage);
     if (showMessage) {
       ElMessage.success(versions.latest ? pluginMeta.value.refreshSuccess : "版本暂不可用，请稍后重试。");
     }
@@ -148,7 +160,8 @@ function pluginStatus(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.wechatPluginStatusByInstanceId[instanceId] || null;
   if (activePlugin.value === "openviking") return admin.openVikingPluginStatusByInstanceId[instanceId] || null;
   if (activePlugin.value === "api") return admin.apiChannelPluginStatusByInstanceId[instanceId] || null;
-  return admin.miniappBridgePluginStatusByInstanceId[instanceId] || null;
+  if (activePlugin.value === "miniapp-bridge") return admin.miniappBridgePluginStatusByInstanceId[instanceId] || null;
+  return admin.workspaceFilePluginStatusByInstanceId[instanceId] || null;
 }
 
 function otherPluginStatus(instanceId: string) {
@@ -156,7 +169,8 @@ function otherPluginStatus(instanceId: string) {
     activePlugin.value !== "wechat" ? admin.wechatPluginStatusByInstanceId[instanceId] || null : null,
     activePlugin.value !== "openviking" ? admin.openVikingPluginStatusByInstanceId[instanceId] || null : null,
     activePlugin.value !== "api" ? admin.apiChannelPluginStatusByInstanceId[instanceId] || null : null,
-    activePlugin.value !== "miniapp-bridge" ? admin.miniappBridgePluginStatusByInstanceId[instanceId] || null : null
+    activePlugin.value !== "miniapp-bridge" ? admin.miniappBridgePluginStatusByInstanceId[instanceId] || null : null,
+    activePlugin.value !== "workspace-file" ? admin.workspaceFilePluginStatusByInstanceId[instanceId] || null : null
   ];
   return statuses.find((status) => isTaskRunning(status)) || null;
 }
@@ -346,70 +360,80 @@ function loadStatus(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.loadWechatPluginStatus(instanceId, false);
   if (activePlugin.value === "openviking") return admin.loadOpenVikingPluginStatus(instanceId, false);
   if (activePlugin.value === "api") return admin.loadApiChannelPluginStatus(instanceId, false);
-  return admin.loadMiniappBridgePluginStatus(instanceId, false);
+  if (activePlugin.value === "miniapp-bridge") return admin.loadMiniappBridgePluginStatus(instanceId, false);
+  return admin.loadWorkspaceFilePluginStatus(instanceId, false);
 }
 
 function installPlugin(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.installWechatPlugin(instanceId, actionVersion());
   if (activePlugin.value === "openviking") return admin.installOpenVikingPlugin(instanceId, actionVersion());
   if (activePlugin.value === "api") return admin.installApiChannelPlugin(instanceId, actionVersion());
-  return admin.operateMiniappBridgePlugin(instanceId, "install", actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.operateMiniappBridgePlugin(instanceId, "install", actionVersion());
+  return admin.operateWorkspaceFilePlugin(instanceId, "install", actionVersion());
 }
 
 function uninstallPlugin(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.uninstallWechatPlugin(instanceId);
   if (activePlugin.value === "openviking") return admin.uninstallOpenVikingPlugin(instanceId);
   if (activePlugin.value === "api") return admin.uninstallApiChannelPlugin(instanceId);
-  return admin.operateMiniappBridgePlugin(instanceId, "uninstall");
+  if (activePlugin.value === "miniapp-bridge") return admin.operateMiniappBridgePlugin(instanceId, "uninstall");
+  return admin.operateWorkspaceFilePlugin(instanceId, "uninstall");
 }
 
 function upgradePlugin(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.upgradeWechatPlugin(instanceId, actionVersion());
   if (activePlugin.value === "openviking") return admin.upgradeOpenVikingPlugin(instanceId, actionVersion());
   if (activePlugin.value === "api") return admin.upgradeApiChannelPlugin(instanceId, actionVersion());
-  return admin.operateMiniappBridgePlugin(instanceId, "upgrade", actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.operateMiniappBridgePlugin(instanceId, "upgrade", actionVersion());
+  return admin.operateWorkspaceFilePlugin(instanceId, "upgrade", actionVersion());
 }
 
 function reinstallPlugin(instanceId: string) {
   if (activePlugin.value === "wechat") return admin.reinstallWechatPlugin(instanceId, actionVersion());
   if (activePlugin.value === "openviking") return admin.reinstallOpenVikingPlugin(instanceId, actionVersion());
   if (activePlugin.value === "api") return admin.reinstallApiChannelPlugin(instanceId, actionVersion());
-  return admin.operateMiniappBridgePlugin(instanceId, "reinstall", actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.operateMiniappBridgePlugin(instanceId, "reinstall", actionVersion());
+  return admin.operateWorkspaceFilePlugin(instanceId, "reinstall", actionVersion());
 }
 
 function batchCheck(instanceIds: string[]) {
   if (activePlugin.value === "wechat") return admin.batchCheckWechatPlugins(instanceIds);
   if (activePlugin.value === "openviking") return admin.batchCheckOpenVikingPlugins(instanceIds);
   if (activePlugin.value === "api") return admin.batchCheckApiChannelPlugins(instanceIds);
-  return admin.batchMiniappBridgePlugins("check", instanceIds);
+  if (activePlugin.value === "miniapp-bridge") return admin.batchMiniappBridgePlugins("check", instanceIds);
+  return admin.batchWorkspaceFilePlugins("check", instanceIds);
 }
 
 function batchInstall(instanceIds: string[]) {
   if (activePlugin.value === "wechat") return admin.batchInstallWechatPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "openviking") return admin.batchInstallOpenVikingPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "api") return admin.batchInstallApiChannelPlugins(instanceIds, actionVersion());
-  return admin.batchMiniappBridgePlugins("install", instanceIds, actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.batchMiniappBridgePlugins("install", instanceIds, actionVersion());
+  return admin.batchWorkspaceFilePlugins("install", instanceIds, actionVersion());
 }
 
 function batchUninstall(instanceIds: string[]) {
   if (activePlugin.value === "wechat") return admin.batchUninstallWechatPlugins(instanceIds);
   if (activePlugin.value === "openviking") return admin.batchUninstallOpenVikingPlugins(instanceIds);
   if (activePlugin.value === "api") return admin.batchUninstallApiChannelPlugins(instanceIds);
-  return admin.batchMiniappBridgePlugins("uninstall", instanceIds);
+  if (activePlugin.value === "miniapp-bridge") return admin.batchMiniappBridgePlugins("uninstall", instanceIds);
+  return admin.batchWorkspaceFilePlugins("uninstall", instanceIds);
 }
 
 function batchUpgrade(instanceIds: string[]) {
   if (activePlugin.value === "wechat") return admin.batchUpgradeWechatPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "openviking") return admin.batchUpgradeOpenVikingPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "api") return admin.batchUpgradeApiChannelPlugins(instanceIds, actionVersion());
-  return admin.batchMiniappBridgePlugins("upgrade", instanceIds, actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.batchMiniappBridgePlugins("upgrade", instanceIds, actionVersion());
+  return admin.batchWorkspaceFilePlugins("upgrade", instanceIds, actionVersion());
 }
 
 function batchReinstall(instanceIds: string[]) {
   if (activePlugin.value === "wechat") return admin.batchReinstallWechatPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "openviking") return admin.batchReinstallOpenVikingPlugins(instanceIds, actionVersion());
   if (activePlugin.value === "api") return admin.batchReinstallApiChannelPlugins(instanceIds, actionVersion());
-  return admin.batchMiniappBridgePlugins("reinstall", instanceIds, actionVersion());
+  if (activePlugin.value === "miniapp-bridge") return admin.batchMiniappBridgePlugins("reinstall", instanceIds, actionVersion());
+  return admin.batchWorkspaceFilePlugins("reinstall", instanceIds, actionVersion());
 }
 
 function handleSelectionChange(selection: PublicInstance[]) {
@@ -439,6 +463,7 @@ function handleSelectionChange(selection: PublicInstance[]) {
       <el-tab-pane label="OpenViking 插件" name="openviking" />
       <el-tab-pane label="API Channel 插件" name="api" />
       <el-tab-pane label="小程序 Bridge 插件" name="miniapp-bridge" />
+      <el-tab-pane label="工作区文件插件" name="workspace-file" />
     </el-tabs>
 
     <el-card shadow="never">

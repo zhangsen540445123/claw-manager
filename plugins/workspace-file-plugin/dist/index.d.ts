@@ -12,6 +12,17 @@ type WorkspaceFileResult = {
     path: string;
     [key: string]: unknown;
 };
+type NativeReadEvent = {
+    toolName: string;
+    params: Record<string, unknown>;
+};
+type NativeReadContext = {
+    agentId?: string;
+};
+export declare function guardNativeRead(config: Record<string, any>, event: NativeReadEvent, ctx: NativeReadContext): Promise<{
+    block: true;
+    blockReason: string;
+} | undefined>;
 export declare function executeWorkspaceFile(workspaceDir: string, input: WorkspaceFileInput): Promise<WorkspaceFileResult>;
 declare const plugin: {
     id: string;

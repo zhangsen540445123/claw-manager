@@ -4,6 +4,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 格式。
 
+## [2026.6.28] - 2026-07-19
+
+### 新增
+
+- 微信用户首次发消息时按 sender hash 创建独立 Agent 和工作区；同一用户跨微信机器人账号复用工作区。
+- 动态 Agent 通过官方 `mutateConfigFile` 串行写入 `agents.list` 和 `bindings`，并读取 Claw Manager 的工作区预设快照。
+
 ## [2.4.5] - 2026-06-22
 
 ### 新增

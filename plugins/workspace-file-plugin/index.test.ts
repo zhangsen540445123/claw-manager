@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, rm, symlink, writeFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import plugin, { executeWorkspaceFile } from "./index.js";
+import plugin, { executeWorkspaceFile, guardNativeRead } from "./index.js";
 
 const workspaces: string[] = [];
 
@@ -20,14 +20,68 @@ afterEach(async () => {
 describe("workspace-file plugin contract", () => {
   it("registers workspace_file as an official tool factory", () => {
     const registerTool = vi.fn();
+    const on = vi.fn();
 
-    plugin.register({ registerTool, logger: { info: vi.fn() } } as never);
+    plugin.register({
+      registerTool,
+      on,
+      runtime: { config: { current: () => ({}) } },
+      logger: { info: vi.fn() },
+    } as never);
 
     expect(registerTool).toHaveBeenCalledTimes(1);
     const [factory, options] = registerTool.mock.calls[0];
     expect(options).toEqual({ name: "workspace_file" });
     expect(factory({ workspaceDir: "C:/workspace" })).toMatchObject({ name: "workspace_file" });
     expect(factory({})).toBeNull();
+    expect(on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
+  });
+});
+
+describe("native read guard", () => {
+  it("allows a dynamic WeChat agent to read its own workspace and shared skills", async () => {
+    const home = await createWorkspace();
+    const agentWorkspace = path.join(home, "workspace-wechat-user");
+    const sharedWorkspace = path.join(home, "shared");
+    await mkdir(agentWorkspace, { recursive: true });
+    await mkdir(path.join(sharedWorkspace, "skills", "demo"), { recursive: true });
+    await writeFile(path.join(agentWorkspace, "SOUL.md"), "soul");
+    await writeFile(path.join(sharedWorkspace, "skills", "demo", "SKILL.md"), "skill");
+    const config = {
+      agents: {
+        defaults: { workspace: sharedWorkspace },
+        list: [{ id: "wechat_user", workspace: agentWorkspace }],
+      },
+    };
+
+    await expect(guardNativeRead(config, { toolName: "read", params: { path: path.join(agentWorkspace, "SOUL.md") } }, { agentId: "wechat_user" }))
+      .resolves.toBeUndefined();
+    await expect(guardNativeRead(config, { toolName: "read", params: { path: path.join(sharedWorkspace, "skills", "demo", "SKILL.md") } }, { agentId: "wechat_user" }))
+      .resolves.toBeUndefined();
+  });
+
+  it("blocks dynamic WeChat agents from reading outside allowed roots", async () => {
+    const home = await createWorkspace();
+    const agentWorkspace = path.join(home, "workspace-wechat-user");
+    const outside = await createWorkspace();
+    await mkdir(agentWorkspace, { recursive: true });
+    await writeFile(path.join(outside, "secret.txt"), "secret");
+
+    const result = await guardNativeRead(
+      { agents: { defaults: { workspace: path.join(home, "shared") }, list: [{ id: "wechat_user", workspace: agentWorkspace }] } },
+      { toolName: "read", params: { path: path.join(outside, "secret.txt") } },
+      { agentId: "wechat_user" },
+    );
+
+    expect(result).toEqual({ block: true, blockReason: "read path is outside the current Agent workspace" });
+    expect(result?.blockReason).not.toContain(outside);
+  });
+
+  it("does not change non-read tools or non-dynamic agents", async () => {
+    await expect(guardNativeRead({}, { toolName: "workspace_file", params: {} }, { agentId: "wechat_user" }))
+      .resolves.toBeUndefined();
+    await expect(guardNativeRead({}, { toolName: "read", params: { path: "C:/outside" } }, { agentId: "main" }))
+      .resolves.toBeUndefined();
   });
 });
 

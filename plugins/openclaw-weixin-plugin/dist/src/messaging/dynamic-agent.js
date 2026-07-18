@@ -163,7 +163,7 @@ async function loadWorkspacePreset(homeDir) {
 }
 function isValidPreset(value) {
     const version = value.version;
-    return typeof version === "number" && Number.isInteger(version) && version > 0 &&
+    return typeof version === "number" && Number.isInteger(version) && version >= 0 &&
         ["agentsMd", "soulMd", "identityMd", "toolsMd", "heartbeatMd", "userMd"]
             .every((key) => typeof value[key] === "string" && String(value[key]).length > 0);
 }
