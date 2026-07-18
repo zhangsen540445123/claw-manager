@@ -1,6 +1,6 @@
 {
   "name": "@claw-manager/workspace-file-plugin",
-  "version": "2026.7.1",
+  "version": "2026.7.2",
   "description": "Workspace-scoped file operations for OpenClaw agents",
   "license": "MIT",
   "type": "module",

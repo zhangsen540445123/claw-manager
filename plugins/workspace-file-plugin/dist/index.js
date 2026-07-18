@@ -193,7 +193,7 @@ async function executeWorkspaceFileInternal(workspaceDir, input) {
         if (typeof input.content !== "string")
             return fail("workspace file content is required");
         const current = await currentSha256(resolved.absolute);
-        if (input.expectedSha256 !== undefined && current !== input.expectedSha256) {
+        if (input.expectedSha256 !== undefined && input.expectedSha256 !== "" && current !== input.expectedSha256) {
             return fail("workspace file changed since expectedSha256");
         }
         await mkdir(path.dirname(resolved.absolute), { recursive: true });

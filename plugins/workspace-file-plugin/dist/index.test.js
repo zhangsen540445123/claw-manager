@@ -78,6 +78,15 @@ describe("executeWorkspaceFile", () => {
         expect(result).toMatchObject({ action: "write", path: "notes/today.md", bytes: 5 });
         await expect(readFile(path.join(workspace, "notes", "today.md"), "utf8")).resolves.toBe("hello");
     });
+    it("treats an empty expectedSha256 as an omitted optimistic lock", async () => {
+        const workspace = await createWorkspace();
+        await expect(executeWorkspaceFile(workspace, {
+            action: "write",
+            path: "notes/first.txt",
+            content: "hello",
+            expectedSha256: "",
+        })).resolves.toMatchObject({ action: "write", path: "notes/first.txt" });
+    });
     it("lists and reads files using workspace-relative paths", async () => {
         const workspace = await createWorkspace();
         await writeFile(path.join(workspace, "README.md"), "read me");
