@@ -176,6 +176,7 @@ type ApiAgentEventStreamState = {
   agentEventDeltaCount: number;
   deliverDeltaCount: number;
   firstAgentEventDeltaAtMs?: number;
+  firstDeltaAtMs?: number;
   seenAgentEventKeys: Set<string>;
   seenArtifactIds: Set<string>;
   writeChain: Promise<void>;
@@ -314,6 +315,9 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
       `[${API_ACCOUNT_ID}] api agent-event first delta requestId=${state.requestId} ` +
         `sessionKey=${state.sessionKey} firstDeltaMs=${state.firstAgentEventDeltaAtMs - state.startedAtMs}`,
     );
+  }
+  if (!state.firstDeltaAtMs) {
+    state.firstDeltaAtMs = Date.now();
   }
 
   try {
@@ -568,7 +572,12 @@ async function ensureApiAgentWorkspace(workspace: string): Promise<void> {
   await safeUnlink(path.join(workspace, "BOOTSTRAP.md"));
 }
 
-export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promise<{ channel: string; messageId: string; text: string }> {
+export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promise<{
+  channel: string;
+  messageId: string;
+  text: string;
+  streamDiagnostics: Record<string, unknown>;
+}> {
   if (!ctx.channelRuntime) {
     throw new Error("ctx.channelRuntime missing");
   }
@@ -646,10 +655,8 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     deliver: async (payload: { text?: string }) => {
       const text = payload.text ?? "";
       replyText += text;
-      if (text) {
-        if (streamState) {
-          streamState.deliverDeltaCount += 1;
-        }
+      if (text && streamState) {
+        await emitDeliveredDelta(streamState, replyText);
       }
     },
     onError: (error: unknown) => {
@@ -673,6 +680,9 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
           },
         }),
     });
+    if (streamState && replyText) {
+      await emitDeliveredDelta(streamState, replyText);
+    }
     await streamState?.writeChain;
     await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.dispatch.completed", status: "completed", elapsedMs: Date.now() - dispatchStartedAt });
   } catch (error) {
@@ -692,6 +702,36 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     channel: API_CHANNEL_ID,
     messageId: requestId,
     text: replyText,
+    streamDiagnostics: streamDiagnostics(streamState),
+  };
+}
+
+async function emitDeliveredDelta(state: ApiAgentEventStreamState, candidate: string): Promise<void> {
+  const delta = trimOverlappingDelta(state.emittedText, candidate);
+  if (!delta) return;
+  state.emittedText += delta;
+  state.deliverDeltaCount += 1;
+  if (!state.firstDeltaAtMs) {
+    state.firstDeltaAtMs = Date.now();
+  }
+  state.writeChain = state.writeChain
+    .catch(() => undefined)
+    .then(() => Promise.resolve(state.onDelta(delta)));
+  await state.writeChain;
+}
+
+function streamDiagnostics(state?: ApiAgentEventStreamState): Record<string, unknown> {
+  const agentEventDeltaCount = state?.agentEventDeltaCount ?? 0;
+  const deliverDeltaCount = state?.deliverDeltaCount ?? 0;
+  const streamMode = agentEventDeltaCount > 0
+    ? (deliverDeltaCount > 0 ? "agent-events+deliver-fallback" : "agent-events")
+    : (deliverDeltaCount > 0 ? "deliver-fallback" : "final-fallback");
+  return {
+    streamMode,
+    agentEventDeltaCount,
+    deliverDeltaCount,
+    deltaCount: agentEventDeltaCount + deliverDeltaCount,
+    firstDeltaMs: state?.firstDeltaAtMs ? Math.max(0, state.firstDeltaAtMs - state.startedAtMs) : -1,
   };
 }
 
@@ -895,7 +935,13 @@ async function processApiRequestFile(
       },
     });
     await writeStreamEvent({ type: "done", messageId: result.messageId });
-    await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.stream.completed", status: "completed" });
+    await reportApiTrace({
+      traceId: cmTraceId,
+      requestId,
+      stage: "api.stream.completed",
+      status: "completed",
+      details: result.streamDiagnostics,
+    });
     await writeQueueResponse(responsePath, {
       ok: true,
       requestId,

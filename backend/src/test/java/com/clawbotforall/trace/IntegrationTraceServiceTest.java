@@ -191,13 +191,16 @@ class IntegrationTraceServiceTest {
     service.record(new IntegrationTraceEventRequest(
         "cmtrace_test123", "parent", "wechat-plugin", "wechat.inbound.received", "completed", "wechat",
         "inst_1", "sender_hash", "session_hash", "", "req_1", 200, 200, 12L, "", 
-        "Authorization: Bearer secret-token user=cm_user_secret apiKey=sk-super-secret-value", Map.of("modelId", "gpt-image-2", "prompt", "private")), "");
+        "Authorization: Bearer secret-token user=cm_user_secret apiKey=sk-super-secret-value",
+        Map.of("modelId", "gpt-image-2", "streamMode", "deliver-fallback", "deltaCount", 3, "prompt", "private")), "");
 
     ArgumentCaptor<IntegrationTraceEvent> captor = forClass(IntegrationTraceEvent.class);
     verify(mapper).insert(captor.capture());
     IntegrationTraceEvent saved = captor.getValue();
     assertThat(saved.errorMessage()).doesNotContain("secret-token", "cm_user_secret", "sk-super-secret-value");
-    assertThat(saved.detailJson()).contains("modelId").doesNotContain("prompt");
+    assertThat(saved.detailJson())
+        .contains("modelId", "streamMode", "deliver-fallback", "deltaCount")
+        .doesNotContain("prompt");
   }
 
   @Test

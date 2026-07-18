@@ -16,6 +16,7 @@ import com.clawbotforall.miniapp.MiniappChatRoute;
 import com.clawbotforall.miniapp.MiniappUserAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -24,6 +25,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.time.Duration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 @ExtendWith(MockitoExtension.class)
 class ExternalApiChatControllerTest {
@@ -35,12 +41,28 @@ class ExternalApiChatControllerTest {
   ExternalApiQueueService queueService;
 
   MockMvc mockMvc;
+  ExecutorService streamExecutor;
+  ScheduledExecutorService heartbeatExecutor;
 
   @BeforeEach
   void setUp() {
+    streamExecutor = Executors.newSingleThreadExecutor();
+    heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ExternalApiChatController(userAccessService, queueService))
+        .standaloneSetup(new ExternalApiChatController(
+            userAccessService,
+            queueService,
+            streamExecutor,
+            heartbeatExecutor,
+            Duration.ofMillis(10),
+            Duration.ofSeconds(5)))
         .build();
+  }
+
+  @AfterEach
+  void tearDown() {
+    streamExecutor.shutdownNow();
+    heartbeatExecutor.shutdownNow();
   }
 
   @Test
@@ -149,5 +171,59 @@ class ExternalApiChatControllerTest {
     assertThat(artifactIndex).isGreaterThan(secondDeltaIndex);
     assertThat(doneIndex).isGreaterThan(artifactIndex);
     assertThat(body).contains("wx_f9db8c63722f76a920d852d85f502177");
+  }
+
+  @Test
+  void streamChatEmitsHeartbeatWhileWaitingForQueueProgress() throws Exception {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    MiniappChatRoute route = new MiniappChatRoute(
+        instance,
+        "local-test-user-001",
+        "f9db8c63722f76a920d852d85f502177",
+        "wx_f9db8c63722f76a920d852d85f502177",
+        "miniapp:f9db8c63722f76a920d852d85f502177"
+    );
+    when(userAccessService.resolveChatRoute("Bearer cm_user_secret", "local-test-user-001")).thenReturn(route);
+    when(userAccessService.conversationHash("conv_1")).thenReturn("conversationhash");
+    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any(), any()))
+        .thenAnswer(invocation -> {
+          Thread.sleep(45);
+          ExternalApiQueueService.StreamDeltaConsumer onDelta = invocation.getArgument(2);
+          onDelta.accept("完成");
+          return java.util.Map.of(
+              "ok", true,
+              "requestId", "req_heartbeat",
+              "messageId", "msg_heartbeat",
+              "text", "完成"
+          );
+        });
+
+    MvcResult result = mockMvc.perform(post("/api/external/openclaw/chat/stream")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer cm_user_secret")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "openid": "local-test-user-001",
+                  "conversationId": "conv_1",
+                  "message": "生成图片"
+                }
+                """))
+        .andExpect(request().asyncStarted())
+        .andReturn();
+
+    String body = mockMvc.perform(asyncDispatch(result))
+        .andExpect(status().isOk())
+        .andReturn()
+        .getResponse()
+        .getContentAsString();
+
+    int startIndex = body.indexOf("event:start");
+    int heartbeatIndex = body.indexOf("event:heartbeat");
+    int doneIndex = body.indexOf("event:done");
+    assertThat(startIndex).isGreaterThanOrEqualTo(0);
+    assertThat(heartbeatIndex).isGreaterThan(startIndex);
+    assertThat(doneIndex).isGreaterThan(heartbeatIndex);
+    assertThat(body.substring(doneIndex)).doesNotContain("event:heartbeat");
   }
 }

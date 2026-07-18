@@ -36,7 +36,9 @@ public class IntegrationTraceService {
       "artifact.image.upload.failed", "artifact.html.create.started", "artifact.html.create.completed",
       "artifact.html.create.failed", "api.request.received", "api.dispatch.started", "api.dispatch.completed",
       "api.dispatch.failed", "api.artifact.emitted", "api.stream.completed");
-  private static final Set<String> DETAIL_KEYS = Set.of("modelId", "mime", "width", "height", "fileSize", "imageId", "generatedImageId", "contentKey", "imageRequested");
+  private static final Set<String> DETAIL_KEYS = Set.of(
+      "modelId", "mime", "width", "height", "fileSize", "imageId", "generatedImageId", "contentKey", "imageRequested",
+      "streamMode", "agentEventDeltaCount", "deliverDeltaCount", "deltaCount", "firstDeltaMs");
   private final IntegrationTraceMapper mapper;
   private final ObjectMapper json;
 

@@ -5,13 +5,19 @@ import com.clawbotforall.web.ExternalRequestIds;
 import com.clawbotforall.miniapp.MiniappChatRoute;
 import com.clawbotforall.miniapp.MiniappUserAccessService;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -25,22 +31,50 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 public class ExternalApiChatController {
   private static final Logger log = LoggerFactory.getLogger(ExternalApiChatController.class);
-  private static final long SSE_TIMEOUT_MS = 960_000L;
+  private static final Duration SSE_TIMEOUT = Duration.ofMinutes(16);
+  private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
   private final MiniappUserAccessService userAccessService;
   private final ExternalApiQueueService queueService;
-  private final Executor executor = Executors.newCachedThreadPool(task -> {
-    Thread thread = new Thread(task, "external-api-chat-" + System.nanoTime());
-    thread.setDaemon(true);
-    return thread;
-  });
+  private final Executor executor;
+  private final ScheduledExecutorService heartbeatExecutor;
+  private final Duration heartbeatInterval;
+  private final Duration sseTimeout;
 
   public ExternalApiChatController(
       MiniappUserAccessService userAccessService,
       ExternalApiQueueService queueService
   ) {
+    this(
+        userAccessService,
+        queueService,
+        Executors.newCachedThreadPool(task -> daemonThread(task, "external-api-chat-")),
+        Executors.newSingleThreadScheduledExecutor(task -> daemonThread(task, "external-api-heartbeat-")),
+        HEARTBEAT_INTERVAL,
+        SSE_TIMEOUT
+    );
+  }
+
+  ExternalApiChatController(
+      MiniappUserAccessService userAccessService,
+      ExternalApiQueueService queueService,
+      Executor executor,
+      ScheduledExecutorService heartbeatExecutor,
+      Duration heartbeatInterval,
+      Duration sseTimeout
+  ) {
     this.userAccessService = userAccessService;
     this.queueService = queueService;
+    this.executor = executor;
+    this.heartbeatExecutor = heartbeatExecutor;
+    this.heartbeatInterval = heartbeatInterval;
+    this.sseTimeout = sseTimeout;
+  }
+
+  @PreDestroy
+  void shutdownExecutors() {
+    if (executor instanceof ExecutorService service) service.shutdownNow();
+    heartbeatExecutor.shutdownNow();
   }
 
   @PostMapping("/api/external/openclaw/chat/stream")
@@ -92,18 +126,23 @@ public class ExternalApiChatController {
       throw error;
     }
 
-    SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+    SseEmitter emitter = new SseEmitter(sseTimeout.toMillis());
+    StreamSession stream = new StreamSession(emitter, heartbeatExecutor, heartbeatInterval, requestId);
+    emitter.onCompletion(stream::cancel);
+    emitter.onTimeout(stream::cancel);
+    emitter.onError(ignored -> stream.cancel());
     executor.execute(() -> {
       long startedAt = System.nanoTime();
       int[] deltaCount = {0};
       long[] firstDeltaMs = {-1};
       try {
-        send(emitter, "start", Map.of(
+        stream.send("start", Map.of(
             "requestId", requestId,
             "instanceId", route.instance().getId(),
             "conversationId", conversationId,
             "openVikingUserId", route.openvikingUserId()
         ));
+        stream.startHeartbeat();
         log.info(
             "external.chat.streamStart cmRequestId={} chatRequestId={} instanceId={} openVikingUserId={} conversationId={}",
             cmRequestId,
@@ -126,19 +165,19 @@ public class ExternalApiChatController {
               firstDeltaMs[0] = elapsedMs(startedAt);
             }
             deltaCount[0] += 1;
-            send(emitter, "delta", Map.of("text", text));
+            stream.send("delta", Map.of("text", text));
             sentDelta[0] = true;
           }
         }, artifact -> {
-          send(emitter, "artifact", artifact);
+          stream.send("artifact", artifact);
         });
         String text = stringify(result.get("text"));
         if (!sentDelta[0] && !text.isBlank()) {
-          send(emitter, "delta", Map.of("text", text));
+          stream.send("delta", Map.of("text", text));
           firstDeltaMs[0] = elapsedMs(startedAt);
           deltaCount[0] += 1;
         }
-        send(emitter, "done", Map.of(
+        stream.complete("done", Map.of(
             "requestId", requestId,
             "messageId", stringify(result.get("messageId")),
             "openVikingUserId", route.openvikingUserId(),
@@ -156,7 +195,6 @@ public class ExternalApiChatController {
             elapsedMs(startedAt),
             safe(stringify(result.get("messageId")))
         );
-        emitter.complete();
       } catch (RuntimeException | IOException error) {
         log.warn(
             "external.chat.error cmRequestId={} chatRequestId={} instanceId={} openVikingUserId={} conversationId={} deltaCount={} firstDeltaMs={} elapsedMs={} error={}",
@@ -171,7 +209,7 @@ public class ExternalApiChatController {
             errorMessage(error)
         );
         try {
-          send(emitter, "error", Map.of(
+          stream.complete("error", Map.of(
               "requestId", requestId,
               "code", "OPENCLAW_API_CHANNEL_ERROR",
               "message", error.getMessage() == null ? String.valueOf(error) : error.getMessage()
@@ -179,7 +217,7 @@ public class ExternalApiChatController {
         } catch (IOException ignored) {
           // client is gone
         }
-        emitter.complete();
+        stream.cancel();
       }
     });
     return emitter;
@@ -205,8 +243,63 @@ public class ExternalApiChatController {
     return params;
   }
 
-  private void send(SseEmitter emitter, String event, Map<String, Object> data) throws IOException {
-    emitter.send(SseEmitter.event().name(event).data(data));
+  private static Thread daemonThread(Runnable task, String prefix) {
+    Thread thread = new Thread(task, prefix + System.nanoTime());
+    thread.setDaemon(true);
+    return thread;
+  }
+
+  private static final class StreamSession {
+    private final SseEmitter emitter;
+    private final ScheduledExecutorService scheduler;
+    private final Duration interval;
+    private final String requestId;
+    private ScheduledFuture<?> heartbeatTask;
+    private boolean closed;
+
+    private StreamSession(SseEmitter emitter, ScheduledExecutorService scheduler, Duration interval, String requestId) {
+      this.emitter = emitter;
+      this.scheduler = scheduler;
+      this.interval = interval;
+      this.requestId = requestId;
+    }
+
+    synchronized void startHeartbeat() {
+      if (closed || heartbeatTask != null) return;
+      heartbeatTask = scheduler.scheduleAtFixedRate(() -> {
+        try {
+          send("heartbeat", Map.of("requestId", requestId));
+        } catch (IOException error) {
+          cancel();
+        }
+      }, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    synchronized void send(String event, Map<String, Object> data) throws IOException {
+      if (closed) return;
+      emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    synchronized void complete(String event, Map<String, Object> data) throws IOException {
+      if (closed) return;
+      stopHeartbeat();
+      emitter.send(SseEmitter.event().name(event).data(data));
+      closed = true;
+      emitter.complete();
+    }
+
+    synchronized void cancel() {
+      if (closed) return;
+      closed = true;
+      stopHeartbeat();
+    }
+
+    private void stopHeartbeat() {
+      if (heartbeatTask != null) {
+        heartbeatTask.cancel(false);
+        heartbeatTask = null;
+      }
+    }
   }
 
   private static String stringify(Object value) {

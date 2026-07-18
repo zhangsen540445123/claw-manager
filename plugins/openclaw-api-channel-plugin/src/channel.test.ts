@@ -494,7 +494,7 @@ describe("buildApiInboundContext", () => {
     expect(chunks).toEqual([]);
   });
 
-  it("does not stream deliver chunks after assistant agent events have streamed", async () => {
+  it("uses deliver output to complete partial assistant agent-event text", async () => {
     const chunks: string[] = [];
     let deliverReply: ((payload: { text?: string }) => Promise<void>) | undefined;
     const dispatchReplyFromConfig = vi.fn(async () => {
@@ -544,8 +544,14 @@ describe("buildApiInboundContext", () => {
       onDelta: async (text) => chunks.push(text),
     });
 
-    expect(chunks).toEqual(["你"]);
+    expect(chunks).toEqual(["你", "好"]);
     expect(result.text).toBe("你好");
+    expect(result.streamDiagnostics).toMatchObject({
+      streamMode: "agent-events+deliver-fallback",
+      agentEventDeltaCount: 1,
+      deliverDeltaCount: 1,
+      deltaCount: 2,
+    });
   });
 
   it("routes dispatch assistant events by the injected runId", async () => {
@@ -996,12 +1002,19 @@ describe("buildApiInboundContext", () => {
     ].sort());
   });
 
-  it("keeps delivered reply chunks out of the token stream and only records final text", async () => {
+  it("streams delivered reply chunks when assistant agent events are unavailable", async () => {
     const chunks: string[] = [];
     let deliverReply: ((payload: { text?: string }) => Promise<void>) | undefined;
+    let releaseDispatch: (() => void) | undefined;
+    let markDelivered: (() => void) | undefined;
+    const dispatchGate = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+    const delivered = new Promise<void>((resolve) => { markDelivered = resolve; });
     const dispatchReplyFromConfig = vi.fn(async () => {
       await deliverReply?.({ text: "你" });
       await deliverReply?.({ text: "好" });
+      await deliverReply?.({ text: "好" });
+      markDelivered?.();
+      await dispatchGate;
     });
     const runtime = {
       routing: {
@@ -1031,7 +1044,7 @@ describe("buildApiInboundContext", () => {
       },
     };
 
-    const result = await dispatchApiMessage({
+    const resultPromise = dispatchApiMessage({
       requestId: "req-stream",
       message: "hello",
       openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
@@ -1044,8 +1057,17 @@ describe("buildApiInboundContext", () => {
       },
     });
 
-    expect(chunks).toEqual([]);
-    expect(result.text).toBe("你好");
+    await delivered;
+    expect(chunks).toEqual(["你", "好", "好"]);
+    releaseDispatch?.();
+    const result = await resultPromise;
+    expect(result.text).toBe("你好好");
+    expect(result.streamDiagnostics).toMatchObject({
+      streamMode: "deliver-fallback",
+      agentEventDeltaCount: 0,
+      deliverDeltaCount: 3,
+      deltaCount: 3,
+    });
     expect(dispatchReplyFromConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         replyOptions: expect.objectContaining({
