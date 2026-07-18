@@ -9,6 +9,7 @@ import { getSyncBufFilePath, loadGetUpdatesBuf, saveGetUpdatesBuf } from "../sto
 import { logger } from "../util/logger.js";
 import type { Logger } from "../util/logger.js";
 import { redactBody } from "../util/redact.js";
+import type { WeixinConfigRuntime } from "../messaging/dynamic-agent.js";
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -29,6 +30,7 @@ export type MonitorWeixinOpts = {
    * Required for inbound message processing; provided by `ChannelGatewayContext.channelRuntime`.
    */
   channelRuntime: PluginRuntime["channel"];
+  configRuntime?: WeixinConfigRuntime;
   abortSignal?: AbortSignal;
   longPollTimeoutMs?: number;
   /** Gateway status callback — called on each successful poll and inbound message. */
@@ -173,6 +175,7 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
           accountId,
           config,
           channelRuntime,
+          configRuntime: opts.configRuntime,
           baseUrl,
           cdnBaseUrl,
           token,

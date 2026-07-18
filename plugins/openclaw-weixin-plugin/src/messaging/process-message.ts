@@ -36,6 +36,11 @@ import { sendMessageWeixin } from "./send.js";
 import { WeixinReplyProgressSender } from "./reply-progress-sender.js";
 import { handleSlashCommand } from "./slash-commands.js";
 import { writeOpenVikingSenderHandoff } from "./openviking-handoff.js";
+import { resolveOpenVikingSenderIdentity } from "./openviking-handoff.js";
+import {
+  ensureWeixinDynamicAgentRoute,
+  type WeixinConfigRuntime,
+} from "./dynamic-agent.js";
 
 const MEDIA_OUTBOUND_TEMP_DIR = path.join(resolvePreferredOpenClawTmpDir(), "weixin/media/outbound-temp");
 
@@ -50,6 +55,7 @@ export type ProcessMessageDeps = {
   accountId: string;
   config: import("openclaw/plugin-sdk/core").OpenClawConfig;
   channelRuntime: PluginRuntime["channel"];
+  configRuntime?: WeixinConfigRuntime;
   baseUrl: string;
   cdnBaseUrl: string;
   token?: string;
@@ -302,8 +308,23 @@ export async function processOneMessage(
     );
   }
 
-  const route = deps.channelRuntime.routing.resolveAgentRoute({
-    cfg: deps.config,
+  const senderIdentity = resolveOpenVikingSenderIdentity(
+    senderId,
+    process.env.OPENVIKING_IDENTITY_HASH_SECRET ?? "",
+  );
+  const dynamicRoute = senderIdentity
+    ? await ensureWeixinDynamicAgentRoute({
+        cfg: deps.config,
+        configRuntime: deps.configRuntime,
+        channelRuntime: deps.channelRuntime,
+        accountId: deps.accountId,
+        peerId: ctx.To,
+        senderHash: senderIdentity.senderHash,
+      })
+    : undefined;
+  const routedConfig = dynamicRoute?.cfg ?? deps.config;
+  const route = dynamicRoute?.route ?? deps.channelRuntime.routing.resolveAgentRoute({
+    cfg: routedConfig,
     channel: "openclaw-weixin",
     accountId: deps.accountId,
     peer: { kind: "direct", id: ctx.To },
@@ -328,7 +349,7 @@ export async function processOneMessage(
   // the correct session (matching the dmScope from config) instead of falling back
   // to agent:main:main.
   ctx.SessionKey = route.sessionKey;
-  const storePath = deps.channelRuntime.session.resolveStorePath(deps.config.session?.store, {
+  const storePath = deps.channelRuntime.session.resolveStorePath(routedConfig.session?.store, {
     agentId: route.agentId,
   });
   const finalized = attachSenderRuntimeIdentity(deps.channelRuntime.reply.finalizeInboundContext(
@@ -366,7 +387,7 @@ export async function processOneMessage(
   if (contextToken) {
     setContextToken(deps.accountId, full.from_user_id ?? "", contextToken);
   }
-  const replyProgressSender = resolveReplyProgressMessagesEnabled(deps.config)
+  const replyProgressSender = resolveReplyProgressMessagesEnabled(routedConfig)
     ? new WeixinReplyProgressSender({
         runId,
         to: ctx.To,
@@ -378,7 +399,7 @@ export async function processOneMessage(
         },
       })
     : undefined;
-  const humanDelay = deps.channelRuntime.reply.resolveHumanDelayConfig(deps.config, route.agentId);
+  const humanDelay = deps.channelRuntime.reply.resolveHumanDelayConfig(routedConfig, route.agentId);
 
   const hasTypingTicket = Boolean(deps.typingTicket);
   const typingCallbacks = createTypingCallbacks({
@@ -555,7 +576,7 @@ export async function processOneMessage(
       run: () =>
         deps.channelRuntime.reply.dispatchReplyFromConfig({
           ctx: finalized,
-          cfg: deps.config,
+          cfg: routedConfig,
           dispatcher,
           replyOptions: {
             ...replyOptions,

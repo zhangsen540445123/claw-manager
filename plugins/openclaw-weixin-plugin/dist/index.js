@@ -2,6 +2,7 @@ import { buildChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-sch
 import { weixinPlugin } from "./src/channel.js";
 import { assertHostCompatibility } from "./src/compat.js";
 import { WeixinConfigSchema } from "./src/config/config-schema.js";
+import { setWeixinConfigRuntime } from "./src/config-runtime.js";
 export default {
     id: "openclaw-weixin",
     name: "Weixin",
@@ -10,6 +11,7 @@ export default {
     register(api) {
         // Fail-fast: reject incompatible host versions before any side-effects.
         assertHostCompatibility(api.runtime?.version);
+        setWeixinConfigRuntime(api.runtime?.config);
         api.registerChannel({ plugin: weixinPlugin });
     },
 };

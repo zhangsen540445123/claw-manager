@@ -4,9 +4,23 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { readOpenVikingSenderHandoff, writeOpenVikingSenderHandoff } from "./openviking-handoff.js";
+import {
+  readOpenVikingSenderHandoff,
+  resolveOpenVikingSenderIdentity,
+  writeOpenVikingSenderHandoff,
+} from "./openviking-handoff.js";
 
 describe("OpenViking sender handoff", () => {
+  it("derives the stable sender hash used by dynamic agents", () => {
+    const first = resolveOpenVikingSenderIdentity("wx_sender_ABC", "identity-secret");
+    const second = resolveOpenVikingSenderIdentity("wx_sender_ABC", "identity-secret");
+
+    expect(first).toEqual(second);
+    expect(first?.senderHash).toMatch(/^[a-f0-9]{32}$/);
+    expect(first?.openVikingUserId).toBe(`wx_${first?.senderHash}`);
+    expect(resolveOpenVikingSenderIdentity("", "identity-secret")).toBeUndefined();
+  });
+
   it("stores derived identity for a session without persisting the raw sender id", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     try {

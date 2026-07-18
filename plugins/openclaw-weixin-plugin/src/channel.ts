@@ -33,6 +33,7 @@ import { applyWeixinMessageSendingHook, emitWeixinMessageSent } from "./messagin
 import { sendWeixinMediaFile } from "./messaging/send-media.js";
 import { sendMessageWeixin, StreamingMarkdownFilter } from "./messaging/send.js";
 import { downloadRemoteImageToTemp } from "./cdn/upload.js";
+import { getWeixinConfigRuntime } from "./config-runtime.js";
 
 /** Returns true when mediaUrl refers to a local filesystem path (absolute or relative). */
 function isLocalFilePath(mediaUrl: string): boolean {
@@ -463,6 +464,7 @@ export const weixinPlugin: ChannelPlugin<ResolvedWeixinAccount> = {
         config: ctx.cfg,
         runtime: ctx.runtime,
         channelRuntime: ctx.channelRuntime as unknown as PluginRuntime["channel"],
+        configRuntime: getWeixinConfigRuntime(),
         abortSignal: ctx.abortSignal,
         setStatus: ctx.setStatus,
       });

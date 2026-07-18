@@ -103,6 +103,7 @@ export async function monitorWeixinProvider(opts) {
                     accountId,
                     config,
                     channelRuntime,
+                    configRuntime: opts.configRuntime,
                     baseUrl,
                     cdnBaseUrl,
                     token,

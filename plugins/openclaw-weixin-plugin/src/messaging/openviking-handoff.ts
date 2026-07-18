@@ -39,7 +39,10 @@ function handoffPath(stateDir?: string): string {
   return path.join(resolveOpenVikingHandoffStateDir(stateDir), "openviking", "sender-handoff.json");
 }
 
-function deriveSenderHandoff(senderId: string, secret: string): Pick<OpenVikingSenderHandoff, "openVikingUserId" | "senderHash"> | undefined {
+export function resolveOpenVikingSenderIdentity(
+  senderId: string,
+  secret: string,
+): Pick<OpenVikingSenderHandoff, "openVikingUserId" | "senderHash"> | undefined {
   const normalizedSender = trimString(senderId);
   const normalizedSecret = trimString(secret);
   if (!normalizedSender || !normalizedSecret) {
@@ -84,7 +87,7 @@ export async function writeOpenVikingSenderHandoff(params: {
   secret?: string;
   cmTraceId?: string;
 }): Promise<boolean> {
-  const derived = deriveSenderHandoff(params.senderId ?? "", params.secret ?? "");
+  const derived = resolveOpenVikingSenderIdentity(params.senderId ?? "", params.secret ?? "");
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
   if (!derived || !key) {
     return false;
