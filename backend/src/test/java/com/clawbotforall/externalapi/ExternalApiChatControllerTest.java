@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -225,5 +226,18 @@ class ExternalApiChatControllerTest {
     assertThat(heartbeatIndex).isGreaterThan(startIndex);
     assertThat(doneIndex).isGreaterThan(heartbeatIndex);
     assertThat(body.substring(doneIndex)).doesNotContain("event:heartbeat");
+  }
+
+  @Test
+  void springContextUsesTheProductionConstructorWhenTestConstructorAlsoExists() {
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(MiniappUserAccessService.class, () -> userAccessService);
+      context.registerBean(ExternalApiQueueService.class, () -> queueService);
+      context.register(ExternalApiChatController.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(ExternalApiChatController.class)).isNotNull();
+    }
   }
 }
