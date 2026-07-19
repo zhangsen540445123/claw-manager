@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OpenVikingSettingsService {
 
   public static final String GLOBAL_ID = "global";
-  public static final String DEFAULT_PLUGIN_PACKAGE = "npm:@claw-manager/openviking-openclaw-plugin@2026.6.37";
+  public static final String DEFAULT_PLUGIN_PACKAGE = "npm:@claw-manager/openviking-openclaw-plugin@2026.6.38";
   private static final String DEFAULT_INTERNAL_BASE_URL = "http://claw-manager-api:8080";
 
   private final OpenVikingSettingsMapper mapper;

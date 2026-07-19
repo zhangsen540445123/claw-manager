@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 import type { FindResult, FindResultItem, OpenVikingClient } from "./client.js";
 import type { MemoryOpenVikingConfig } from "./config.js";
 import type { EffectiveQueryConfig } from "./query-config.js";
 import {
+  clampScore,
   pickMemoriesForInjection,
   postProcessMemories,
   summarizeInjectionMemories,
@@ -605,7 +608,7 @@ export async function buildAutoRecallContext(params: {
         `openviking: injecting ${memoryLines.length} memories (${block.length} chars, ~${estimatedTokens} tokens, maxInjectedChars=${maxInjectedChars})`,
       );
       verbose?.(
-        `openviking: inject-detail ${toJsonLog({ count: memories.length, memories: summarizeInjectionMemories(memories) })}`,
+        `openviking: inject-detail ${toJsonLog({ candidateCount: memories.length, selectedCount: memoryLines.length, highestScore: memories.reduce((highest, item) => Math.max(highest, clampScore(item.score)), 0), resourceType: [...new Set(memories.slice(0, memoryLines.length).map((item) => inferResourceTypeForLog(item.uri)))], uriHash: memories.slice(0, memoryLines.length).map((item) => createHash("sha256").update(item.uri).digest("hex").slice(0, 16)) })}`,
       );
 
       await recordTrace(memories.slice(0, memoryLines.length), memoryLines.length, estimatedTokens);
@@ -614,4 +617,11 @@ export async function buildAutoRecallContext(params: {
     cfg.autoRecallTimeoutMs,
     "openviking: auto-recall search timeout",
   );
+}
+
+function inferResourceTypeForLog(uri: string): "resource" | "agent" | "user" | "unknown" {
+  if (uri.startsWith("viking://resources")) return "resource";
+  if (uri.startsWith("viking://user/skills") || uri.startsWith("viking://skills")) return "agent";
+  if (uri.startsWith("viking://user/")) return "user";
+  return "unknown";
 }

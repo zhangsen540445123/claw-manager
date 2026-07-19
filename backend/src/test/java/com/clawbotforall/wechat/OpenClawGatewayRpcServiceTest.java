@@ -1,6 +1,7 @@
 package com.clawbotforall.wechat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -60,6 +61,34 @@ class OpenClawGatewayRpcServiceTest {
     service.startApiChannel(instance());
 
     verifyNoInteractions(openClawRuntime);
+  }
+
+  @Test
+  void ensureUserAgentRequiresStrictSuccessfulRpcPayload() {
+    completeExecWith("{\"agentId\":\"user_1\",\"persisted\":true,\"runtimeApplied\":true,\"wechatBindingCreated\":true}");
+
+    service.ensureUserAgent(instance(), "user_1", "wx_1", "bot-a", "peer-a");
+
+    String script = capturedCommand.get().get(3);
+    assertThat(script).contains("claw-manager-api.ensure-user-agent");
+  }
+
+  @Test
+  void ensureUserAgentRejectsMissingWechatBindingResultEvenWhenProcessExitsZero() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":true}");
+
+    assertThatThrownBy(() -> service.ensureUserAgent(instance(), "user_1", "wx_1", "bot-a", "peer-a"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("wechatBindingCreated");
+  }
+
+  @Test
+  void ensureApiBindingRejectsFalseRuntimeAppliedEvenWhenProcessExitsZero() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":false,\"apiBindingCreated\":false}");
+
+    assertThatThrownBy(() -> service.ensureApiBinding(instance(), "user_1", "wx_1", "api:sender-a"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("runtimeApplied");
   }
 
   private void completeExecWith(String output) {

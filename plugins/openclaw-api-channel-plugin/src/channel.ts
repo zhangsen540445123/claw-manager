@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,10 +6,10 @@ import path from "node:path";
 import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-runtime";
 import type { ChannelPlugin, OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk/core";
 
-import { writeApiOpenVikingHandoff } from "./openviking-handoff.js";
+import { clearApiOpenVikingTurn, registerApiOpenVikingTurn, runWithApiOpenVikingTurn } from "./openviking-handoff.js";
 
 export type ApiSendMessageParams = {
-  operation?: "chat" | "ensure_user_agent";
+  operation?: "chat";
   requestId?: string;
   agentId?: string;
   openVikingUserId?: string;
@@ -78,7 +78,7 @@ type ApiConfigRuntime = {
 type ApiQueueResponse = {
   ok: boolean;
   requestId: string;
-  operation?: "chat" | "ensure_user_agent";
+  operation?: "chat";
   agentId?: string;
   messageId?: string;
   text?: string;
@@ -337,7 +337,7 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
         } else {
           state.log?.warn?.(
             `[${API_ACCOUNT_ID}] api agent-event ignored non-monotonic cumulative text ` +
-              `requestId=${state.requestId} sessionKey=${state.sessionKey}`,
+              `requestId=${state.requestId} sessionKeyHash=${hashPreview(state.sessionKey)}`,
           );
           return false;
         }
@@ -362,7 +362,7 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
     state.firstAgentEventDeltaAtMs = Date.now();
     state.log?.info?.(
       `[${API_ACCOUNT_ID}] api agent-event first delta requestId=${state.requestId} ` +
-        `sessionKey=${state.sessionKey} firstDeltaMs=${state.firstAgentEventDeltaAtMs - state.startedAtMs}`,
+        `sessionKeyHash=${hashPreview(state.sessionKey)} firstDeltaMs=${state.firstAgentEventDeltaAtMs - state.startedAtMs}`,
     );
   }
   if (!state.firstDeltaAtMs) {
@@ -385,30 +385,28 @@ export async function handleApiAssistantAgentEvent(event: ApiAssistantAgentEvent
 
 async function writeOpenVikingHandoffForTurn(params: {
   sessionKey?: string;
+  agentId?: string;
   openVikingUserId?: string;
-  senderHash?: string;
   log?: ApiLogSink;
   cmTraceId?: string;
+  requestId?: string;
 }): Promise<void> {
   const secret = trim(process.env.OPENVIKING_IDENTITY_HASH_SECRET);
   if (!secret) {
-    params.log?.debug?.(`[${API_ACCOUNT_ID}] openviking handoff skipped: identity secret missing`);
-    return;
+    throw new Error("API_TURN_IDENTITY_MISSING");
   }
-  try {
-    const wrote = await writeApiOpenVikingHandoff({
-      sessionKey: params.sessionKey,
-      openVikingUserId: params.openVikingUserId,
-      senderHash: params.senderHash,
-      secret,
-      cmTraceId: params.cmTraceId,
-    });
-    if (wrote) {
-      params.log?.info?.(`[${API_ACCOUNT_ID}] openviking handoff written user=${params.openVikingUserId}`);
-    }
-  } catch (error) {
-    params.log?.warn?.(`[${API_ACCOUNT_ID}] openviking handoff write failed: ${errorMessage(error)}`);
+  const wrote = await registerApiOpenVikingTurn({
+    sessionKey: params.sessionKey,
+    agentId: params.agentId,
+    openVikingUserId: params.openVikingUserId,
+    secret,
+    cmTraceId: params.cmTraceId,
+    requestId: params.requestId,
+  });
+  if (!wrote) {
+    throw new Error("API_TURN_IDENTITY_MISSING");
   }
+  params.log?.info?.(`[${API_ACCOUNT_ID}] openviking turn registered`);
 }
 
 export function buildApiInboundContext(params: ApiSendMessageParams): ApiMsgContext {
@@ -474,10 +472,36 @@ export async function ensureApiUserAgentBinding(params: {
     : [];
   const currentAgent = currentAgents.find((entry) => isRecord(entry) && entry.id === agentId);
   const currentBindings = Array.isArray(current.bindings) ? current.bindings : [];
-  if (isRecord(currentAgent) && hasRequiredApiToolPolicy(currentAgent) &&
+  const agentReady = isRecord(currentAgent) && currentAgent.workspace === workspace &&
+    currentAgent.agentDir === agentDir && hasRequiredApiToolPolicy(currentAgent);
+  if (params.apiPeerId && !agentReady) {
+    throw new Error("API_BINDING_NOT_READY");
+  }
+  if (agentReady &&
       (!binding || currentBindings.some((entry) => isUserAgentBinding(entry, agentId, binding)))) {
-    await ensureApiAgentWorkspace(workspace);
+    if (!params.apiPeerId) {
+      await ensureApiAgentWorkspace(workspace);
+    }
     return current as OpenClawConfig;
+  }
+  const mutateConfigFile = params.configRuntime?.mutateConfigFile;
+  if (!mutateConfigFile) {
+    throw new Error("CONFIG_RUNTIME_UNAVAILABLE");
+  }
+  if (params.apiPeerId && binding) {
+    await serializeApiDynamicAgentBindingMutation(() => mutateConfigFile({
+      base: "runtime",
+      afterWrite: { mode: "auto" },
+      mutate: (draft: Record<string, unknown>) => {
+        const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
+        if (!bindings.some((entry) => isUserAgentBinding(entry, agentId, binding))) {
+          bindings.push({ agentId, match: binding });
+        }
+        draft.bindings = bindings;
+        return { agentId, created: false, bound: true };
+      },
+    }));
+    return params.configRuntime?.current?.() ?? current;
   }
   const mutateDraft = async (draft: Record<string, unknown>) => {
     const agents = isRecord(draft.agents) ? draft.agents : {};
@@ -514,12 +538,6 @@ export async function ensureApiUserAgentBinding(params: {
     return { agentId, created: !existing, bound: !bindingExists };
   };
 
-  const mutateConfigFile = params.configRuntime?.mutateConfigFile;
-  if (!mutateConfigFile) {
-    const draft = structuredClone(current) as Record<string, unknown>;
-    await mutateDraft(draft);
-    return draft as OpenClawConfig;
-  }
   await serializeApiDynamicAgentBindingMutation(() => mutateConfigFile({
     base: "runtime",
     afterWrite: { mode: "auto" },
@@ -527,6 +545,32 @@ export async function ensureApiUserAgentBinding(params: {
   }));
 
   return params.configRuntime?.current?.() ?? current;
+}
+
+export function requirePersistedApiUserAgentBinding(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  apiPeerId: string;
+}): OpenClawConfig {
+  const agentId = requireUserAgentId(params.agentId);
+  const agents = isRecord(params.cfg.agents) && Array.isArray(params.cfg.agents.list)
+    ? params.cfg.agents.list
+    : [];
+  const agent = agents.find((entry) => isRecord(entry) && entry.id === agentId);
+  const binding: UserAgentBindingMatch = {
+    channel: API_CHANNEL_ID,
+    accountId: API_ACCOUNT_ID,
+    peer: { kind: "direct", id: trim(params.apiPeerId) },
+  };
+  const bindings = Array.isArray(params.cfg.bindings) ? params.cfg.bindings : [];
+  const workspace = resolveHomePath(`~/.openclaw/workspace-${agentId}`);
+  const agentDir = resolveHomePath(`~/.openclaw/agents/${agentId}/agent`);
+  if (!isRecord(agent) || agent.workspace !== workspace || agent.agentDir !== agentDir ||
+      !hasRequiredApiToolPolicy(agent) ||
+      !bindings.some((entry) => isUserAgentBinding(entry, agentId, binding))) {
+    throw new Error("API_BINDING_NOT_READY");
+  }
+  return params.cfg;
 }
 
 function requireUserAgentId(value?: string): string {
@@ -673,13 +717,10 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   const openVikingUserId = requireOpenVikingUserId(ctx.openVikingUserId ?? ctx.openvikingUserId);
   const runtime = ctx.channelRuntime;
   const inbound = buildApiInboundContext(ctx);
-  const cfgForRoute = await ensureApiUserAgentBinding({
+  const cfgForRoute = requirePersistedApiUserAgentBinding({
     cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
-    configRuntime: ctx.configRuntime,
     agentId,
-    openVikingUserId,
     apiPeerId: inbound.To,
-    log: ctx.log,
   });
   const resolvedRoute = runtime.routing.resolveAgentRoute({
     cfg: cfgForRoute,
@@ -687,6 +728,9 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
     accountId: API_ACCOUNT_ID,
     peer: { kind: "direct", id: inbound.To },
   });
+  if (resolvedRoute.agentId !== agentId) {
+    throw new Error("API_BINDING_NOT_READY");
+  }
   const route = {
     ...resolvedRoute,
     agentId,
@@ -700,7 +744,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   inbound.SessionKey = sessionKey;
   ctx.log?.info?.(
     `[${API_ACCOUNT_ID}] api dispatch route requestId=${trim(ctx.requestId) || "auto"} ` +
-      `user=${inbound.openVikingUserId} senderHash=${trim(ctx.senderHash)} sessionKey=${sessionKey}`,
+      `openVikingUserHash=${hashPreview(inbound.openVikingUserId)} sessionKeyHash=${hashPreview(sessionKey)}`,
   );
   const storePath = runtime.session.resolveStorePath(cfgForRoute.session?.store, {
     agentId: route.agentId,
@@ -712,10 +756,11 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   const cmTraceId = apiTraceId(requestId);
   await writeOpenVikingHandoffForTurn({
     sessionKey,
+    agentId,
     openVikingUserId: inbound.openVikingUserId,
-    senderHash: trim(ctx.senderHash),
     log: ctx.log,
     cmTraceId,
+    requestId,
   });
   await runtime.session.recordInboundSession({
     storePath,
@@ -763,7 +808,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   const dispatchStartedAt = Date.now();
   await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.dispatch.started", status: "started" });
   try {
-    await runtime.reply.withReplyDispatcher({
+    await runWithApiOpenVikingTurn(requestId, () => runtime.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
         runtime.reply.dispatchReplyFromConfig({
@@ -775,7 +820,7 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
             runId,
           },
         }),
-    });
+    }));
     if (streamState && replyText) {
       await emitDeliveredDelta(streamState, replyText);
     }
@@ -787,10 +832,15 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   } finally {
     markDispatchIdle();
     unregisterApiAgentEventStream(sessionKey, streamState);
+    await clearApiOpenVikingTurn({
+      sessionKey,
+      secret: trim(process.env.OPENVIKING_IDENTITY_HASH_SECRET),
+      requestId,
+    });
   }
   ctx.log?.info?.(
     `[${API_ACCOUNT_ID}] api dispatch completed requestId=${requestId} ` +
-      `user=${inbound.openVikingUserId} sessionKey=${sessionKey} textLen=${replyText.length} ` +
+      `openVikingUserHash=${hashPreview(inbound.openVikingUserId)} sessionKeyHash=${hashPreview(sessionKey)} textLen=${replyText.length} ` +
       `agentEventDeltaCount=${streamState?.agentEventDeltaCount ?? 0} ` +
       `deliverDeltaCount=${streamState?.deliverDeltaCount ?? 0}`,
   );
@@ -1014,30 +1064,6 @@ async function processApiRequestFile(
     request = JSON.parse(await fs.readFile(processingPath, "utf8")) as ApiSendMessageParams;
     requestId = trim(request.requestId) || requestId;
     const operation = request.operation ?? "chat";
-    if (operation === "ensure_user_agent") {
-      if (!ctx.cfg) throw new Error("ctx.cfg missing");
-      const agentId = requireUserAgentId(request.agentId);
-      const openVikingUserId = requireOpenVikingUserId(request.openVikingUserId ?? request.openvikingUserId);
-      await ensureApiUserAgentBinding({
-        cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
-        configRuntime: ctx.configRuntime,
-        agentId,
-        openVikingUserId,
-        wechatAccountId: request.wechatAccountId,
-        wechatPeerId: request.wechatPeerId,
-        log: ctx.log,
-      });
-      await writeQueueResponse(responsePath, {
-        ok: true,
-        requestId,
-        operation,
-        agentId,
-        finishedAt: new Date().toISOString(),
-      });
-      ctx.log?.info?.(`[${API_ACCOUNT_ID}] user agent ensured requestId=${requestId} agent=${agentId}`);
-      await safeUnlink(processingPath);
-      return;
-    }
     if (operation !== "chat") {
       throw new Error("unsupported operation");
     }
@@ -1047,7 +1073,7 @@ async function processApiRequestFile(
         imageRequested: requestsImageGeneration(trim(request.message)),
         imageIntentReason: imageRequestIntentReason(trim(request.message)),
       } });
-    ctx.log?.info?.(`[${API_ACCOUNT_ID}] api request received requestId=${requestId} user=${trim(request.openVikingUserId) || trim(request.openvikingUserId) || "missing"}`);
+    ctx.log?.info?.(`[${API_ACCOUNT_ID}] api request received requestId=${requestId} openVikingUserHash=${hashPreview(request.openVikingUserId ?? request.openvikingUserId)}`);
     ctx.setStatus?.({
       accountId: API_ACCOUNT_ID,
       running: true,
@@ -1238,6 +1264,11 @@ export const apiChannelPlugin: ChannelPlugin<Record<string, never>> = {
 
 function trim(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function hashPreview(value: unknown): string {
+  const normalized = trim(value);
+  return normalized ? createHash("sha256").update(normalized).digest("hex").slice(0, 12) : "missing";
 }
 
 function stringValue(value: unknown): string {

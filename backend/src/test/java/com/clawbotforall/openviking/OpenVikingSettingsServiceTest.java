@@ -27,7 +27,7 @@ class OpenVikingSettingsServiceTest {
     assertThat(settings.baseUrl()).isBlank();
     assertThat(settings.trustedModeEnabled()).isTrue();
     assertThat(settings.accountId()).isEqualTo("claw-manager");
-    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.37");
+    assertThat(settings.pluginPackage()).isEqualTo("npm:@claw-manager/openviking-openclaw-plugin@2026.6.38");
     assertThat(settings.rootApiKeyConfigured()).isFalse();
     assertThat(settings.rootApiKeyFingerprint()).isBlank();
     assertThat(settings.saltConfigured()).isFalse();

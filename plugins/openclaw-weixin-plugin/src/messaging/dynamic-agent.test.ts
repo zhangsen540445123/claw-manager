@@ -50,61 +50,47 @@ describe("Weixin dynamic agent", () => {
       .toThrow("agentId");
   });
 
-  it("creates one agent, its six templates, tool policy, and an account-peer binding", async () => {
+  it("accepts a persisted Agent and account-peer binding without mutating config", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
     try {
-      const state = createConfigRuntime();
+      const agentId = "user_abcdef0123456789abcdef0123456789";
+      const persisted = {
+        agents: { list: [{ id: agentId, tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] } }] },
+        bindings: [{ agentId, match: { channel: "openclaw-weixin", accountId: "bot-a", peer: { kind: "direct", id: "user@im.wechat" } } }],
+      };
+      const mutateConfigFile = vi.fn(() => { throw new Error("must not mutate during first message"); });
       const cfg = await ensureWeixinDynamicAgentBinding({
-        cfg: {},
-        configRuntime: state.runtime,
+        cfg: persisted,
+        configRuntime: { current: () => persisted, mutateConfigFile },
         accountId: "bot-a",
         peerId: "user@im.wechat",
-        agentId: "user_abcdef0123456789abcdef0123456789",
+        agentId,
         homeDir,
       });
 
-      const agentId = "user_abcdef0123456789abcdef0123456789";
-      const workspace = path.join(homeDir, ".openclaw", `workspace-${agentId}`);
-      expect(cfg.agents.list).toEqual([expect.objectContaining({
-        id: agentId,
-        workspace,
-        agentDir: path.join(homeDir, ".openclaw", "agents", agentId, "agent"),
-        tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] },
-      })]);
-      expect(cfg.bindings).toEqual([{
-        agentId,
-        match: {
-          channel: "openclaw-weixin",
-          accountId: "bot-a",
-          peer: { kind: "direct", id: "user@im.wechat" },
-        },
-      }]);
-      for (const file of ["AGENTS.md", "USER.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md"]) {
-        await expect(readFile(path.join(workspace, file), "utf8")).resolves.not.toBe("");
-      }
+      expect(cfg).toBe(persisted);
+      expect(mutateConfigFile).not.toHaveBeenCalled();
     } finally {
       await rm(homeDir, { recursive: true, force: true });
     }
   });
 
-  it("reuses one agent across accounts while adding a binding for each account and peer", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
-    try {
-      const state = createConfigRuntime();
-      const base = { cfg: {}, configRuntime: state.runtime, peerId: "user@im.wechat",
-        agentId: "user_abcdef0123456789abcdef0123456789", homeDir };
+  it("rejects a missing account binding without attempting chat-time repair", async () => {
+    const agentId = "user_abcdef0123456789abcdef0123456789";
+    const persisted = {
+      agents: { list: [{ id: agentId, tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] } }] },
+      bindings: [],
+    };
+    const mutateConfigFile = vi.fn();
 
-      await ensureWeixinDynamicAgentBinding({ ...base, accountId: "bot-a" });
-      await ensureWeixinDynamicAgentBinding({ ...base, accountId: "bot-a" });
-      const cfg = await ensureWeixinDynamicAgentBinding({ ...base, accountId: "bot-b" });
-
-      expect(cfg.agents.list).toHaveLength(1);
-      expect(cfg.bindings).toHaveLength(2);
-      expect(cfg.bindings.map((entry: any) => entry.match.accountId)).toEqual(["bot-a", "bot-b"]);
-      expect(state.mutationCount()).toBe(2);
-    } finally {
-      await rm(homeDir, { recursive: true, force: true });
-    }
+    await expect(ensureWeixinDynamicAgentBinding({
+      cfg: persisted,
+      configRuntime: { current: () => persisted, mutateConfigFile },
+      accountId: "bot-a",
+      peerId: "user@im.wechat",
+      agentId,
+    })).rejects.toThrow("WECHAT_AGENT_NOT_READY");
+    expect(mutateConfigFile).not.toHaveBeenCalled();
   });
 
   it("never overwrites templates that the user already customized", async () => {
@@ -199,45 +185,12 @@ describe("Weixin dynamic agent", () => {
     }
   });
 
-  it("serializes concurrent config mutations so no agent or binding is lost", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
-    try {
-      let current: MutableConfig = {};
-      let activeMutations = 0;
-      let maxActiveMutations = 0;
-      const runtime: WeixinConfigRuntime = {
-        current: () => current,
-        mutateConfigFile: async (params) => {
-          activeMutations += 1;
-          maxActiveMutations = Math.max(maxActiveMutations, activeMutations);
-          const draft = structuredClone(current);
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          const result = await params.mutate(draft);
-          current = draft;
-          activeMutations -= 1;
-          return { nextConfig: current, result };
-        },
-      };
-
-      await Promise.all([
-        ensureWeixinDynamicAgentBinding({ cfg: {}, configRuntime: runtime, accountId: "bot-a",
-          peerId: "user-a@im.wechat", agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", homeDir }),
-        ensureWeixinDynamicAgentBinding({ cfg: {}, configRuntime: runtime, accountId: "bot-b",
-          peerId: "user-b@im.wechat", agentId: "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", homeDir }),
-      ]);
-
-      expect(maxActiveMutations).toBe(1);
-      expect(current.agents.list).toHaveLength(2);
-      expect(current.bindings).toHaveLength(2);
-    } finally {
-      await rm(homeDir, { recursive: true, force: true });
-    }
-  });
-
-  it("re-resolves the route against the config returned by mutateConfigFile", async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), "weixin-agent-"));
-    try {
-      const state = createConfigRuntime();
+  it("resolves the route against the already-persisted config", async () => {
+    const agentId = "user_abcdef0123456789abcdef0123456789";
+    const persisted = {
+      agents: { list: [{ id: agentId, tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] } }] },
+      bindings: [{ agentId, match: { channel: "openclaw-weixin", accountId: "bot-a", peer: { kind: "direct", id: "user@im.wechat" } } }],
+    };
       const resolveAgentRoute = vi.fn(({ cfg }) => {
         const binding = cfg.bindings?.[0];
         return binding
@@ -246,20 +199,15 @@ describe("Weixin dynamic agent", () => {
       });
 
       const result = await ensureWeixinDynamicAgentRoute({
-        cfg: {},
-        configRuntime: state.runtime,
+        cfg: persisted,
         channelRuntime: { routing: { resolveAgentRoute } } as any,
         accountId: "bot-a",
         peerId: "user@im.wechat",
-        agentId: "user_abcdef0123456789abcdef0123456789",
-        homeDir,
+        agentId,
       });
 
-      expect(result.route.agentId).toBe("user_abcdef0123456789abcdef0123456789");
+      expect(result.route.agentId).toBe(agentId);
       expect(resolveAgentRoute).toHaveBeenLastCalledWith(expect.objectContaining({ cfg: result.cfg }));
-    } finally {
-      await rm(homeDir, { recursive: true, force: true });
-    }
   });
 
   it("fails closed instead of routing a user to agent:main", async () => {
@@ -278,6 +226,6 @@ describe("Weixin dynamic agent", () => {
       accountId: "bot-a",
       peerId: "peer-a",
       agentId: "user_abcdef0123456789abcdef0123456789",
-    })).rejects.toThrow("resolved unexpected agent");
+    })).rejects.toThrow("WECHAT_AGENT_NOT_READY");
   });
 });

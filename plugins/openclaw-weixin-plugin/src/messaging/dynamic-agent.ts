@@ -79,10 +79,6 @@ export async function ensureWeixinDynamicAgentBinding(params: {
 }): Promise<ConfigRecord> {
   const current = params.configRuntime?.current?.() ?? params.cfg as ConfigRecord;
   const agentId = validateWeixinUserAgentId(params.agentId);
-  const homeDir = params.homeDir ?? process.env.OPENCLAW_HOME?.trim() ?? os.homedir();
-  const workspace = path.join(homeDir, ".openclaw", `workspace-${agentId}`);
-  const agentDir = path.join(homeDir, ".openclaw", "agents", agentId, "agent");
-
   const currentAgents = isRecord(current.agents) && Array.isArray(current.agents.list)
     ? current.agents.list
     : [];
@@ -91,63 +87,9 @@ export async function ensureWeixinDynamicAgentBinding(params: {
   if (isRecord(currentAgent) &&
       hasRequiredToolPolicy(currentAgent) &&
       currentBindings.some((entry: unknown) => isWeixinBinding(entry, agentId, params.accountId, params.peerId))) {
-    await ensureWeixinAgentWorkspace(workspace, { homeDir });
     return current;
   }
-
-  const run = mutationChain.catch(() => undefined).then(async () => {
-    const runtime = params.configRuntime;
-    if (!runtime?.mutateConfigFile) {
-      await ensureWeixinAgentWorkspace(workspace, { homeDir });
-      return current;
-    }
-
-    const mutation = await runtime.mutateConfigFile({
-      base: "runtime",
-      afterWrite: { mode: "auto" },
-      mutate: async (draft) => {
-        const agents = isRecord(draft.agents) ? draft.agents : {};
-        const list = Array.isArray(agents.list) ? [...agents.list] : [];
-        const existing = list.find((entry) => isRecord(entry) && entry.id === agentId);
-        await ensureWeixinAgentWorkspace(workspace, { homeDir });
-        await mkdir(agentDir, { recursive: true });
-
-        const agent: ConfigRecord = isRecord(existing) ? { ...existing } : { id: agentId };
-        agent.id = agentId;
-        agent.workspace = workspace;
-        agent.agentDir = agentDir;
-        const tools = isRecord(agent.tools) ? { ...agent.tools } : {};
-        const denied = Array.isArray(tools.deny)
-          ? tools.deny.filter((value: unknown): value is string => typeof value === "string")
-          : [];
-        tools.deny = [...new Set([...denied, ...REQUIRED_DENIED_TOOLS])];
-        agent.tools = tools;
-
-        const nextList = existing
-          ? list.map((entry) => (isRecord(entry) && entry.id === agentId ? agent : entry))
-          : [...list, agent];
-        draft.agents = { ...agents, list: nextList };
-
-        const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
-        const bindingExists = bindings.some((entry) => isWeixinBinding(entry, agentId, params.accountId, params.peerId));
-        if (!bindingExists) {
-          bindings.push({
-            agentId,
-            match: {
-              channel: WEIXIN_CHANNEL_ID,
-              accountId: params.accountId,
-              peer: { kind: "direct", id: params.peerId },
-            },
-          });
-        }
-        draft.bindings = bindings;
-        return { agentId, created: !existing, bound: !bindingExists };
-      },
-    });
-    return mutation.nextConfig ?? runtime.current?.() ?? current;
-  });
-  mutationChain = run.then(() => undefined, () => undefined);
-  return run;
+  throw new Error("WECHAT_AGENT_NOT_READY");
 }
 
 export async function ensureWeixinDynamicAgentRoute(params: WeixinDynamicAgentRouteParams): Promise<{

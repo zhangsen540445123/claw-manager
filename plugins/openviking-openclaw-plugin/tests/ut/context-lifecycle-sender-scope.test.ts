@@ -4,8 +4,14 @@ import {
   commitOpenVikingSession,
   compactOpenVikingSession,
 } from "../../services/context-lifecycle-service.js";
+import {
+  TEST_API_SESSION_KEY,
+  TEST_OPENVIKING_USER_ID,
+  useStrictActiveTurnFixtures,
+} from "../helpers/active-turn.js";
 
 describe("context lifecycle sender-scoped clients", () => {
+  useStrictActiveTurnFixtures(["agent:main:session-1"]);
   it("uses sender-scoped client for explicit session commits", async () => {
     const staticCommitSession = vi.fn();
     const senderCommitSession = vi.fn().mockResolvedValue({
@@ -17,6 +23,7 @@ describe("context lifecycle sender-scoped clients", () => {
 
     const ok = await commitOpenVikingSession({
       sessionId: "session-1",
+      sessionKey: TEST_API_SESSION_KEY,
       runtimeContext: { senderId: "wxid_A" },
       getClient,
       getClientForSender,
@@ -27,41 +34,43 @@ describe("context lifecycle sender-scoped clients", () => {
     });
 
     expect(ok).toBe(true);
-    expect(getClientForSender).toHaveBeenCalledWith("wxid_A");
+    expect(getClientForSender).toHaveBeenCalledWith(TEST_OPENVIKING_USER_ID);
     expect(senderCommitSession).toHaveBeenCalled();
     expect(getClient).not.toHaveBeenCalled();
     expect(staticCommitSession).not.toHaveBeenCalled();
   });
 
-  it("skips explicit commits when sender identity is unavailable in sender-scoped mode", async () => {
+  it("fails explicit commits when active Turn identity is unavailable", async () => {
     const getClient = vi.fn(async () => ({ commitSession: vi.fn() }));
     const getClientForSender = vi.fn();
 
-    const ok = await commitOpenVikingSession({
+    await expect(commitOpenVikingSession({
       sessionId: "session-1",
+      sessionKey: "agent:missing:claw-manager-api:global:direct:api:missing:conv",
+      identityHashSecret: "missing-secret",
       getClient,
       getClientForSender,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       resolveAgentId: () => "agent-main",
       rememberSessionAgentId: vi.fn(),
       isBypassedSession: () => false,
-    });
+    })).rejects.toThrow("API_TURN_IDENTITY_MISSING");
 
-    expect(ok).toBe(false);
     expect(getClientForSender).not.toHaveBeenCalled();
     expect(getClient).not.toHaveBeenCalled();
   });
 
-  it("skips compact when sender identity is unavailable in sender-scoped mode", async () => {
+  it("fails compact when active Turn identity is unavailable", async () => {
     const getClient = vi.fn(async () => ({
       commitSession: vi.fn(),
       getSessionContext: vi.fn(),
     }));
     const getClientForSender = vi.fn();
 
-    const result = await compactOpenVikingSession({
+    await expect(compactOpenVikingSession({
       sessionId: "session-1",
       sessionKey: "agent:main:session-1",
+      identityHashSecret: "missing-secret",
       tokenBudget: 1000,
       getClient,
       getClientForSender,
@@ -69,13 +78,7 @@ describe("context lifecycle sender-scoped clients", () => {
       resolveAgentId: () => "agent-main",
       isBypassedSession: () => false,
       diag: vi.fn(),
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      compacted: false,
-      reason: "identity_missing",
-    });
+    })).rejects.toThrow("API_TURN_IDENTITY_MISSING");
     expect(getClientForSender).not.toHaveBeenCalled();
     expect(getClient).not.toHaveBeenCalled();
   });

@@ -1,6 +1,6 @@
 {
   "name": "@claw-manager/openclaw-api-channel",
-  "version": "2026.6.51",
+  "version": "2026.6.52",
   "description": "OpenClaw API channel for Claw Manager",
   "license": "MIT",
   "type": "module",

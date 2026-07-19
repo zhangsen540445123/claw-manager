@@ -202,9 +202,7 @@ export function createOpenVikingRecallTraceRuntime(deps: OpenVikingRecallTraceRu
   const resolveReadClient = async (
     ctx?: unknown,
   ): Promise<{ read: (uri: string, agentId?: string) => Promise<unknown> } | undefined> => {
-    if (!deps.getClientForSender) {
-      return deps.getClient();
-    }
+    if (!deps.getClientForSender) return deps.getClient();
     const senderId = deps.extractSenderId?.(ctx);
     return senderId ? deps.getClientForSender(senderId) : undefined;
   };

@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import contextEnginePlugin from "../../index.js";
-import { OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE } from "../../plugin/openviking-runtime-utils.js";
+import { readActiveOpenVikingTurn, registerActiveOpenVikingTurn } from "../../active-turn-identity.js";
 
 type ToolDef = {
   name: string;
@@ -21,6 +24,24 @@ type ToolResult = {
 const SECRET = "sender-scoped-test-secret";
 const ACCOUNT_ID = "claw-manager";
 const EXPLICIT_USER_ID = "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const stateDirs: string[] = [];
+
+async function registerApiTurn(sessionKey: string, openVikingUserId = EXPLICIT_USER_ID): Promise<void> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ov-tool-turn-"));
+  stateDirs.push(dir);
+  process.env.OPENCLAW_STATE_DIR = dir;
+  process.env.OPENVIKING_IDENTITY_HASH_SECRET = SECRET;
+  await registerActiveOpenVikingTurn({
+    stateDir: dir, secret: SECRET, channel: "api", sessionKey,
+    agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", openVikingUserId, requestId: "request-a",
+  });
+}
+
+afterEach(async () => {
+  delete process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENVIKING_IDENTITY_HASH_SECRET;
+  await Promise.all(stateDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 function okResponse(result: unknown): Response {
   return new Response(JSON.stringify({ status: "ok", result }), {
@@ -82,7 +103,26 @@ function expectTenantHeaders(init: RequestInit | undefined, openVikingUserId: st
 }
 
 describe("sender-scoped OpenViking tools", () => {
+  it("uses only the active turn selected by exact ToolContext.sessionKey", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:a:conv";
+    await registerApiTurn(sessionKey);
+    const openVikingTransport = vi.fn(async (url: string) => url.endsWith("/api/v1/search/find")
+      ? okResponse({ memories: [], resources: [], skills: [], total: 0 })
+      : okResponse({}));
+    const { factoryTools } = setupPlugin(openVikingTransport);
+
+    await factoryTools.get("ov_search")!({
+      sessionKey,
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      senderId: "must-not-be-used",
+    }).execute("tc-search", { query: "preference", uri: "viking://resources" });
+
+    const [, init] = openVikingTransport.mock.calls.find(([url]) => String(url).endsWith("/api/v1/search/find")) as [string, RequestInit];
+    expectTenantHeaders(init, EXPLICIT_USER_ID);
+  });
   it("uses explicit OpenViking user id for ov_search tenant headers", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:search:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/search/find")) {
         return okResponse({ memories: [], resources: [], skills: [], total: 0 });
@@ -96,7 +136,7 @@ describe("sender-scoped OpenViking tools", () => {
       agentId: "main",
       senderId: "sender-b",
       requesterSenderId: "sender-a",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     });
     await tool.execute("tc-search", { query: "preference", uri: "viking://resources" });
 
@@ -116,13 +156,14 @@ describe("sender-scoped OpenViking tools", () => {
       senderId: "sender-b",
       requesterSenderId: "sender-a",
     });
-    const result = await tool.execute("tc-search", { query: "preference", uri: "viking://resources" }) as ToolResult;
-
-    expect(result.content[0]?.text).toBe(OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE);
+    await expect(tool.execute("tc-search", { query: "preference", uri: "viking://resources" }))
+      .rejects.toThrow("API_TURN_IDENTITY_MISSING");
     expect(openVikingTransport).not.toHaveBeenCalled();
   });
 
   it("uses explicit OpenViking user id for memory_store writes", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:store:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.includes("/messages")) {
         return okResponse({ session_id: "stored-session" });
@@ -138,14 +179,34 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "sender-fallback",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     });
     await tool.execute("tc-store", { text: "remember blue" });
+
+    expect(readActiveOpenVikingTurn({ sessionKey, secret: SECRET, expectedChannel: "api" }))
+      .toMatchObject({ explicitMemoryStored: true, explicitMemoryStoreOutcome: "stored" });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>
       String(url).includes("/api/v1/sessions/") && String(url).includes("/messages"),
     ) as [string, RequestInit];
     expectTenantHeaders(init, EXPLICIT_USER_ID);
+  });
+
+  it("marks failed explicit memory_store so afterTurn cannot compensate it", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:failed-store:conv";
+    await registerApiTurn(sessionKey);
+    const openVikingTransport = vi.fn(async (url: string) => {
+      if (url.includes("/messages")) return okResponse({ session_id: "stored-session" });
+      if (url.endsWith("/commit")) return okResponse({ status: "failed", error: "provider rejected" });
+      return okResponse({});
+    });
+    const { factoryTools } = setupPlugin(openVikingTransport);
+
+    const result = await factoryTools.get("memory_store")!({ sessionKey }).execute("tc-store", { text: "remember blue" }) as ToolResult;
+
+    expect(result.details).toMatchObject({ action: "failed" });
+    expect(readActiveOpenVikingTurn({ sessionKey, secret: SECRET, expectedChannel: "api" }))
+      .toMatchObject({ explicitMemoryStored: false, explicitMemoryStoreOutcome: "failed" });
   });
 
   it("rejects user memory tools without sender identity and sends no OpenViking request", async () => {
@@ -156,13 +217,14 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
     });
-    const result = await tool.execute("tc-recall", { query: "what color" }) as ToolResult;
-
-    expect(result.content[0]?.text).toBe(OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE);
+    await expect(tool.execute("tc-recall", { query: "what color" }))
+      .rejects.toThrow("API_TURN_IDENTITY_MISSING");
     expect(openVikingTransport).not.toHaveBeenCalled();
   });
 
   it("uses explicit OpenViking user id for archive reads", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:archive:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.includes("/archives/archive_001")) {
         return okResponse({ archive_id: "archive_001", abstract: "summary", overview: "", messages: [] });
@@ -175,7 +237,7 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "archive-sender",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     });
     await tool.execute("tc-archive", { archiveId: "archive_001" });
 
@@ -186,6 +248,8 @@ describe("sender-scoped OpenViking tools", () => {
   });
 
   it("uses explicit OpenViking user id for add_skill imports", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:skill:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/skills")) {
         return okResponse({ uri: "viking://user/skills/demo", name: "demo" });
@@ -198,7 +262,7 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       requesterSenderId: "skill-sender",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     });
     await tool.execute("tc-add-skill", { data: "name: demo\n" });
 
@@ -216,16 +280,16 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
     });
-    const result = await tool.execute("tc-add-resource", {
+    await expect(tool.execute("tc-add-resource", {
       source: "https://example.com/docs",
       to: "viking://resources/docs",
-    }) as ToolResult;
-
-    expect(result.content[0]?.text).toBe(OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE);
+    })).rejects.toThrow("API_TURN_IDENTITY_MISSING");
     expect(openVikingTransport).not.toHaveBeenCalled();
   });
 
   it("uses explicit OpenViking user id for recall trace content reads", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:trace:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       const requestUrl = new URL(url);
       if (requestUrl.pathname === "/api/v1/search/find") {
@@ -251,7 +315,7 @@ describe("sender-scoped OpenViking tools", () => {
       sessionId: "session-1",
       agentId: "main",
       senderId: "trace-sender",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     };
     await factoryTools.get("ov_search")!(ctx).execute("tc-search", {
       query: "spec",
@@ -270,6 +334,8 @@ describe("sender-scoped OpenViking tools", () => {
   });
 
   it("uses explicit OpenViking user id for ov-search slash command tenant headers", async () => {
+    const sessionKey = "agent:user:claw-manager-api:global:direct:api:command:conv";
+    await registerApiTurn(sessionKey);
     const openVikingTransport = vi.fn(async (url: string) => {
       if (url.endsWith("/api/v1/search/find")) {
         return okResponse({ memories: [], resources: [], skills: [], total: 0 });
@@ -284,7 +350,7 @@ describe("sender-scoped OpenViking tools", () => {
       agentId: "main",
       senderId: "command-sender-b",
       requesterSenderId: "command-sender-a",
-      openVikingUserId: EXPLICIT_USER_ID,
+      sessionKey,
     });
 
     const [, init] = openVikingTransport.mock.calls.find(([url]) =>

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
@@ -22,6 +22,11 @@ export type FindResultItem = {
   score?: number;
   match_reason?: string;
 };
+
+function logHash(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? createHash("sha256").update(text, "utf8").digest("hex").slice(0, 12) : null;
+}
 
 export type FindResult = {
   memories?: FindResultItem[];
@@ -358,13 +363,12 @@ export class OpenVikingClient {
     this.routingDebugLog(
       `openviking: ${label} ` +
         JSON.stringify({
-          ...detail,
-          X_OpenViking_Account: tenantHeaders.accountId ?? null,
-          X_OpenViking_User: tenantHeaders.userId ?? null,
-          X_OpenViking_Actor_Peer: actorPeerHeader ?? null,
-          session_vfs_hint: detail.sessionId
-            ? userSessionUri(String(detail.sessionId))
-            : undefined,
+          operation: label,
+          accountHash: logHash(tenantHeaders.accountId),
+          userHash: logHash(tenantHeaders.userId),
+          actorPeerHash: logHash(actorPeerHeader),
+          sessionHash: logHash(detail.sessionId),
+          detailKeys: Object.keys(detail).filter((key) => !["query", "content", "text", "uri", "path"].includes(key)).sort(),
         }),
     );
   }
@@ -490,17 +494,13 @@ export class OpenVikingClient {
     const actorPeerId = this.resolveActorPeerHeader(options.actorPeerId ?? legacyActorPeerId);
     const tenantHeaders = this.resolveTenantHeaders();
     this.routingDebugLog?.(
-      `openviking: find POST ${this.baseUrl}/api/v1/search/find ` +
+      "openviking: find POST " +
         JSON.stringify({
-          X_OpenViking_Account: tenantHeaders.accountId ?? null,
-          X_OpenViking_User: tenantHeaders.userId ?? null,
-          X_OpenViking_Actor_Peer: actorPeerId ?? null,
-          target_uri: targetUri || null,
-          target_uri_input: options.targetUri,
-          query:
-            query.length > 4000
-              ? `${query.slice(0, 4000)}…(+${query.length - 4000} more chars)`
-              : query,
+          accountHash: logHash(tenantHeaders.accountId),
+          userHash: logHash(tenantHeaders.userId),
+          actorPeerHash: logHash(actorPeerId),
+          targetUriHash: logHash(targetUri),
+          queryLength: query.length,
           limit: body.limit,
           score_threshold: body.score_threshold ?? null,
           context_type: body.context_type ?? null,

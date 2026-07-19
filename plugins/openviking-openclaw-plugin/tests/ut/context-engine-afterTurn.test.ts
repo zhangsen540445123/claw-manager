@@ -1,5 +1,4 @@
-import { createHmac } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -8,7 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { OpenVikingClient } from "../../client.js";
 import { memoryOpenVikingConfigSchema } from "../../config.js";
 import { createMemoryOpenVikingContextEngine } from "../../context-engine.js";
-import { writeOpenVikingSenderHandoff } from "../../sender-handoff.js";
+import {
+  strictTestOvSessionId,
+  TEST_OPENVIKING_USER_ID,
+  useStrictActiveTurnFixtures,
+  withDefaultActiveTurnSession,
+} from "../helpers/active-turn.js";
+import { registerActiveOpenVikingTurn } from "../../active-turn-identity.js";
 
 function makeLogger() {
   return {
@@ -83,7 +88,7 @@ function makeEngine(opts?: {
   });
 
   return {
-    engine,
+    engine: withDefaultActiveTurnSession(engine),
     client: client as unknown as {
       addSessionMessage: ReturnType<typeof vi.fn>;
       commitSession: ReturnType<typeof vi.fn>;
@@ -96,16 +101,22 @@ function makeEngine(opts?: {
 }
 
 describe("context-engine afterTurn()", () => {
+  useStrictActiveTurnFixtures([
+    "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
+    "agent:main:cron:nightly:run:1",
+    "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+  ]);
   it("uses sender-scoped client from handoff when afterTurn runtimeContext has no sender", async () => {
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     process.env.OPENCLAW_STATE_DIR = stateDir;
     try {
-      await writeOpenVikingSenderHandoff({
+      await registerActiveOpenVikingTurn({
         stateDir,
+        channel: "wechat",
         sessionKey: "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
+        agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         secret: "identity-secret",
       });
       const { engine, getClient, getClientForSender, client } = makeEngine({
@@ -127,12 +138,7 @@ describe("context-engine afterTurn()", () => {
         runtimeContext: {},
       });
 
-      expect(getClientForSender).toHaveBeenCalledWith(
-        expect.objectContaining({
-          openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        }),
-      );
+      expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(getClient).not.toHaveBeenCalled();
       expect(client.addSessionMessage).toHaveBeenCalled();
     } finally {
@@ -147,6 +153,11 @@ describe("context-engine afterTurn()", () => {
 
   it("uses explicit API OpenViking user id when present", async () => {
     const apiHash = "0123456789abcdef0123456789abcdef";
+    const sessionKey = `agent:main:claw-manager-api:global:direct:api:${apiHash}:conversation`;
+    await registerActiveOpenVikingTurn({
+      channel: "api", sessionKey, agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openVikingUserId: `api_${apiHash}`, secret: "identity-secret",
+    });
     const { engine, getClient, getClientForSender, client } = makeEngine({
       useSenderScopedClient: true,
       cfgOverrides: {
@@ -156,7 +167,7 @@ describe("context-engine afterTurn()", () => {
 
     await engine.afterTurn!({
       sessionId: "session-api",
-      sessionKey: `agent:main:claw-manager-api:global:direct:api:${apiHash}:conversation`,
+      sessionKey,
       sessionFile: "",
       messages: [
         { role: "user", content: "请记住我的名字叫大锤" },
@@ -180,22 +191,10 @@ describe("context-engine afterTurn()", () => {
     try {
       const apiHash = "0123456789abcdef0123456789abcdef";
       const sessionKey = `agent:main:claw-manager-api:global:direct:api:${apiHash}:conversation`;
-      const handoffKey = createHmac("sha256", "identity-secret").update(sessionKey, "utf8").digest("hex").slice(0, 32);
-      await mkdir(path.join(stateDir, "openviking"), { recursive: true });
-      await writeFile(
-        path.join(stateDir, "openviking", "sender-handoff.json"),
-        JSON.stringify({
-          version: 1,
-          entries: {
-            [handoffKey]: {
-              openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              senderHash: apiHash,
-              updatedAt: new Date().toISOString(),
-            },
-          },
-        }),
-        "utf8",
-      );
+      await registerActiveOpenVikingTurn({
+        stateDir, channel: "api", sessionKey, agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", secret: "identity-secret",
+      });
       const { engine, getClientForSender } = makeEngine({
         useSenderScopedClient: true,
         cfgOverrides: {
@@ -217,12 +216,7 @@ describe("context-engine afterTurn()", () => {
         },
       });
 
-      expect(getClientForSender).toHaveBeenCalledWith(
-        expect.objectContaining({
-          openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          senderHash: apiHash,
-        }),
-      );
+      expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     } finally {
       if (previousStateDir === undefined) {
         delete process.env.OPENCLAW_STATE_DIR;
@@ -353,6 +347,13 @@ describe("context-engine afterTurn()", () => {
         identityHashSecret: "identity-secret",
       },
     });
+    await registerActiveOpenVikingTurn({
+      channel: "api",
+      sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+      agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openVikingUserId: "api_0123456789abcdef0123456789abcdef",
+      secret: "identity-secret",
+    });
 
     try {
       await engine.afterTurn!({
@@ -391,7 +392,7 @@ describe("context-engine afterTurn()", () => {
     });
 
     expect(client.addSessionMessage).toHaveBeenCalled();
-    expect(client.commitSession).toHaveBeenCalledWith("s-memory-intent", {
+    expect(client.commitSession).toHaveBeenCalledWith(strictTestOvSessionId("s-memory-intent"), {
       wait: false,
       agentId: "test-agent",
       keepRecentCount: 0,
@@ -457,7 +458,7 @@ describe("context-engine afterTurn()", () => {
     });
 
     expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining("\"senderIdFound\":false"),
+      expect.stringContaining("\"senderIdFound\":true"),
     );
     for (const call of logger.info.mock.calls) {
       expect(String(call[0])).not.toContain("telegram:12345");
@@ -476,7 +477,7 @@ describe("context-engine afterTurn()", () => {
     });
 
     expect(client.addSessionMessage).toHaveBeenCalledTimes(1);
-    expect(client.addSessionMessage.mock.calls[0][5]).toBeUndefined();
+    expect(client.addSessionMessage.mock.calls[0][5]).toBe(TEST_OPENVIKING_USER_ID);
   });
 
   it("skips sender-scoped writes when only raw runtime senderId is present", async () => {
@@ -492,9 +493,9 @@ describe("context-engine afterTurn()", () => {
       runtimeContext: { senderId: "wxid_Alpha" },
     });
 
-    expect(getClientForSender).toHaveBeenCalledWith(undefined);
+    expect(getClientForSender).toHaveBeenCalledWith(TEST_OPENVIKING_USER_ID);
     expect(getClient).not.toHaveBeenCalled();
-    expect(client.addSessionMessage).not.toHaveBeenCalled();
+    expect(client.addSessionMessage).toHaveBeenCalled();
   });
 
   it("skips user memory writes when sender-scoped client cannot be resolved", async () => {
@@ -511,12 +512,10 @@ describe("context-engine afterTurn()", () => {
       runtimeContext: {},
     });
 
-    expect(getClientForSender).toHaveBeenCalledWith(undefined);
+    expect(getClientForSender).toHaveBeenCalledWith(TEST_OPENVIKING_USER_ID);
     expect(getClient).not.toHaveBeenCalled();
     expect(client.addSessionMessage).not.toHaveBeenCalled();
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining("identity_missing"),
-    );
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("identity_missing"));
   });
 
   it("sanitizes <relevant-memories> from user content but not from assistant", async () => {
@@ -687,7 +686,7 @@ describe("context-engine afterTurn()", () => {
 
     expect(client.addSessionMessage).toHaveBeenCalledTimes(1);
     const ovSessionId = client.addSessionMessage.mock.calls[0][0] as string;
-    expect(ovSessionId).toBe("my-session");
+    expect(ovSessionId).toBe(strictTestOvSessionId("my-session"));
   });
 
   it("preserves code snippets and file paths in captured content", async () => {

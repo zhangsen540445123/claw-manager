@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,7 +24,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -137,7 +135,36 @@ class MiniappUserAccessServiceTest {
     assertThat(result.key()).isNull();
     assertThat(result.keyPreview()).isEqualTo("cm_user_...cret");
     assertThat(result.created()).isFalse();
+    verify(userAgentProvisioningService).ensureApiBinding(
+        "inst_1",
+        "user_11111111111111111111111111111111",
+        "wx_hash_1",
+        "hash_1"
+    );
     verify(keyMapper).updateLastUsed("hash_1", "2026-07-04T10:00:00Z");
+  }
+
+  @Test
+  void doesNotReturnOrCreateKeyWhenApiBindingPersistenceFails() {
+    when(openVikingSettingsService.effectiveSettings()).thenReturn(settings());
+    when(identityService.resolve("openid_1", "salt_1")).thenReturn(apiIdentity("hash_1"));
+    MiniappUserBindingEntity binding = binding(
+        "hash_1", "openid_1", "connected", "inst_1", "wx_user_1", "wx_hash_1");
+    when(bindingMapper.findByOpenidHash("hash_1")).thenReturn(binding);
+    doThrow(new IllegalStateException("CONFIG_RUNTIME_NOT_APPLIED"))
+        .when(userAgentProvisioningService).ensureApiBinding(
+            "inst_1",
+            "user_11111111111111111111111111111111",
+            "wx_hash_1",
+            "hash_1"
+        );
+
+    assertThatThrownBy(() -> service.createOrGetUserKey("openid_1", false))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("CONFIG_RUNTIME_NOT_APPLIED");
+
+    verify(keyMapper, never()).findByOpenidHash("hash_1");
+    verify(keyMapper, never()).insert(org.mockito.ArgumentMatchers.any());
   }
 
   @Test
@@ -153,9 +180,6 @@ class MiniappUserAccessServiceTest {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
     when(instanceService.requireUsableApiInstance("inst_1")).thenReturn(instance);
-    WechatBindLinkEntity link = connectedLink();
-    when(bindLinkMapper.findByToken("token_1")).thenReturn(link);
-
     MiniappChatRoute route = service.resolveChatRoute("Bearer cm_user_secret", "");
 
     assertThat(route.instance()).isSameAs(instance);
@@ -164,12 +188,12 @@ class MiniappUserAccessServiceTest {
     assertThat(route.agentId()).isEqualTo("user_11111111111111111111111111111111");
     assertThat(route.openvikingUserId()).isEqualTo("wx_hash_1");
     assertThat(route.senderId()).isEqualTo("miniapp:hash_1");
-    verify(userAgentProvisioningService).ensure(
-        "inst_1",
-        "user_11111111111111111111111111111111",
-        "wx_hash_1",
-        "account_1",
-        "wechat_peer_1"
+    verify(userAgentProvisioningService, never()).ensure(
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString()
     );
   }
 
@@ -213,54 +237,17 @@ class MiniappUserAccessServiceTest {
         "2026-07-04T10:00:00Z",
         "2026-07-04T10:00:00Z"
     );
-    InOrder provisioningOrder = inOrder(bindingMapper, userAgentProvisioningService);
-    provisioningOrder.verify(bindingMapper).markConnected(
-        "hash_1",
-        "o9cq805zYxJ9dUBkeCRtXhCiSQro@im.wechat",
-        "user_0123456789abcdef0123456789abcdef",
-        "wx_a67b392317ec3e01e7ee1285528f8a2e",
-        "2026-07-04T10:00:00Z",
-        "2026-07-04T10:00:00Z"
-    );
-    provisioningOrder.verify(userAgentProvisioningService).ensureAsync(
-        "inst_1",
-        "user_0123456789abcdef0123456789abcdef",
-        "wx_a67b392317ec3e01e7ee1285528f8a2e",
-        "account_1",
-        "o9cq805zYxJ9dUBkeCRtXhCiSQro@im.wechat"
+    verify(userAgentProvisioningService, never()).ensure(
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString()
     );
   }
 
   @Test
-  void keepsBindingConnectedWhenAsynchronousProvisioningCannotBeScheduled() {
-    MiniappUserBindingEntity binding = binding("hash_1", "openid_1", "pending", "inst_1", "", "");
-    binding.setCurrentBindToken("token_1");
-    when(bindingMapper.findByOpenidHash("hash_1")).thenReturn(binding);
-    WechatBindLinkEntity link = connectedLink();
-    when(bindLinkMapper.findByToken("token_1")).thenReturn(link);
-    when(userAgentIdentityService.resolve("inst_1", "wechat_peer_1"))
-        .thenReturn(new UserAgentIdentityResult(
-            "user_0123456789abcdef0123456789abcdef",
-            "wx_a67b392317ec3e01e7ee1285528f8a2e",
-            true
-        ));
-    doThrow(new IllegalStateException("executor stopped"))
-        .when(userAgentProvisioningService).ensureAsync(
-            "inst_1",
-            "user_0123456789abcdef0123456789abcdef",
-            "wx_a67b392317ec3e01e7ee1285528f8a2e",
-            "account_1",
-            "wechat_peer_1"
-        );
-
-    MiniappUserBindingEntity result = service.reconcileBinding("hash_1");
-
-    assertThat(result.getBindStatus()).isEqualTo("connected");
-    assertThat(result.getAgentId()).isEqualTo("user_0123456789abcdef0123456789abcdef");
-  }
-
-  @Test
-  void blocksChatWhenSynchronousAgentProvisioningFails() {
+  void chatResolutionDoesNotRepairAgentOrBindings() {
     MiniappUserKeyEntity key = new MiniappUserKeyEntity();
     key.setOpenidHash("hash_1");
     key.setOpenid("openid_1");
@@ -272,20 +259,22 @@ class MiniappUserAccessServiceTest {
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");
     when(instanceService.requireUsableApiInstance("inst_1")).thenReturn(instance);
-    when(bindLinkMapper.findByToken("token_1")).thenReturn(connectedLink());
-    doThrow(new IllegalStateException("queue failed"))
-        .when(userAgentProvisioningService).ensure(
-            "inst_1",
-            "user_11111111111111111111111111111111",
-            "wx_hash_1",
-            "account_1",
-            "wechat_peer_1"
-        );
+    MiniappChatRoute route = service.resolveChatRoute("Bearer cm_user_secret", "");
 
-    assertThatThrownBy(() -> service.resolveChatRoute("Bearer cm_user_secret", ""))
-        .isInstanceOf(ApiException.class)
-        .hasMessage("用户 Agent 尚未准备完成，请稍后重试。");
-    verify(keyMapper, never()).updateLastUsed("hash_1", "2026-07-04T10:00:00Z");
+    assertThat(route.agentId()).isEqualTo("user_11111111111111111111111111111111");
+    verify(userAgentProvisioningService, never()).ensure(
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString()
+    );
+    verify(userAgentProvisioningService, never()).ensureApiBinding(
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString()
+    );
   }
 
   @Test

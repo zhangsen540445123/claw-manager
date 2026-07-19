@@ -22,8 +22,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class MiniappUserAccessService {
@@ -117,6 +115,15 @@ public class MiniappUserAccessService {
     if (!completeConnectedIdentity(binding)) {
       throw new ApiException(HttpStatus.CONFLICT, "小程序用户尚未完成微信扫码绑定。");
     }
+    if (userAgentProvisioningService == null) {
+      throw new ApiException(HttpStatus.CONFLICT, "API Binding 初始化服务不可用。");
+    }
+    userAgentProvisioningService.ensureApiBinding(
+        binding.getInstanceId(),
+        binding.getAgentId(),
+        binding.getOpenvikingUserId(),
+        identity.openidHash()
+    );
     MiniappUserKeyEntity existing = keyMapper.findByOpenidHash(identity.openidHash());
     String now = clock.instant().toString();
     if (existing != null && existing.isEnabled() && !reset) {
@@ -170,7 +177,6 @@ public class MiniappUserAccessService {
       throw new ApiException(HttpStatus.CONFLICT, "小程序用户尚未完成微信扫码绑定。");
     }
     InstanceEntity instance = instanceService.requireUsableApiInstance(binding.getInstanceId());
-    ensureChatAgentReady(binding);
     keyMapper.updateLastUsed(key.getOpenidHash(), clock.instant().toString());
     return new MiniappChatRoute(
         instance,
@@ -243,13 +249,6 @@ public class MiniappUserAccessService {
     binding.setBindStatus("connected");
     binding.setBoundAt(now);
     binding.setUpdatedAt(now);
-    scheduleProvisioningAfterCommit(
-        binding.getInstanceId(),
-        userIdentity.agentId(),
-        userIdentity.openVikingUserId(),
-        link.getTargetAccountId(),
-        link.getScannedWechatUserId()
-    );
     log.info(
         "miniapp.binding.identityReady openidHash={} bindTokenPresent={} linkStatus={} instanceId={} agentIdPreview={}",
         openidHash,
@@ -259,78 +258,6 @@ public class MiniappUserAccessService {
         agentPreview(userIdentity.agentId())
     );
     return binding;
-  }
-
-  private void ensureChatAgentReady(MiniappUserBindingEntity binding) {
-    if (userAgentProvisioningService == null) {
-      return;
-    }
-    WechatBindLinkEntity link = bindLinkMapper.findByToken(trim(binding.getCurrentBindToken()));
-    if (link == null
-        || !"connected".equals(link.getStatus())
-        || blank(link.getTargetAccountId())
-        || blank(link.getScannedWechatUserId())) {
-      throw new ApiException(HttpStatus.CONFLICT, "用户 Agent 尚未准备完成，请稍后重试。");
-    }
-    try {
-      userAgentProvisioningService.ensure(
-          binding.getInstanceId(),
-          binding.getAgentId(),
-          binding.getOpenvikingUserId(),
-          link.getTargetAccountId(),
-          link.getScannedWechatUserId()
-      );
-    } catch (RuntimeException error) {
-      log.warn(
-          "miniapp.agent.ensureFailed instanceId={} agentIdPreview={} errorType={}",
-          binding.getInstanceId(),
-          agentPreview(binding.getAgentId()),
-          error.getClass().getSimpleName()
-      );
-      throw new ApiException(HttpStatus.CONFLICT, "用户 Agent 尚未准备完成，请稍后重试。");
-    }
-  }
-
-  private void scheduleProvisioningAfterCommit(
-      String instanceId,
-      String agentId,
-      String openVikingUserId,
-      String wechatAccountId,
-      String wechatPeerId
-  ) {
-    if (userAgentProvisioningService == null) {
-      return;
-    }
-    Runnable task = () -> {
-      try {
-        userAgentProvisioningService.ensureAsync(
-            instanceId,
-            agentId,
-            openVikingUserId,
-            wechatAccountId,
-            wechatPeerId
-        );
-      } catch (RuntimeException error) {
-        log.warn(
-            "miniapp.agent.asyncScheduleFailed instanceId={} agentIdPreview={} accountIdPresent={} peerIdPresent={} errorType={}",
-            trim(instanceId),
-            agentPreview(agentId),
-            blank(wechatAccountId) ? "absent" : "present",
-            blank(wechatPeerId) ? "absent" : "present",
-            error.getClass().getSimpleName()
-        );
-      }
-    };
-    if (TransactionSynchronizationManager.isSynchronizationActive()) {
-      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-        @Override
-        public void afterCommit() {
-          task.run();
-        }
-      });
-      return;
-    }
-    task.run();
   }
 
   private static String bearerToken(String authorization) {

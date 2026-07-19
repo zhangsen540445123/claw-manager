@@ -4,6 +4,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import plugin from "../../index.js";
+import { TEST_API_SESSION_KEY, useStrictActiveTurnFixtures } from "../helpers/active-turn.js";
+
+const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 
 type RequestRecord = {
   body?: string;
@@ -37,6 +40,7 @@ function json(res: ServerResponse, statusCode: number, payload: unknown): void {
 }
 
 describe("plugin normal flow with healthy backend", () => {
+  useStrictActiveTurnFixtures();
   let server: ReturnType<typeof createServer>;
   let baseUrl = "";
   let requests: RequestRecord[] = [];
@@ -215,11 +219,13 @@ describe("plugin normal flow with healthy backend", () => {
     const contextEngine = contextEngineFactory!() as {
       assemble: (params: {
         sessionId: string;
+        sessionKey?: string;
         prompt?: string;
         messages: Array<{ role: string; content: string }>;
       }) => Promise<{ messages: Array<{ role: string; content: unknown }> }>;
       afterTurn: (params: {
         sessionId: string;
+        sessionKey?: string;
         sessionFile: string;
         messages: Array<{ role: string; content: unknown; timestamp?: number }>;
         prePromptMessageCount: number;
@@ -227,7 +233,8 @@ describe("plugin normal flow with healthy backend", () => {
     };
 
     const assembled = await contextEngine.assemble({
-      sessionId: "session-normal",
+      sessionId: SESSION_ID,
+      sessionKey: TEST_API_SESSION_KEY,
       prompt: "what backend language should we use?",
       messages: [{ role: "user", content: "fallback" }],
     });
@@ -242,7 +249,8 @@ describe("plugin normal flow with healthy backend", () => {
     });
 
     const transformed = await contextEngine.assemble({
-      sessionId: "session-normal",
+      sessionId: SESSION_ID,
+      sessionKey: TEST_API_SESSION_KEY,
       messages: [
         ...(assembled.messages as Array<{ role: string; content: string }>),
         { role: "user", content: "what backend language should we use?" },
@@ -256,7 +264,8 @@ describe("plugin normal flow with healthy backend", () => {
     expect(String(latest?.content)).toContain("what backend language should we use?");
 
     await contextEngine.afterTurn({
-      sessionId: "session-normal",
+      sessionId: SESSION_ID,
+      sessionKey: TEST_API_SESSION_KEY,
       sessionFile: "",
       messages: [
         { role: "user", content: "Please keep using Rust.", timestamp: Date.parse("2026-04-07T08:00:00Z") },
@@ -270,13 +279,13 @@ describe("plugin normal flow with healthy backend", () => {
       requests.some((entry) => entry.method === "POST" && entry.path === "/api/v1/search/find"),
     ).toBe(true);
     expect(
-      requests.some((entry) => entry.method === "GET" && entry.path.startsWith("/api/v1/sessions/session-normal/context")),
+      requests.some((entry) => entry.method === "GET" && entry.path.startsWith(`/api/v1/sessions/${SESSION_ID}/context`)),
     ).toBe(true);
     expect(
-      requests.some((entry) => entry.method === "POST" && entry.path === "/api/v1/sessions/session-normal/messages"),
+      requests.some((entry) => entry.method === "POST" && entry.path === `/api/v1/sessions/${SESSION_ID}/messages`),
     ).toBe(true);
     const addMessageRequest = requests.find(
-      (entry) => entry.method === "POST" && entry.path === "/api/v1/sessions/session-normal/messages",
+      (entry) => entry.method === "POST" && entry.path === `/api/v1/sessions/${SESSION_ID}/messages`,
     );
     expect(addMessageRequest).toBeTruthy();
     expect(JSON.parse(addMessageRequest!.body ?? "{}")).toMatchObject({
@@ -284,7 +293,7 @@ describe("plugin normal flow with healthy backend", () => {
       created_at: "2026-04-07T08:00:01.000Z",
     });
     expect(
-      requests.some((entry) => entry.method === "POST" && entry.path === "/api/v1/sessions/session-normal/commit"),
+      requests.some((entry) => entry.method === "POST" && entry.path === `/api/v1/sessions/${SESSION_ID}/commit`),
     ).toBe(true);
 
     await service?.stop?.();

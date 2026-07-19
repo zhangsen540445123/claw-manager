@@ -147,7 +147,7 @@ ON DUPLICATE KEY UPDATE
 INSERT INTO clawbot.openviking_settings
   (id, base_url, trusted_mode_enabled, account_id, plugin_package, identity_salt, root_api_key, created_at, updated_at)
 VALUES
-  ('global', 'https://openviking.anyclawer.com', 1, 'claw-manager', 'npm:@claw-manager/openviking-openclaw-plugin@2026.6.37', 'oauLVCAwdwhHFrGAm6txDGcUcULgjM08zF5ZTdwZQKkPgUmVzW', 'sk-XaJnsy6gL42kmeXHNFZDTB4vHaHvBiVNJoJd', '2026-07-04T04:40:04.871124335Z', '2026-07-04T04:40:04.871124335Z')
+  ('global', 'https://openviking.anyclawer.com', 1, 'claw-manager', 'npm:@claw-manager/openviking-openclaw-plugin@2026.6.38', 'oauLVCAwdwhHFrGAm6txDGcUcULgjM08zF5ZTdwZQKkPgUmVzW', 'sk-XaJnsy6gL42kmeXHNFZDTB4vHaHvBiVNJoJd', '2026-07-04T04:40:04.871124335Z', '2026-07-04T04:40:04.871124335Z')
 ON DUPLICATE KEY UPDATE
   base_url = VALUES(base_url),
   trusted_mode_enabled = VALUES(trusted_mode_enabled),

@@ -241,7 +241,15 @@ describe("TOS release and single installer contract", () => {
   });
 
   it("does not run OpenViking setup during verify-only mode", () => {
-    execFileSync("bash", [join(rootDir, "scripts/install.sh"), "--source", "existing", "--verify-only"], {
+    const nativeInstallScript = join(rootDir, "scripts/install.sh").replace(/\\/g, "/");
+    const windowsPath = /^([A-Za-z]):\/(.*)$/.exec(nativeInstallScript);
+    const installScript = windowsPath
+      ? `/mnt/${windowsPath[1]!.toLowerCase()}/${windowsPath[2]}`
+      : nativeInstallScript;
+    execFileSync("bash", [
+      "-lc",
+      `tr -d '\\r' < '${installScript}' | bash -s -- --source existing --verify-only`,
+    ], {
       env: {
         ...process.env,
         OPENVIKING_API_KEY: "test-secret-key",

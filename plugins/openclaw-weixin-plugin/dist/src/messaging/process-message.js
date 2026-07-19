@@ -21,7 +21,7 @@ import { StreamingMarkdownFilter } from "./markdown-filter.js";
 import { sendMessageWeixin } from "./send.js";
 import { WeixinReplyProgressSender } from "./reply-progress-sender.js";
 import { handleSlashCommand } from "./slash-commands.js";
-import { writeOpenVikingSenderHandoff } from "./openviking-handoff.js";
+import { clearWechatOpenVikingTurn, registerWechatOpenVikingTurn, runWithWechatOpenVikingTurn } from "./openviking-handoff.js";
 import { resolveUserAgentIdentity } from "./user-agent-identity.js";
 import { ensureWeixinDynamicAgentRoute, } from "./dynamic-agent.js";
 const MEDIA_OUTBOUND_TEMP_DIR = path.join(resolvePreferredOpenClawTmpDir(), "weixin/media/outbound-temp");
@@ -49,22 +49,20 @@ function describeSenderForLog(senderId) {
 async function writeOpenVikingHandoffForTurn(params) {
     const secret = process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "";
     if (!secret || !params.sessionKey || !params.openVikingUserId.trim()) {
-        return;
+        throw new Error("WECHAT_TURN_IDENTITY_MISSING");
     }
-    try {
-        const wrote = await writeOpenVikingSenderHandoff({
-            sessionKey: params.sessionKey,
-            openVikingUserId: params.openVikingUserId,
-            secret,
-            cmTraceId: params.cmTraceId,
-        });
-        if (wrote) {
-            params.log("[openviking] sender handoff written");
-        }
+    const wrote = await registerWechatOpenVikingTurn({
+        sessionKey: params.sessionKey,
+        agentId: params.agentId,
+        openVikingUserId: params.openVikingUserId,
+        secret,
+        cmTraceId: params.cmTraceId,
+        runId: params.runId,
+    });
+    if (!wrote) {
+        throw new Error("WECHAT_TURN_IDENTITY_MISSING");
     }
-    catch (err) {
-        params.log(`[openviking] sender handoff write failed: ${String(err)}`);
-    }
+    params.log("[openviking] turn registered");
 }
 export async function reportWechatTrace(params) {
     const env = params.env ?? process.env;
@@ -145,7 +143,7 @@ export async function processOneMessage(full, deps) {
         details: { imageRequested: requestsImageGeneration(textBody) } });
     if (debug) {
         const itemTypes = full.item_list?.map((i) => i.type).join(",") ?? "none";
-        debugTrace.push("── 收消息 ──", `│ seq=${full.seq ?? "?"} msgId=${full.message_id ?? "?"} sender=${describeSenderForLog(full.from_user_id ?? "")}`, `│ body="${textBody.slice(0, 40)}${textBody.length > 40 ? "…" : ""}" (len=${textBody.length}) itemTypes=[${itemTypes}]`, `│ sessionId=${full.session_id ?? "?"} contextToken=${full.context_token ? "present" : "none"}`);
+        debugTrace.push("── 收消息 ──", `│ seq=${full.seq ?? "?"} msgId=${full.message_id ?? "?"} sender=${describeSenderForLog(full.from_user_id ?? "")}`, `│ bodyLen=${textBody.length} itemTypes=[${itemTypes}]`, `│ sessionId=${full.session_id ?? "?"} contextToken=${full.context_token ? "present" : "none"}`);
     }
     const mediaOpts = {};
     // Find the first downloadable media item (priority: IMAGE > VIDEO > FILE > VOICE).
@@ -254,9 +252,11 @@ export async function processOneMessage(full, deps) {
     const finalized = attachSenderRuntimeIdentity(deps.channelRuntime.reply.finalizeInboundContext(ctx), senderId);
     await writeOpenVikingHandoffForTurn({
         sessionKey: route.sessionKey,
+        agentId: route.agentId,
         openVikingUserId: senderIdentity.openVikingUserId,
         log: deps.log,
         cmTraceId,
+        runId,
     });
     logger.info(`inbound: sender=${senderForLog} bodyLen=${(finalized.Body ?? "").length} hasMedia=${Boolean(finalized.MediaPath ?? finalized.MediaUrl)}`);
     logger.debug(`inbound context: bodyLen=${(finalized.Body ?? "").length} sender=${senderForLog} ` +
@@ -450,7 +450,7 @@ export async function processOneMessage(full, deps) {
     logger.debug(`dispatchReplyFromConfig: starting agentId=${route.agentId ?? "(none)"}`);
     await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.started", status: "started", requestId: runId });
     try {
-        await deps.channelRuntime.reply.withReplyDispatcher({
+        await runWithWechatOpenVikingTurn(runId, () => deps.channelRuntime.reply.withReplyDispatcher({
             dispatcher,
             run: () => deps.channelRuntime.reply.dispatchReplyFromConfig({
                 ctx: finalized,
@@ -462,7 +462,7 @@ export async function processOneMessage(full, deps) {
                     disableBlockStreaming: true,
                 },
             }),
-        });
+        }));
         logger.debug(`dispatchReplyFromConfig: done agentId=${route.agentId ?? "(none)"}`);
         await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.completed", status: "completed", requestId: runId });
     }
@@ -473,6 +473,11 @@ export async function processOneMessage(full, deps) {
     }
     finally {
         markDispatchIdle();
+        await clearWechatOpenVikingTurn({
+            sessionKey: route.sessionKey,
+            secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "",
+            runId,
+        });
         await replyProgressSender?.finalize();
         logger.info(`debug-check: accountId=${redactIdentity(deps.accountId)} debug=${String(debug)} hasContextToken=${Boolean(contextToken)}`);
         if (debug && contextToken) {

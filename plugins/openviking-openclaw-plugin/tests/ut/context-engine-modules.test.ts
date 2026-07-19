@@ -10,6 +10,7 @@ import {
 } from "../../services/context-message-adapter.js";
 import { assembleOpenVikingSession, afterTurnOpenVikingSession, commitOpenVikingSession, compactOpenVikingSession } from "../../services/context-lifecycle-service.js";
 import { openClawSessionToOvStorageId } from "../../routing/identity-routing.js";
+import { TEST_OPENVIKING_USER_ID, useStrictActiveTurnFixtures } from "../helpers/active-turn.js";
 
 describe("context-engine message adapter seam", () => {
   it("sanitizes role ids in the concrete message adapter", () => {
@@ -83,6 +84,7 @@ describe("context-engine message adapter seam", () => {
 });
 
 describe("context-engine lifecycle service seam", () => {
+  useStrictActiveTurnFixtures(["agent:main:main"]);
   it("assembles through the lifecycle service seam and preserves no-data passthrough diagnostics", async () => {
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const messages = [{ role: "user", content: "hello world" }];
@@ -112,7 +114,7 @@ describe("context-engine lifecycle service seam", () => {
       isBypassedSession: () => false,
       diag,
       roughEstimate: () => 42,
-      messageDigest: () => [{ role: "user", content: "hello world", tokens: 42, truncated: false }],
+      messageDigest: () => [{ role: "user", chars: 11, tokens: 42, contentTypes: ["text"] }],
       extractAgentMessageText: () => "hello world",
       hasAutoRecallBlock: () => false,
       prependRecallToLatestUserMessage: vi.fn(),
@@ -129,7 +131,7 @@ describe("context-engine lifecycle service seam", () => {
     expect(client.getSessionContext).toHaveBeenCalledWith(ovSessionId, 4096, "agent_main");
     expect(buildAssembledContext).not.toHaveBeenCalled();
     expect(result).toEqual({ messages, estimatedTokens: 42 });
-    expect(diag).toHaveBeenCalledWith("assemble_result", ovSessionId, expect.objectContaining({
+    expect(diag).toHaveBeenCalledWith("assemble_result", expect.stringMatching(/^[a-f0-9]{12}$/), expect.objectContaining({
       passthrough: true,
       reason: "no_ov_data",
       estimatedTokens: 42,
@@ -244,13 +246,13 @@ describe("context-engine lifecycle service seam", () => {
         },
       },
     });
-    expect(diag).toHaveBeenCalledWith("compact_entry", ovSessionId, expect.objectContaining({
+    expect(diag).toHaveBeenCalledWith("compact_entry", expect.stringMatching(/^[a-f0-9]{12}$/), expect.objectContaining({
       tokenBudget: 4096,
       force: true,
       compactionTarget: "budget",
       hasCustomInstructions: true,
     }));
-    expect(diag).toHaveBeenCalledWith("compact_result", ovSessionId, expect.objectContaining({
+    expect(diag).toHaveBeenCalledWith("compact_result", expect.stringMatching(/^[a-f0-9]{12}$/), expect.objectContaining({
       ok: true,
       compacted: true,
       reason: "commit_completed",
@@ -315,7 +317,7 @@ describe("context-engine lifecycle service seam", () => {
       [{ type: "text", text: "hello world" }],
       "agent_main",
       "2026-04-01T10:01:00.000Z",
-      "telegram_123",
+      TEST_OPENVIKING_USER_ID,
     );
     expect(client.getSession).toHaveBeenCalledWith(ovSessionId, "agent_main");
     expect(client.commitSession).toHaveBeenCalledWith(ovSessionId, {
@@ -323,7 +325,7 @@ describe("context-engine lifecycle service seam", () => {
       agentId: "agent_main",
       keepRecentCount: 7,
     });
-    expect(diag).toHaveBeenCalledWith("afterTurn_commit", ovSessionId, expect.objectContaining({
+    expect(diag).toHaveBeenCalledWith("afterTurn_commit", expect.stringMatching(/^[a-f0-9]{12}$/), expect.objectContaining({
       pendingTokens: 25000,
       commitTokenThreshold: 20000,
       status: "accepted",

@@ -5,6 +5,7 @@ import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeExecListener;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,34 @@ public class OpenClawGatewayRpcService {
     log.debug("API Channel monitor is auto-started by the plugin runtime: instanceId={}", instance.getId());
   }
 
+  public void ensureUserAgent(
+      InstanceEntity instance,
+      String agentId,
+      String openVikingUserId,
+      String wechatAccountId,
+      String wechatPeerId
+  ) {
+    runGatewayJsonMethod(instance, "claw-manager-api.ensure-user-agent", Map.of(
+        "agentId", agentId,
+        "openVikingUserId", openVikingUserId,
+        "wechatAccountId", wechatAccountId,
+        "wechatPeerId", wechatPeerId
+    ), "wechatBindingCreated");
+  }
+
+  public void ensureApiBinding(
+      InstanceEntity instance,
+      String agentId,
+      String openVikingUserId,
+      String apiPeerId
+  ) {
+    runGatewayJsonMethod(instance, "claw-manager-api.ensure-api-binding", Map.of(
+        "agentId", agentId,
+        "openVikingUserId", openVikingUserId,
+        "apiPeerId", apiPeerId
+    ), "apiBindingCreated");
+  }
+
   public void restartWechatChannel(InstanceEntity instance, List<String> accountIds) {
     Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
     if (normalizedAccountIds.isEmpty()) {
@@ -101,7 +130,7 @@ public class OpenClawGatewayRpcService {
     runGatewayScript(instance, method, operationScript(method, channelId, accountId, requireStarted));
   }
 
-  private void runGatewayScript(InstanceEntity instance, String method, String script) {
+  private String runGatewayScript(InstanceEntity instance, String method, String script) {
     CompletableFuture<Integer> exit = new CompletableFuture<>();
     StringBuilder output = new StringBuilder();
     openClawRuntime.startExec(
@@ -142,6 +171,67 @@ public class OpenClawGatewayRpcService {
     }
     if (exitCode != 0) {
       throw new IllegalStateException("OpenClaw " + method + " 退出码 " + exitCode + "：" + tail(output.toString()));
+    }
+    return output.toString();
+  }
+
+  private void runGatewayJsonMethod(
+      InstanceEntity instance,
+      String method,
+      Map<String, Object> params,
+      String bindingCreatedField
+  ) {
+    String methodLiteral;
+    String paramsLiteral;
+    try {
+      methodLiteral = objectMapper.writeValueAsString(method);
+      paramsLiteral = objectMapper.writeValueAsString(params);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("Gateway RPC 参数序列化失败。", error);
+    }
+    String script = """
+        import { c as callGateway } from "/usr/local/lib/node_modules/openclaw/dist/call-BlqKbSL2.js";
+        import { i as GATEWAY_CLIENT_NAMES, r as GATEWAY_CLIENT_MODES } from "/usr/local/lib/node_modules/openclaw/dist/client-info-CcqJJIan.js";
+        const result = await callGateway({
+          method: %s,
+          params: %s,
+          mode: GATEWAY_CLIENT_MODES.BACKEND,
+          clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+          deviceIdentity: null,
+          requireLocalBackendSharedAuth: true,
+          scopes: ["operator.admin"],
+          timeoutMs: 15000
+        });
+        console.log(JSON.stringify(result));
+        """.formatted(methodLiteral, paramsLiteral);
+    String output = runGatewayScript(instance, method, script);
+    JsonNode result = parseLastJsonLine(method, output);
+    requireTrue(method, result, "persisted");
+    requireTrue(method, result, "runtimeApplied");
+    if (!result.has(bindingCreatedField) || !result.get(bindingCreatedField).isBoolean()) {
+      throw new IllegalStateException("OpenClaw " + method + " 响应缺少布尔字段 " + bindingCreatedField + "。");
+    }
+  }
+
+  private JsonNode parseLastJsonLine(String method, String output) {
+    String[] lines = defaultString(output).split("\\R");
+    for (int index = lines.length - 1; index >= 0; index--) {
+      String line = lines[index].trim();
+      if (line.isEmpty()) {
+        continue;
+      }
+      try {
+        return objectMapper.readTree(line);
+      } catch (JsonProcessingException ignored) {
+        // Gateway may emit diagnostic lines before the final JSON response.
+      }
+    }
+    throw new IllegalStateException("OpenClaw " + method + " 未返回有效 JSON 响应。");
+  }
+
+  private void requireTrue(String method, JsonNode result, String field) {
+    if (!result.path(field).isBoolean() || !result.path(field).booleanValue()) {
+      throw new IllegalStateException("OpenClaw " + method + " 响应字段 " + field + " 必须为 true。");
     }
   }
 

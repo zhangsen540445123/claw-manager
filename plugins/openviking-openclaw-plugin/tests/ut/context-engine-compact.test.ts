@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { OpenVikingClient } from "../../client.js";
 import { memoryOpenVikingConfigSchema } from "../../config.js";
 import { createMemoryOpenVikingContextEngine } from "../../context-engine.js";
+import {
+  strictTestOvSessionId,
+  strictTestSessionKey,
+  useStrictActiveTurnFixtures,
+  withDefaultActiveTurnSession,
+} from "../helpers/active-turn.js";
 import { openClawSessionToOvStorageId } from "../../routing/identity-routing.js";
 
 function makeLogger() {
@@ -52,7 +58,7 @@ function makeEngine(commitResult: unknown, opts?: { throwError?: Error }) {
   });
 
   return {
-    engine,
+    engine: withDefaultActiveTurnSession(engine),
     client: client as unknown as {
       commitSession: ReturnType<typeof vi.fn>;
     },
@@ -62,6 +68,12 @@ function makeEngine(commitResult: unknown, opts?: { throwError?: Error }) {
 }
 
 describe("context-engine commitOVSession()", () => {
+  useStrictActiveTurnFixtures([
+    "agent:main:main",
+    "agent:top:main",
+    "agent:runtime:main",
+    "agent:main:cron:nightly:run:1",
+  ]);
   it("returns true on successful commit", async () => {
     const { engine } = makeEngine({
       status: "completed",
@@ -178,6 +190,12 @@ describe("context-engine commitOVSession()", () => {
 });
 
 describe("context-engine compact()", () => {
+  useStrictActiveTurnFixtures([
+    "agent:main:main",
+    "agent:top:main",
+    "agent:runtime:main",
+    "agent:main:cron:nightly:run:1",
+  ]);
   it("returns compacted=false when the session matches bypassSessionPatterns", async () => {
     const cfg = memoryOpenVikingConfigSchema.parse({
       mode: "remote",
@@ -357,7 +375,7 @@ describe("context-engine compact()", () => {
     expect(commitCallSessionId).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
   });
 
-  it("uses sessionKey-derived OV session ID and resolver context when compact receives a non-UUID sessionId", async () => {
+  it("does not use runtimeContext sessionKey as a fallback for compact", async () => {
     const { engine, client, resolveAgentId } = makeEngine({
       status: "completed",
       archived: false,
@@ -370,9 +388,9 @@ describe("context-engine compact()", () => {
       runtimeContext: { sessionKey: "agent:main:main", agentId: "main" },
     });
 
-    const ovSessionId = openClawSessionToOvStorageId("plain-session", "agent:main:main");
+    const ovSessionId = strictTestOvSessionId("plain-session");
     expect(client.commitSession.mock.calls[0][0]).toBe(ovSessionId);
-    expect(resolveAgentId).toHaveBeenCalledWith("plain-session", "agent:main:main", ovSessionId);
+    expect(resolveAgentId).toHaveBeenCalledWith("plain-session", strictTestSessionKey("plain-session"), ovSessionId);
   });
 
   it("prefers top-level sessionKey over runtimeContext sessionKey in compact params", async () => {

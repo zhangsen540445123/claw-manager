@@ -117,32 +117,33 @@ function msgTokenEstimate(msg: AgentMessage): number {
   return estimateAgentMessageTokens(msg);
 }
 
-function messageDigest(messages: AgentMessage[], maxCharsPerMsg = 2000): Array<{role: string; content: string; tokens: number; truncated: boolean}> {
+function messageDigest(messages: AgentMessage[]): Array<{role: string; chars: number; tokens: number; contentTypes: string[]}> {
   return messages.map((msg) => {
     const m = msg as Record<string, unknown>;
     const role = String(m.role ?? "unknown");
     const raw = m.content;
     let text: string;
+    const contentTypes: string[] = [];
     if (typeof raw === "string") {
       text = raw;
     } else if (Array.isArray(raw)) {
+      contentTypes.push(...(raw as Record<string, unknown>[]).map((block) => String(block.type ?? "unknown")));
       text = (raw as Record<string, unknown>[])
         .map((b) => {
           if (b.type === "text") return String(b.text ?? "");
-          if (b.type === "toolCall") return `[toolCall: ${String(b.name)}(${JSON.stringify(b.arguments ?? {}).slice(0, 200)})]`;
-          if (b.type === "toolResult") return `[toolResult: ${JSON.stringify(b.content ?? "").slice(0, 200)}]`;
+          if (b.type === "toolCall") return "[toolCall]";
+          if (b.type === "toolResult") return "[toolResult]";
           return `[${String(b.type)}]`;
         })
         .join("\n");
     } else {
       text = JSON.stringify(raw) ?? "";
     }
-    const truncated = text.length > maxCharsPerMsg;
     return {
       role,
-      content: truncated ? text.slice(0, maxCharsPerMsg) + "..." : text,
+      chars: text.length,
       tokens: msgTokenEstimate(msg),
-      truncated,
+      contentTypes: [...new Set(contentTypes)],
     };
   });
 }

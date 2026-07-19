@@ -35,7 +35,7 @@ import { StreamingMarkdownFilter } from "./markdown-filter.js";
 import { sendMessageWeixin } from "./send.js";
 import { WeixinReplyProgressSender } from "./reply-progress-sender.js";
 import { handleSlashCommand } from "./slash-commands.js";
-import { writeOpenVikingSenderHandoff } from "./openviking-handoff.js";
+import { clearWechatOpenVikingTurn, registerWechatOpenVikingTurn, runWithWechatOpenVikingTurn } from "./openviking-handoff.js";
 import { resolveUserAgentIdentity } from "./user-agent-identity.js";
 import {
   ensureWeixinDynamicAgentRoute,
@@ -92,27 +92,28 @@ function describeSenderForLog(senderId: string): string {
 
 async function writeOpenVikingHandoffForTurn(params: {
   sessionKey?: string;
+  agentId?: string;
   openVikingUserId: string;
   log: (msg: string) => void;
   cmTraceId?: string;
+  runId?: string;
 }): Promise<void> {
   const secret = process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "";
   if (!secret || !params.sessionKey || !params.openVikingUserId.trim()) {
-    return;
+    throw new Error("WECHAT_TURN_IDENTITY_MISSING");
   }
-  try {
-    const wrote = await writeOpenVikingSenderHandoff({
-      sessionKey: params.sessionKey,
-      openVikingUserId: params.openVikingUserId,
-      secret,
-      cmTraceId: params.cmTraceId,
-    });
-    if (wrote) {
-      params.log("[openviking] sender handoff written");
-    }
-  } catch (err) {
-    params.log(`[openviking] sender handoff write failed: ${String(err)}`);
+  const wrote = await registerWechatOpenVikingTurn({
+    sessionKey: params.sessionKey,
+    agentId: params.agentId,
+    openVikingUserId: params.openVikingUserId,
+    secret,
+    cmTraceId: params.cmTraceId,
+    runId: params.runId,
+  });
+  if (!wrote) {
+    throw new Error("WECHAT_TURN_IDENTITY_MISSING");
   }
+  params.log("[openviking] turn registered");
 }
 
 export async function reportWechatTrace(params: {
@@ -223,7 +224,7 @@ export async function processOneMessage(
     debugTrace.push(
       "── 收消息 ──",
       `│ seq=${full.seq ?? "?"} msgId=${full.message_id ?? "?"} sender=${describeSenderForLog(full.from_user_id ?? "")}`,
-      `│ body="${textBody.slice(0, 40)}${textBody.length > 40 ? "…" : ""}" (len=${textBody.length}) itemTypes=[${itemTypes}]`,
+      `│ bodyLen=${textBody.length} itemTypes=[${itemTypes}]`,
       `│ sessionId=${full.session_id ?? "?"} contextToken=${full.context_token ? "present" : "none"}`,
     );
   }
@@ -378,9 +379,11 @@ export async function processOneMessage(
   ), senderId);
   await writeOpenVikingHandoffForTurn({
     sessionKey: route.sessionKey,
+    agentId: route.agentId,
     openVikingUserId: senderIdentity.openVikingUserId,
     log: deps.log,
     cmTraceId,
+    runId,
   });
 
   logger.info(
@@ -595,7 +598,7 @@ export async function processOneMessage(
   logger.debug(`dispatchReplyFromConfig: starting agentId=${route.agentId ?? "(none)"}`);
   await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.started", status: "started", requestId: runId });
   try {
-    await deps.channelRuntime.reply.withReplyDispatcher({
+    await runWithWechatOpenVikingTurn(runId, () => deps.channelRuntime.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
         deps.channelRuntime.reply.dispatchReplyFromConfig({
@@ -608,7 +611,7 @@ export async function processOneMessage(
             disableBlockStreaming: true,
           },
         }),
-    });
+    }));
     logger.debug(`dispatchReplyFromConfig: done agentId=${route.agentId ?? "(none)"}`);
     await reportWechatTrace({ traceId: cmTraceId, stage: "openclaw.dispatch.completed", status: "completed", requestId: runId });
   } catch (err) {
@@ -619,6 +622,11 @@ export async function processOneMessage(
     throw err;
   } finally {
     markDispatchIdle();
+    await clearWechatOpenVikingTurn({
+      sessionKey: route.sessionKey,
+      secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "",
+      runId,
+    });
     await replyProgressSender?.finalize();
 
     logger.info(

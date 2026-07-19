@@ -492,7 +492,8 @@ class WechatBindLinkServiceTest {
     verify(applicationEventPublisher).publishEvent(new WechatBindConnectedEvent(
         "inst_1",
         "554603a4df61-im-bot",
-        "wechat-user"
+        "wechat-user",
+        ""
     ));
   }
 
@@ -670,6 +671,12 @@ class WechatBindLinkServiceTest {
     verify(mutationMapper).insertWechatAccount(accountCaptor.capture());
     assertThat(accountCaptor.getValue().getPhone()).isNull();
     assertThat(saved.get().getStatus()).isEqualTo("connected");
+    verify(applicationEventPublisher).publishEvent(new WechatBindConnectedEvent(
+        "inst_1",
+        "554603a4df61-im-bot",
+        "wechat-miniapp-user",
+        "openid_hash_1"
+    ));
   }
 
   @Test

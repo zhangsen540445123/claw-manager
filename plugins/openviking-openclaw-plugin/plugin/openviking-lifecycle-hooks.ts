@@ -41,7 +41,7 @@ export function registerOpenVikingLifecycleHooks(deps: OpenVikingLifecycleHooksD
   deps.api.on("before_reset", async (_event: unknown, ctx?: OpenVikingHookContext) => {
     if (deps.isBypassedSession(ctx)) {
       deps.verboseRoutingInfo(
-        `openviking: bypassing before_reset due to session pattern match (sessionKey=${ctx?.sessionKey ?? "none"}, sessionId=${ctx?.sessionId ?? "none"})`,
+        `openviking: bypassing before_reset due to session pattern match (sessionKeyPresent=${Boolean(ctx?.sessionKey)})`,
       );
       return;
     }

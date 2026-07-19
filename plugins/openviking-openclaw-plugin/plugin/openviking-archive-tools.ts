@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { createHash } from "node:crypto";
 import type { OVMessage } from "../client.js";
 import type { RecallTraceEntry, RecallTraceResult } from "../recall-trace.js";
 import { makeIdentityUnavailableToolResult } from "./openviking-runtime-utils.js";
@@ -79,11 +80,14 @@ async function resolveArchiveClient(
   deps: OpenVikingArchiveToolsDeps,
   ctx: OpenVikingArchiveToolContext,
 ): Promise<OpenVikingArchiveClient | undefined> {
-  if (!deps.getClientForSender) {
-    return deps.getClient();
-  }
+  if (!deps.getClientForSender) return undefined;
   const senderId = deps.extractSenderId?.(ctx);
   return senderId ? deps.getClientForSender(senderId) : undefined;
+}
+
+function hashLogValue(value: unknown): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? createHash("sha256").update(text, "utf8").digest("hex").slice(0, 12) : "none";
 }
 
 export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps): void {
@@ -113,11 +117,6 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
         if (deps.isBypassedSession(ctx)) {
           return deps.makeBypassedToolResult("ov_archive_search");
         }
-        const client = await resolveArchiveClient(deps, ctx);
-        if (!client) {
-          return makeIdentityUnavailableToolResult("ov_archive_search");
-        }
-        deps.rememberSessionAgentId(ctx);
         const sessionId = ctx.sessionId ?? "";
         const sessionKey = ctx.sessionKey ?? "";
         if (!sessionId && !sessionKey) {
@@ -136,9 +135,12 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
             details: { error: "missing_param", param: "query" },
           };
         }
+        const client = await resolveArchiveClient(deps, ctx);
+        if (!client) return makeIdentityUnavailableToolResult("ov_archive_search");
+        deps.rememberSessionAgentId(ctx);
 
         const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        deps.logger?.info?.(`openviking: ov_archive_search query="${query}" escaped="${escapedQuery}" archive=${archiveId ?? "all"} session=${ovSessionId}`);
+        deps.logger?.info?.(`openviking: ov_archive_search queryLength=${query.length} archiveHash=${hashLogValue(archiveId)} sessionHash=${hashLogValue(ovSessionId)}`);
 
         try {
           const agentId = deps.resolveAgentId(ctx.sessionId, ctx.sessionKey);
@@ -256,14 +258,10 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
       if (deps.isBypassedSession(ctx)) {
         return deps.makeBypassedToolResult("ov_archive_expand");
       }
-      const client = await resolveArchiveClient(deps, ctx);
-      if (!client) {
-        return makeIdentityUnavailableToolResult("ov_archive_expand");
-      }
       const session = deps.resolvePluginSessionRouting(ctx);
       const archiveId = String((params as { archiveId?: string }).archiveId ?? "").trim();
       const sessionId = session.sessionId ?? "";
-      deps.logger?.info?.(`openviking: ov_archive_expand invoked (archiveId=${archiveId || "(empty)"}, sessionId=${sessionId || "(empty)"})`);
+      deps.logger?.info?.(`openviking: ov_archive_expand invoked archiveHash=${hashLogValue(archiveId)} sessionHash=${hashLogValue(sessionId)}`);
 
       if (!archiveId) {
         deps.logger?.warn?.("openviking: ov_archive_expand missing archiveId");
@@ -279,6 +277,8 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
           details: { error: "no_session" },
         };
       }
+      const client = await resolveArchiveClient(deps, ctx);
+      if (!client) return makeIdentityUnavailableToolResult("ov_archive_expand");
 
       try {
         const detail = await client.getSessionArchive(
@@ -298,7 +298,7 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
           .map((message) => deps.formatMessage(message))
           .join("\n\n");
 
-        deps.logger?.info?.(`openviking: ov_archive_expand expanded ${detail.archive_id}, messages=${detail.messages.length}, chars=${body.length}, sessionId=${sessionId}`);
+        deps.logger?.info?.(`openviking: ov_archive_expand completed archiveHash=${hashLogValue(detail.archive_id)} messages=${detail.messages.length} chars=${body.length} sessionHash=${hashLogValue(sessionId)}`);
         return {
           content: [{ type: "text", text: `${header}\n${body}` }],
           details: {
@@ -311,7 +311,7 @@ export function registerOpenVikingArchiveTools(deps: OpenVikingArchiveToolsDeps)
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        deps.logger?.warn?.(`openviking: ov_archive_expand failed (archiveId=${archiveId}, sessionId=${sessionId}): ${msg}`);
+        deps.logger?.warn?.(`openviking: ov_archive_expand failed archiveHash=${hashLogValue(archiveId)} sessionHash=${hashLogValue(sessionId)} errorType=${hashLogValue(msg)}`);
         return {
           content: [{ type: "text", text: `Failed to expand ${archiveId}: ${msg}` }],
           details: { error: msg, archiveId, sessionId, ovSessionId: session.ovSessionId },

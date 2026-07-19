@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { OpenVikingClient } from "../client.js";
 import { memoryOpenVikingConfigSchema } from "../config.js";
 import { createMemoryOpenVikingContextEngine } from "../context-engine.js";
+import {
+  strictTestOvSessionId,
+  strictTestSessionKey,
+  useStrictActiveTurnFixtures,
+  withDefaultActiveTurnSession,
+} from "./helpers/active-turn.js";
 
 const cfg = memoryOpenVikingConfigSchema.parse({
   mode: "remote",
@@ -59,7 +65,7 @@ function makeEngine(contextResult: unknown) {
   });
 
   return {
-    engine,
+    engine: withDefaultActiveTurnSession(engine),
     client: client as unknown as { getSessionContext: ReturnType<typeof vi.fn> },
     getClient,
     logger,
@@ -68,6 +74,7 @@ function makeEngine(contextResult: unknown) {
 }
 
 describe("context-engine assemble()", () => {
+  useStrictActiveTurnFixtures();
   it("assembles summary archive and completed tool parts into agent messages", async () => {
     const { engine, client, resolveAgentId } = makeEngine({
       latest_archive_overview: "# Session Summary\nPreviously discussed repository setup.",
@@ -114,8 +121,9 @@ describe("context-engine assemble()", () => {
       tokenBudget: 4096,
     });
 
-    expect(resolveAgentId).toHaveBeenCalledWith("session-1", undefined, "session-1");
-    expect(client.getSessionContext).toHaveBeenCalledWith("session-1", 4096, "agent:session-1");
+    const ovSessionId = strictTestOvSessionId("session-1");
+    expect(resolveAgentId).toHaveBeenCalledWith("session-1", strictTestSessionKey("session-1"), ovSessionId);
+    expect(client.getSessionContext).toHaveBeenCalledWith(ovSessionId, 4096, "agent:session-1");
     expect(result.estimatedTokens).toBe(
       roughEstimate(result.messages) + systemPromptTokens(result.systemPromptAddition),
     );

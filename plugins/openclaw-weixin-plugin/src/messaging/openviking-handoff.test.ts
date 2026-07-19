@@ -5,11 +5,49 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  clearWechatOpenVikingTurn,
   readOpenVikingSenderHandoff,
+  registerWechatOpenVikingTurn,
   writeOpenVikingSenderHandoff,
 } from "./openviking-handoff.js";
 
 describe("OpenViking sender handoff", () => {
+  it("registers and clears a wechat-only active turn", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "wechat-ov-turn-"));
+    try {
+      await registerWechatOpenVikingTurn({
+        stateDir,
+        secret: "identity-secret",
+        sessionKey: "agent:user:wechat:one",
+        agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        cmTraceId: "cmtrace_a",
+        runId: "run-a",
+      });
+      const filePath = path.join(stateDir, "openviking", "active-turns.json");
+      const registered = JSON.parse(await readFile(filePath, "utf8"));
+      expect(Object.values(registered.entries)[0]).toMatchObject({ channel: "wechat", status: "active", runId: "run-a" });
+
+      await clearWechatOpenVikingTurn({ stateDir, secret: "identity-secret", sessionKey: "agent:user:wechat:one", runId: "run-a" });
+      const cleared = JSON.parse(await readFile(filePath, "utf8"));
+      expect(Object.keys(cleared.entries)).toHaveLength(0);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+  it("does not let an older WeChat run clear a newer active turn", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "wechat-ov-turn-race-"));
+    try {
+      const common = { stateDir, secret: "identity-secret", sessionKey: "agent:user:wechat:shared", agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+      await registerWechatOpenVikingTurn({ ...common, runId: "run-old" });
+      await registerWechatOpenVikingTurn({ ...common, runId: "run-new" });
+      expect(await clearWechatOpenVikingTurn({ stateDir, secret: common.secret, sessionKey: common.sessionKey, runId: "run-old" })).toBe(true);
+      const file = JSON.parse(await readFile(path.join(stateDir, "openviking", "active-turns.json"), "utf8"));
+      expect(Object.values(file.entries)).toEqual([expect.objectContaining({ runId: "run-new" })]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
   it("stores the persisted identity for a session without deriving it from the salt", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     try {

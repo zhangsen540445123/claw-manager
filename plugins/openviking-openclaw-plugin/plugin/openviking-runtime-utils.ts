@@ -1,4 +1,5 @@
 import type { RecallResourceType } from "../registries/recall-resource-types.js";
+import { readActiveOpenVikingTurn, readRegisteredOpenVikingTurnChannel } from "../active-turn-identity.js";
 
 export const OPENVIKING_IDENTITY_UNAVAILABLE_MESSAGE =
   "OpenViking user identity is unavailable for this turn.";
@@ -35,19 +36,16 @@ export function boundTraceQuery(query: string, maxChars: number): { query: strin
 
 export function extractToolSenderId(ctx: unknown): string | undefined {
   if (!ctx || typeof ctx !== "object") {
-    return undefined;
+    throw new Error("API_TURN_IDENTITY_MISSING");
   }
   const toolCtx = ctx as Record<string, unknown>;
-  for (const key of ["openVikingUserId", "openvikingUserId"]) {
-    const value = toolCtx[key];
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (/^(?:wx|api)_[0-9a-f]{32}$/.test(trimmed)) {
-        return trimmed;
-      }
-    }
-  }
-  return undefined;
+  const sessionKey = typeof toolCtx.sessionKey === "string" ? toolCtx.sessionKey.trim() : "";
+  const secret = process.env.OPENVIKING_IDENTITY_HASH_SECRET;
+  return readActiveOpenVikingTurn({
+    sessionKey,
+    expectedChannel: readRegisteredOpenVikingTurnChannel({ sessionKey, secret }),
+    secret,
+  }).openVikingUserId;
 }
 
 export function makeIdentityUnavailableToolResult(toolName: string) {

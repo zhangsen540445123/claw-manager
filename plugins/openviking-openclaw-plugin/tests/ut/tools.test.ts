@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,8 @@ import {
 } from "../../plugin/openviking-command-args.js";
 import type { FindResultItem } from "../../client.js";
 import { openClawSessionToOvStorageId } from "../../routing/identity-routing.js";
+import { registerActiveOpenVikingTurn } from "../../active-turn-identity.js";
+
 
 type ToolDef = {
   name: string;
@@ -444,6 +446,26 @@ describe("Tool: memory_recall (registration)", () => {
 });
 
 describe("Tool: memory_store (behavioral)", () => {
+  let activeTurnStateDir = "";
+
+  beforeEach(async () => {
+    activeTurnStateDir = await mkdtemp(join(tmpdir(), "ov-memory-store-turn-"));
+    vi.stubEnv("OPENCLAW_STATE_DIR", activeTurnStateDir);
+    vi.stubEnv("OPENVIKING_IDENTITY_HASH_SECRET", "memory-store-test-secret");
+    await registerActiveOpenVikingTurn({
+      stateDir: activeTurnStateDir,
+      secret: "memory-store-test-secret",
+      channel: "api",
+      sessionKey: "agent:main:main",
+      agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    if (activeTurnStateDir) await rm(activeTurnStateDir, { recursive: true, force: true });
+  });
   it("registers with correct name and description", () => {
     const { tools, api } = setupPlugin();
     contextEnginePlugin.register(api as any);
@@ -455,7 +477,7 @@ describe("Tool: memory_store (behavioral)", () => {
     expect(store!.description).toContain("threshold/commit dependent");
   });
 
-  it("does not use raw requesterSenderId to populate role_id for user writes", async () => {
+  it("uses active Turn identity instead of raw requesterSenderId for user writes", async () => {
     const openVikingTransport = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/api/v1/system/status")) {
         return okResponse({ user: "default" });
@@ -494,7 +516,7 @@ describe("Tool: memory_store (behavioral)", () => {
     const [, init] = messageCall as [string, RequestInit];
     const body = JSON.parse(String(init.body));
     expect(body.role).toBe("user");
-    expect(body.role_id).toBeUndefined();
+    expect(body.role_id).toBe("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   });
 
   it("uses a temporary session by default instead of the current tool session", async () => {
@@ -1951,6 +1973,20 @@ describe("Tool: ov_recall_trace", () => {
   });
 
   it("records archive search traces with displayed archive matches", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "ov-archive-trace-"));
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    const previousSecret = process.env.OPENVIKING_IDENTITY_HASH_SECRET;
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    vi.stubEnv("OPENVIKING_IDENTITY_HASH_SECRET", "archive-trace-secret");
+    await registerActiveOpenVikingTurn({
+      stateDir,
+      secret: "archive-trace-secret",
+      channel: "api",
+      sessionKey: "archive-trace-session-key",
+      agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      requestId: "archive-trace-request",
+    });
     const openVikingTransport = vi.fn(async (url: string) => {
       const requestUrl = new URL(url);
       if (requestUrl.pathname === "/api/v1/search/grep") {
@@ -1969,10 +2005,10 @@ describe("Tool: ov_recall_trace", () => {
     const { factoryTools, api } = setupPlugin(undefined, { traceRecall: true });
     (api as any).openVikingTransport = openVikingTransport;
     contextEnginePlugin.register(api as any);
-    const archiveSearch = factoryTools.get("ov_archive_search")!({ sessionId: "test-session", agentId: "main" });
+    const archiveSearch = factoryTools.get("ov_archive_search")!({ sessionId: "test-session", sessionKey: "archive-trace-session-key", agentId: "main" });
     await archiveSearch.execute("tc-archive", { query: "recall traces" });
 
-    const trace = factoryTools.get("ov_recall_trace")!({ sessionId: "test-session" });
+    const trace = factoryTools.get("ov_recall_trace")!({ sessionId: "test-session", sessionKey: "archive-trace-session-key" });
     const result = await trace.execute("tc-trace", { source: "ov_archive_search", limit: 10 }) as ToolResult;
 
     expect(result.content[0]!.text).toContain("ov_archive_search");
@@ -1983,6 +2019,11 @@ describe("Tool: ov_recall_trace", () => {
     expect(entry.selected).toEqual(expect.arrayContaining([
       expect.objectContaining({ uri: "viking://session/test-session/history/archive_001#L12", displayed: true }),
     ]));
+    await rm(stateDir, { recursive: true, force: true });
+    if (previousStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+    else process.env.OPENCLAW_STATE_DIR = previousStateDir;
+    if (previousSecret === undefined) delete process.env.OPENVIKING_IDENTITY_HASH_SECRET;
+    else process.env.OPENVIKING_IDENTITY_HASH_SECRET = previousSecret;
   });
 });
 

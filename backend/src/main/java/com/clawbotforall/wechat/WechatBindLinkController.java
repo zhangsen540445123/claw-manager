@@ -166,6 +166,14 @@ public class WechatBindLinkController {
     return Map.of("link", bindLinkService.refreshQr(token, RequestOrigins.resolve(request)));
   }
 
+  @PostMapping("/api/public/wechat-bind-links/{token}/agent/retry")
+  public Map<String, Object> retryAgentProvisioning(
+      @PathVariable String token,
+      HttpServletRequest request
+  ) {
+    return Map.of("link", bindLinkService.retryAgentProvisioning(token, RequestOrigins.resolve(request)));
+  }
+
   private static AuthenticatedAdmin requireAdmin(Authentication authentication) {
     if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedAdmin admin)) {
       throw new ApiException(HttpStatus.UNAUTHORIZED, "请先登录。");

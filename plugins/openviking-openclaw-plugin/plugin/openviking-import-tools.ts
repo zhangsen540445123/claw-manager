@@ -55,9 +55,7 @@ async function resolveImportClient(
   deps: OpenVikingImportToolsDeps,
   ctx: OpenVikingImportToolContext,
 ): Promise<OpenVikingImportClient | undefined> {
-  if (!deps.getClientForSender) {
-    return deps.getClient();
-  }
+  if (!deps.getClientForSender) return deps.getClient();
   const senderId = deps.extractSenderId?.(ctx);
   return senderId ? deps.getClientForSender(senderId) : undefined;
 }

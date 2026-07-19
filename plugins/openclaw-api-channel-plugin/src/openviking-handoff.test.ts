@@ -4,10 +4,51 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { readApiOpenVikingHandoff, writeApiOpenVikingHandoff } from "./openviking-handoff.js";
+import {
+  clearApiOpenVikingTurn,
+  readApiOpenVikingHandoff,
+  registerApiOpenVikingTurn,
+  writeApiOpenVikingHandoff,
+} from "./openviking-handoff.js";
 import { writeOpenVikingSenderHandoff } from "../../openclaw-weixin-plugin/src/messaging/openviking-handoff.js";
 
 describe("API OpenViking handoff", () => {
+  it("registers and clears an api-only active turn", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "api-ov-turn-"));
+    try {
+      await registerApiOpenVikingTurn({
+        stateDir,
+        secret: "identity-secret",
+        sessionKey: "agent:user:api:one",
+        agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        cmTraceId: "cmtrace_a",
+        requestId: "request-a",
+      });
+      const filePath = path.join(stateDir, "openviking", "active-turns.json");
+      const registered = JSON.parse(await readFile(filePath, "utf8"));
+      expect(Object.values(registered.entries)[0]).toMatchObject({ channel: "api", status: "active", requestId: "request-a" });
+
+      await clearApiOpenVikingTurn({ stateDir, secret: "identity-secret", sessionKey: "agent:user:api:one", requestId: "request-a" });
+      const cleared = JSON.parse(await readFile(filePath, "utf8"));
+      expect(Object.keys(cleared.entries)).toHaveLength(0);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+  it("does not let an older API request clear a newer active turn", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "api-ov-turn-race-"));
+    try {
+      const common = { stateDir, secret: "identity-secret", sessionKey: "agent:user:api:shared", agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+      await registerApiOpenVikingTurn({ ...common, requestId: "request-old" });
+      await registerApiOpenVikingTurn({ ...common, requestId: "request-new" });
+      expect(await clearApiOpenVikingTurn({ stateDir, secret: common.secret, sessionKey: common.sessionKey, requestId: "request-old" })).toBe(true);
+      const file = JSON.parse(await readFile(path.join(stateDir, "openviking", "active-turns.json"), "utf8"));
+      expect(Object.values(file.entries)).toEqual([expect.objectContaining({ requestId: "request-new" })]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
   it("stores an explicit api user identity without persisting raw session data", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "api-ov-handoff-"));
     try {

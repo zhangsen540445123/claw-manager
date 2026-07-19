@@ -1,9 +1,20 @@
 import { Type } from "@sinclair/typebox";
+import { createHash } from "node:crypto";
 
 import type { CommitSessionResult, FindResultItem } from "../client.js";
 import { clampScore, postProcessMemories } from "../memory-ranking.js";
 import { isMemoryUri } from "../routing/memory-uri.js";
 import { makeIdentityUnavailableToolResult } from "./openviking-runtime-utils.js";
+import { markActiveTurnExplicitMemoryStore } from "../active-turn-identity.js";
+
+function hashLogValue(value: unknown): string {
+  return createHash("sha256").update(String(value ?? ""), "utf8").digest("hex").slice(0, 12);
+}
+
+function errorType(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message.split(/[\s:]/, 1)[0] || error.name;
+  return typeof error === "string" ? error.split(/[\s:]/, 1)[0] || "Error" : "Error";
+}
 
 export type OpenVikingMemoryToolContext = {
   sessionKey?: string;
@@ -71,9 +82,7 @@ async function resolveMemoryClient(
   deps: OpenVikingMemoryToolsDeps,
   ctx: OpenVikingMemoryToolContext,
 ): Promise<OpenVikingMemoryClient | undefined> {
-  if (!deps.getClientForSender) {
-    return deps.getClient();
-  }
+  if (!deps.getClientForSender) return deps.getClient();
   const senderId = deps.extractSenderId(ctx);
   return senderId ? deps.getClientForSender(senderId) : undefined;
 }
@@ -112,7 +121,7 @@ export function registerOpenVikingMemoryTools(deps: OpenVikingMemoryToolsDeps): 
 
         if (deps.logFindRequests) {
           deps.logger.info?.(
-            `openviking: memory_store invoked (textLength=${text?.length ?? 0}, sessionId=${explicitSessionId ?? "auto"})`,
+            `openviking: memory_store invoked textLength=${text?.length ?? 0}, explicitSession=${Boolean(explicitSessionId)}`,
           );
         }
 
@@ -139,8 +148,9 @@ export function registerOpenVikingMemoryTools(deps: OpenVikingMemoryToolsDeps): 
           });
           const memoriesCount = totalCommitMemories(commitResult);
           if (commitResult.status === "failed") {
+            await markActiveTurnExplicitMemoryStore({ sessionKey: ctx.sessionKey, secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET, outcome: "failed" });
             deps.logger.warn(
-              `openviking: memory_store commit failed (sessionId=${sessionId}): ${commitResult.error ?? "unknown"}`,
+              `openviking: memory_store commit failed sessionHash=${hashLogValue(sessionId)}, errorType=${errorType(commitResult.error)}`,
             );
             return {
               content: [{ type: "text", text: `Memory extraction failed for session ${sessionId}: ${commitResult.error ?? "unknown"}` }],
@@ -154,8 +164,9 @@ export function registerOpenVikingMemoryTools(deps: OpenVikingMemoryToolsDeps): 
             };
           }
           if (commitResult.status === "timeout") {
+            await markActiveTurnExplicitMemoryStore({ sessionKey: ctx.sessionKey, secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET, outcome: "pending" });
             deps.logger.warn(
-              `openviking: memory_store commit timed out (sessionId=${sessionId}), task_id=${commitResult.task_id ?? "none"}. Memories may still be extracting in background.`,
+              `openviking: memory_store commit timed out sessionHash=${hashLogValue(sessionId)}, taskPresent=${Boolean(commitResult.task_id)}`,
             );
             return {
               content: [{ type: "text", text: `Memory extraction timed out for session ${sessionId}. It may still complete in the background (task_id=${commitResult.task_id ?? "none"}).` }],
@@ -170,12 +181,13 @@ export function registerOpenVikingMemoryTools(deps: OpenVikingMemoryToolsDeps): 
           }
           if (memoriesCount === 0) {
             deps.logger.warn(
-              `openviking: memory_store committed but 0 memories extracted (sessionId=${sessionId}). ` +
+              `openviking: memory_store committed but 0 memories extracted sessionHash=${hashLogValue(sessionId)}. ` +
                 "Check OpenViking server logs for embedding/extract errors (e.g. 401 API key, or extraction pipeline).",
             );
           } else {
             deps.logger.info?.(`openviking: memory_store committed, memories=${memoriesCount}`);
           }
+          await markActiveTurnExplicitMemoryStore({ sessionKey: ctx.sessionKey, secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET, outcome: "stored" });
           return {
             content: [
               {
@@ -193,7 +205,8 @@ export function registerOpenVikingMemoryTools(deps: OpenVikingMemoryToolsDeps): 
             },
           };
         } catch (err) {
-          deps.logger.warn(`openviking: memory_store failed: ${String(err)}`);
+          await markActiveTurnExplicitMemoryStore({ sessionKey: ctx.sessionKey, secret: process.env.OPENVIKING_IDENTITY_HASH_SECRET, outcome: "failed" });
+          deps.logger.warn(`openviking: memory_store failed errorType=${errorType(err)}`);
           throw err;
         }
       },

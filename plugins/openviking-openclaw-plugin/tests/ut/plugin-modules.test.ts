@@ -600,6 +600,8 @@ describe("plugin module seams", () => {
     const deps = {
       registerTool,
       getClient: async () => ({ grepSessionArchives, getSessionArchive }),
+      getClientForSender: async () => ({ grepSessionArchives, getSessionArchive }),
+      extractSenderId: () => "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       rememberSessionAgentId: vi.fn(),
       toOvSessionId: () => "ov-session-1",
       resolveAgentId: () => "agent-main",

@@ -7,9 +7,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { OpenVikingClient } from "../../client.js";
 import { memoryOpenVikingConfigSchema } from "../../config.js";
 import { createMemoryOpenVikingContextEngine } from "../../context-engine.js";
+import {
+  strictTestOvSessionId,
+  strictTestSessionKey,
+  TEST_OPENVIKING_USER_ID,
+  useStrictActiveTurnFixtures,
+  withDefaultActiveTurnSession,
+} from "../helpers/active-turn.js";
 import { RuntimeQueryConfigStore } from "../../query-config.js";
 import { RecallTraceMemoryStore } from "../../recall-trace.js";
-import { writeOpenVikingSenderHandoff } from "../../sender-handoff.js";
+import { registerActiveOpenVikingTurn } from "../../active-turn-identity.js";
 
 const cfg = memoryOpenVikingConfigSchema.parse({
   mode: "remote",
@@ -91,7 +98,7 @@ function makeEngine(
   });
 
   return {
-    engine,
+    engine: withDefaultActiveTurnSession(engine),
     client: client as unknown as {
       getSessionContext: ReturnType<typeof vi.fn>;
       healthCheck: ReturnType<typeof vi.fn>;
@@ -106,16 +113,21 @@ function makeEngine(
 }
 
 describe("context-engine assemble()", () => {
+  useStrictActiveTurnFixtures([
+    "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
+    "agent:main:cron:nightly:run:1",
+  ]);
   it("uses sender-scoped client from handoff when assemble has no runtimeContext", async () => {
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     process.env.OPENCLAW_STATE_DIR = stateDir;
     try {
-      await writeOpenVikingSenderHandoff({
+      await registerActiveOpenVikingTurn({
         stateDir,
+        channel: "wechat",
         sessionKey: "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
+        agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         secret: "identity-secret",
       });
       const { engine, getClient, getClientForSender } = makeEngine(
@@ -141,12 +153,7 @@ describe("context-engine assemble()", () => {
         messages: [{ role: "user", content: "hello" }],
       });
 
-      expect(getClientForSender).toHaveBeenCalledWith(
-        expect.objectContaining({
-          openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        }),
-      );
+      expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(getClient).not.toHaveBeenCalled();
     } finally {
       if (previousStateDir === undefined) {
@@ -258,7 +265,7 @@ describe("context-engine assemble()", () => {
       expect(result.messages[0]?.content).toContain("Sender scoped memory.");
   });
 
-  it("skips transformContext auto-recall when sender identity is unavailable", async () => {
+  it("fails transformContext when the active Turn identity is unavailable", async () => {
       const { engine, client, getClient, getClientForSender, logger } = makeEngine(
         {
           latest_archive_overview: "unused",
@@ -277,19 +284,17 @@ describe("context-engine assemble()", () => {
         },
       );
 
-      const result = await engine.assemble({
+      await expect(engine.assemble({
         sessionId: "session-transform-no-sender",
         messages: [{ role: "user", content: "what should be remembered?" }],
         runtimeContext: {},
-      });
+        __skipActiveTurnFixture: true,
+      } as any)).rejects.toThrow("API_TURN_IDENTITY_MISSING");
 
-      expect(getClientForSender).toHaveBeenCalledWith(undefined);
+      expect(getClientForSender).not.toHaveBeenCalled();
       expect(getClient).not.toHaveBeenCalled();
       expect(client.find).not.toHaveBeenCalled();
-      expect(result.messages[0]?.content).toBe("what should be remembered?");
-      expect(logger.info).toHaveBeenCalledWith(
-        expect.stringContaining("identity_missing"),
-      );
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("identity_missing"));
   });
 
   it("passes session metadata into auto-recall trace recording during transformContext", async () => {
@@ -331,7 +336,7 @@ describe("context-engine assemble()", () => {
 
       const recorded = traces.query({ turn: "latest", sessionId: "session-transform-trace", limit: 10 }).entries[0]!;
       expect(recorded.sessionId).toBe("session-transform-trace");
-      expect(recorded.ovSessionId).toBe("session-transform-trace");
+      expect(recorded.ovSessionId).toBe(strictTestOvSessionId("session-transform-trace"));
       expect(recorded.agentId).toBe("agent:session-transform-trace");
       expect(recorded.trigger.query).toBe("which language should the gateway plugin use?");
       expect(recorded.resourceTypes).toEqual(["user"]);
@@ -543,13 +548,12 @@ describe("context-engine assemble()", () => {
       availableTools: new Set(),
     });
 
-    expect(resolveAgentId).toHaveBeenCalledWith(
-      "session-main-no-prompt",
-      undefined,
-      "session-main-no-prompt",
-    );
-    expect(client.getSessionContext).toHaveBeenCalledWith(
-      "session-main-no-prompt",
+      const ovSessionId = strictTestOvSessionId("session-main-no-prompt");
+      expect(resolveAgentId).toHaveBeenCalledWith(
+        "session-main-no-prompt", strictTestSessionKey("session-main-no-prompt"), ovSessionId,
+      );
+      expect(client.getSessionContext).toHaveBeenCalledWith(
+        ovSessionId,
       4096,
       "agent:session-main-no-prompt",
     );
@@ -611,8 +615,9 @@ describe("context-engine assemble()", () => {
       tokenBudget: 4096,
     });
 
-    expect(resolveAgentId).toHaveBeenCalledWith("session-1", undefined, "session-1");
-    expect(client.getSessionContext).toHaveBeenCalledWith("session-1", 4096, "agent:session-1");
+    const ovSessionId = strictTestOvSessionId("session-1");
+    expect(resolveAgentId).toHaveBeenCalledWith("session-1", strictTestSessionKey("session-1"), ovSessionId);
+    expect(client.getSessionContext).toHaveBeenCalledWith(ovSessionId, 4096, "agent:session-1");
     expect(result.estimatedTokens).toBe(
       roughEstimate(result.messages) + systemPromptTokens(result.systemPromptAddition),
     );
@@ -663,7 +668,7 @@ describe("context-engine assemble()", () => {
       tokenBudget: 4096,
     });
 
-    expect(client.getSessionContext).toHaveBeenCalledWith("session-new", 4096, "agent:session-new");
+    expect(client.getSessionContext).toHaveBeenCalledWith(strictTestOvSessionId("session-new"), 4096, "agent:session-new");
     expect(result).toEqual({
       messages: liveMessages,
       estimatedTokens: roughEstimate(liveMessages),
@@ -722,7 +727,7 @@ describe("context-engine assemble()", () => {
     expect(getClientForSender).toHaveBeenCalledWith("wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(getClient).not.toHaveBeenCalled();
     expect(client.find).toHaveBeenCalled();
-    expect(client.getSessionContext).toHaveBeenCalledWith("session-new-recall", 4096, "agent:session-new-recall");
+    expect(client.getSessionContext).toHaveBeenCalledWith(strictTestOvSessionId("session-new-recall"), 4096, "agent:session-new-recall");
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.content).toMatch(/^<relevant-memories>/);
     expect(result.messages[0]?.content).toContain("Source: openviking-auto-recall");
@@ -770,7 +775,7 @@ describe("context-engine assemble()", () => {
     expect(getClient).not.toHaveBeenCalled();
     expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-profile-recall");
     expect(client.find).not.toHaveBeenCalled();
-    expect(client.getSessionContext).toHaveBeenCalledWith("session-profile-recall", 4096, "agent:session-profile-recall");
+    expect(client.getSessionContext).toHaveBeenCalledWith(strictTestOvSessionId("session-profile-recall"), 4096, "agent:session-profile-recall");
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.content).toMatch(/^<relevant-memories>/);
     expect(result.messages[0]?.content).toContain("Source: openviking-auto-recall");
@@ -815,7 +820,7 @@ describe("context-engine assemble()", () => {
     expect(client.read).toHaveBeenCalledWith("viking://user/memories/profile.md", "agent:session-codename-prompt");
     expect(client.find).not.toHaveBeenCalled();
     expect(client.getSessionContext).toHaveBeenCalledWith(
-      "session-codename-prompt",
+      strictTestOvSessionId("session-codename-prompt"),
       4096,
       "agent:session-codename-prompt",
     );
@@ -1253,7 +1258,7 @@ describe("context-engine assemble()", () => {
     const getClient = vi.fn().mockRejectedValue(new Error("OV connection refused"));
     const resolveAgentId = vi.fn((_s: string) => "agent");
 
-    const engine = createMemoryOpenVikingContextEngine({
+    const engine = withDefaultActiveTurnSession(createMemoryOpenVikingContextEngine({
       id: "openviking",
       name: "Test",
       version: "test",
@@ -1261,7 +1266,7 @@ describe("context-engine assemble()", () => {
       logger,
       getClient,
       resolveAgentId,
-    });
+    }));
 
     const liveMessages = [
       { role: "user", content: "hello" },

@@ -556,8 +556,13 @@ public class WechatBindLinkService {
     } else {
       markChannelError(account, "微信扫码绑定成功，但通道热启动失败。", "");
     }
+    try {
+      publishConnectedProvisioning(link, accountId);
+    } catch (RuntimeException error) {
+      markFailed(link, "用户 Agent 初始化失败，请重试初始化。");
+      return linkMapper.findByToken(link.getToken());
+    }
     markConnected(link);
-    publishConnectedAfterCommit(link, accountId);
     log.info("新用户微信绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
@@ -608,8 +613,13 @@ public class WechatBindLinkService {
     } else {
       markChannelError(pairedAccount, "老用户重新扫码成功，但通道热启动失败。", "");
     }
+    try {
+      publishConnectedProvisioning(link, expectedAccountId);
+    } catch (RuntimeException error) {
+      markFailed(link, "用户 Agent 初始化失败，请重试初始化。");
+      return linkMapper.findByToken(link.getToken());
+    }
     markConnected(link);
-    publishConnectedAfterCommit(link, expectedAccountId);
     log.info("老用户微信重新绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
@@ -915,37 +925,44 @@ public class WechatBindLinkService {
     );
   }
 
-  private void publishConnectedAfterCommit(WechatBindLinkEntity link, String accountId) {
+  private void publishConnectedProvisioning(WechatBindLinkEntity link, String accountId) {
     String instanceId = defaultString(link.getInstanceId()).trim();
     String normalizedAccountId = defaultString(accountId).trim();
     String wechatUserId = defaultString(link.getScannedWechatUserId()).trim();
     if (instanceId.isBlank() || normalizedAccountId.isBlank() || wechatUserId.isBlank()) {
-      return;
+      throw new ApiException(HttpStatus.CONFLICT, "扫码身份信息不完整，无法初始化用户 Agent。");
     }
-    WechatBindConnectedEvent event = new WechatBindConnectedEvent(instanceId, normalizedAccountId, wechatUserId);
-    Runnable publish = () -> {
-      try {
-        bindEventPublisher.publishEvent(event);
-      } catch (RuntimeException error) {
-        log.warn(
-            "wechatBind.connectedEvent.publishFailed instanceId={} accountHash={} wechatUserHash={} errorType={}",
-            instanceId,
-            WechatLogSanitizer.identityHashPreview(normalizedAccountId),
-            WechatLogSanitizer.identityHashPreview(wechatUserId),
-            error.getClass().getSimpleName()
-        );
-      }
-    };
-    if (TransactionSynchronizationManager.isSynchronizationActive()) {
-      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-        @Override
-        public void afterCommit() {
-          publish.run();
-        }
-      });
-      return;
+    WechatBindConnectedEvent event = new WechatBindConnectedEvent(
+        instanceId,
+        normalizedAccountId,
+        wechatUserId,
+        defaultString(link.getMiniappOpenidHash()).trim()
+    );
+    bindEventPublisher.publishEvent(event);
+  }
+
+  @Transactional
+  public PublicWechatBindLink retryAgentProvisioning(String token, String origin) {
+    WechatBindLinkEntity link = requireLink(token);
+    if (!"failed".equals(link.getStatus())) {
+      throw new ApiException(HttpStatus.CONFLICT, "当前扫码链接不需要重试初始化。");
     }
-    publish.run();
+    String accountId = defaultString(link.getTargetAccountId()).trim();
+    String wechatUserId = defaultString(link.getScannedWechatUserId()).trim();
+    if (accountId.isBlank() || wechatUserId.isBlank() || defaultString(link.getInstanceId()).trim().isBlank()) {
+      throw new ApiException(HttpStatus.CONFLICT, "扫码身份信息不完整，请重新扫码。");
+    }
+    link = markInitializing(link, accountId, wechatUserId, "");
+    publishLink(link, origin);
+    try {
+      publishConnectedProvisioning(link, accountId);
+      markConnected(link);
+    } catch (RuntimeException error) {
+      markFailed(link, "用户 Agent 初始化失败，请稍后重试。");
+    }
+    PublicWechatBindLink result = publicLink(linkMapper.findByToken(token), origin);
+    publishLink(linkMapper.findByToken(token), origin);
+    return result;
   }
 
   private long elapsedSinceStarted(WechatBindLinkEntity link) {

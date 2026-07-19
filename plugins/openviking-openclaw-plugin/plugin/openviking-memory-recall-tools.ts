@@ -119,9 +119,7 @@ async function resolveRecallClient(
   deps: OpenVikingMemoryRecallToolsDeps,
   ctx: OpenVikingMemoryRecallToolContext,
 ): Promise<OpenVikingMemoryRecallClient | undefined> {
-  if (!deps.getClientForSender) {
-    return deps.getClient();
-  }
+  if (!deps.getClientForSender) return deps.getClient();
   const senderId = deps.extractSenderId?.(ctx);
   return senderId ? deps.getClientForSender(senderId) : undefined;
 }
