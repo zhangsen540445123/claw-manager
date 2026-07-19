@@ -93,8 +93,67 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
-        .isEqualTo(5);
+        .isEqualTo(1);
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admins", Long.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'user_agent_identities'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'user_agent_identities'
+              AND non_unique = 0
+              AND index_name IN (
+                'uk_user_agent_identities_wechat_user_id',
+                'uk_user_agent_identities_openviking_user_id'
+              )
+            """,
+        Long.class
+    ))
+        .isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'miniapp_user_bindings'
+              AND column_name = 'agent_id'
+              AND is_nullable = 'YES'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'miniapp_user_bindings'
+              AND column_name = 'agent_id'
+            """,
+        Long.class
+    ))
+        .isGreaterThanOrEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.referential_constraints
+            WHERE constraint_schema = DATABASE()
+              AND table_name = 'miniapp_user_bindings'
+              AND referenced_table_name = 'user_agent_identities'
+            """,
+        Long.class
+    ))
         .isEqualTo(1);
     assertThat(jdbcTemplate.queryForObject(
         """

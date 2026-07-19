@@ -67,7 +67,12 @@ public class OpenClawGatewayRpcService {
       try {
         stopAccount(instance, WECHAT_CHANNEL_ID, accountId);
       } catch (RuntimeException error) {
-        log.warn("OpenClaw channels.stop 失败，将继续 start：instanceId={}, accountId={}, reason={}", instance.getId(), accountId, error.getMessage());
+        log.warn(
+            "OpenClaw channels.stop 失败，将继续 start：instanceId={}, accountHash={}, reason={}",
+            instance.getId(),
+            WechatLogSanitizer.identityHashPreview(accountId),
+            error.getMessage()
+        );
       }
       startAccount(instance, WECHAT_CHANNEL_ID, accountId);
     }

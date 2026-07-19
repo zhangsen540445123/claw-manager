@@ -3,6 +3,7 @@ import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { sendMessage as sendMessageApi } from "../api/api.js";
 import type { WeixinApiOptions } from "../api/api.js";
 import { logger } from "../util/logger.js";
+import { redactIdentity } from "../util/redact.js";
 import { generateId } from "../util/random.js";
 import type { MessageItem, SendMessageReq } from "../api/types.js";
 import { MessageItemType, MessageState, MessageType } from "../api/types.js";
@@ -73,7 +74,7 @@ export async function sendMessageWeixin(params: {
 }): Promise<{ messageId: string }> {
   const { to, text, opts } = params;
   if (!opts.contextToken) {
-    logger.warn(`sendMessageWeixin: contextToken missing for to=${to}, sending without context`);
+    logger.warn(`sendMessageWeixin: contextToken missing for to=${redactIdentity(to)}, sending without context`);
   }
   const clientId = generateClientId();
   const req = buildSendMessageReq({
@@ -91,7 +92,7 @@ export async function sendMessageWeixin(params: {
       body: req,
     });
   } catch (err) {
-    logger.error(`sendMessageWeixin: failed to=${to} clientId=${clientId} err=${String(err)}`);
+    logger.error(`sendMessageWeixin: failed to=${redactIdentity(to)} clientId=${clientId} err=${String(err)}`);
     throw err;
   }
   return { messageId: clientId };
@@ -107,7 +108,7 @@ export async function sendMessageItemWeixin(params: {
 }): Promise<{ messageId: string }> {
   const { to, item, opts } = params;
   if (!opts.contextToken) {
-    logger.warn(`sendMessageItemWeixin: contextToken missing for to=${to}, sending without context`);
+    logger.warn(`sendMessageItemWeixin: contextToken missing for to=${redactIdentity(to)}, sending without context`);
   }
   const clientId = params.clientId ?? generateClientId();
   const req: SendMessageReq = {
@@ -131,7 +132,7 @@ export async function sendMessageItemWeixin(params: {
     });
   } catch (err) {
     logger.error(
-      `${params.label ?? "sendMessageItemWeixin"}: failed to=${to} clientId=${clientId} err=${String(err)}`,
+      `${params.label ?? "sendMessageItemWeixin"}: failed to=${redactIdentity(to)} clientId=${clientId} err=${String(err)}`,
     );
     throw err;
   }
@@ -182,13 +183,13 @@ async function sendMediaItems(params: {
       });
     } catch (err) {
       logger.error(
-        `${label}: failed to=${to} clientId=${lastClientId} err=${String(err)}`,
+        `${label}: failed to=${redactIdentity(to)} clientId=${lastClientId} err=${String(err)}`,
       );
       throw err;
     }
   }
 
-  logger.info(`${label}: success to=${to} clientId=${lastClientId}`);
+  logger.info(`${label}: success to=${redactIdentity(to)} clientId=${lastClientId}`);
   return { messageId: lastClientId };
 }
 
@@ -209,10 +210,10 @@ export async function sendImageMessageWeixin(params: {
 }): Promise<{ messageId: string }> {
   const { to, text, uploaded, opts } = params;
   if (!opts.contextToken) {
-    logger.warn(`sendImageMessageWeixin: contextToken missing for to=${to}, sending without context`);
+    logger.warn(`sendImageMessageWeixin: contextToken missing for to=${redactIdentity(to)}, sending without context`);
   }
   logger.info(
-    `sendImageMessageWeixin: to=${to} filekey=${uploaded.filekey} fileSize=${uploaded.fileSize} aeskey=present`,
+    `sendImageMessageWeixin: to=${redactIdentity(to)} filekey=${uploaded.filekey} fileSize=${uploaded.fileSize} aeskey=present`,
   );
 
   const imageItem: MessageItem = {
@@ -243,7 +244,7 @@ export async function sendVideoMessageWeixin(params: {
 }): Promise<{ messageId: string }> {
   const { to, text, uploaded, opts } = params;
   if (!opts.contextToken) {
-    logger.warn(`sendVideoMessageWeixin: contextToken missing for to=${to}, sending without context`);
+    logger.warn(`sendVideoMessageWeixin: contextToken missing for to=${redactIdentity(to)}, sending without context`);
   }
 
   const videoItem: MessageItem = {
@@ -275,7 +276,7 @@ export async function sendFileMessageWeixin(params: {
 }): Promise<{ messageId: string }> {
   const { to, text, fileName, uploaded, opts } = params;
   if (!opts.contextToken) {
-    logger.warn(`sendFileMessageWeixin: contextToken missing for to=${to}, sending without context`);
+    logger.warn(`sendFileMessageWeixin: contextToken missing for to=${redactIdentity(to)}, sending without context`);
   }
   const fileItem: MessageItem = {
     type: MessageItemType.FILE,

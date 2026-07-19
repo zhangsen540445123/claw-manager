@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   buildApiInboundContext,
   dispatchApiMessage,
-  resolveApiDynamicAgentId,
+  ensureApiUserAgentBinding,
   handleApiAssistantAgentEvent,
   imageRequestIntentReason,
   monitorApiQueue,
@@ -527,7 +527,7 @@ describe("buildApiInboundContext", () => {
     const dispatchReplyFromConfig = vi.fn(async () => {
       await handleApiAssistantAgentEvent({
         stream: "assistant",
-        sessionKey: "agent:main:claw-manager-api:global:direct:api:f9db:conv",
+        sessionKey: "agent:user_f9db8c63722f76a920d852d85f502177:claw-manager-api:global:direct:api:f9db8c63722f76a920d852d85f502177:convhash",
         data: { delta: "你" },
       });
       await deliverReply?.({ text: "你好" });
@@ -562,8 +562,9 @@ describe("buildApiInboundContext", () => {
 
     const result = await dispatchApiMessage({
       requestId: "req-agent-stream",
+      agentId: "user_f9db8c63722f76a920d852d85f502177",
       message: "hello",
-      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
       senderHash: "f9db8c63722f76a920d852d85f502177",
       conversationHash: "convhash",
       cfg: { session: {} } as any,
@@ -632,8 +633,9 @@ describe("buildApiInboundContext", () => {
 
     const result = await dispatchApiMessage({
       requestId: "req-run-id-stream",
+      agentId: "user_f9db8c63722f76a920d852d85f502177",
       message: "hello",
-      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
       senderHash: "f9db8c63722f76a920d852d85f502177",
       conversationHash: "convhash",
       cfg: { session: {} } as any,
@@ -654,17 +656,18 @@ describe("buildApiInboundContext", () => {
 
   it("propagates explicit OpenViking identity and sender fields", () => {
     const ctx = buildApiInboundContext({
+      agentId: "user_0123456789abcdef0123456789abcdef",
       message: "hello",
-      openVikingUserId: "api_0123456789abcdef0123456789abcdef",
+      openVikingUserId: "wx_0123456789abcdef0123456789abcdef",
       senderHash: "0123456789abcdef0123456789abcdef",
       conversationHash: "abcdef0123456789",
     });
 
     expect(ctx.SessionKey).toBe("api:0123456789abcdef0123456789abcdef:abcdef0123456789");
     expect(ctx.From).toBe("api:0123456789abcdef0123456789abcdef");
-    expect(ctx.To).toBe("api:0123456789abcdef0123456789abcdef:abcdef0123456789");
-    expect(ctx.openVikingUserId).toBe("api_0123456789abcdef0123456789abcdef");
-    expect(ctx.openvikingUserId).toBe("api_0123456789abcdef0123456789abcdef");
+    expect(ctx.To).toBe("api:0123456789abcdef0123456789abcdef");
+    expect(ctx.openVikingUserId).toBe("wx_0123456789abcdef0123456789abcdef");
+    expect(ctx.openvikingUserId).toBe("wx_0123456789abcdef0123456789abcdef");
     expect(ctx.SenderId).toBe("api:0123456789abcdef0123456789abcdef");
     expect(ctx.senderId).toBe("api:0123456789abcdef0123456789abcdef");
     expect(ctx.requesterSenderId).toBe("api:0123456789abcdef0123456789abcdef");
@@ -673,6 +676,7 @@ describe("buildApiInboundContext", () => {
   it("rejects missing identity instead of falling back to default user", () => {
     expect(() =>
       buildApiInboundContext({
+        agentId: "user_0123456789abcdef0123456789abcdef",
         message: "hello",
         senderHash: "0123456789abcdef0123456789abcdef",
         conversationHash: "abcdef0123456789",
@@ -700,16 +704,18 @@ describe("buildApiInboundContext", () => {
     await fs.mkdir(requests, { recursive: true });
     await fs.writeFile(path.join(requests, "req-user-a.json"), JSON.stringify({
       requestId: "req-user-a",
+      agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       message: "hello a",
-      openVikingUserId: "api_user_a",
-      senderHash: "user_a",
+      openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       conversationHash: "conv_a",
     }), "utf8");
     await fs.writeFile(path.join(requests, "req-user-b.json"), JSON.stringify({
       requestId: "req-user-b",
+      agentId: "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       message: "hello b",
-      openVikingUserId: "api_user_b",
-      senderHash: "user_b",
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      senderHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       conversationHash: "conv_b",
     }), "utf8");
 
@@ -758,9 +764,10 @@ describe("buildApiInboundContext", () => {
     for (const requestId of ["req-same-user-1", "req-same-user-2"]) {
       await fs.writeFile(path.join(requests, `${requestId}.json`), JSON.stringify({
         requestId,
+        agentId: "user_cccccccccccccccccccccccccccccccc",
         message: "hello",
-        openVikingUserId: "api_same_user",
-        senderHash: "same_user",
+        openVikingUserId: "wx_cccccccccccccccccccccccccccccccc",
+        senderHash: "cccccccccccccccccccccccccccccccc",
         conversationHash: requestId,
       }), "utf8");
     }
@@ -837,8 +844,9 @@ describe("buildApiInboundContext", () => {
 
     await dispatchApiMessage({
       requestId: "req-1",
+      agentId: "user_f9db8c63722f76a920d852d85f502177",
       message: "hello",
-      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
       senderHash: "f9db8c63722f76a920d852d85f502177",
       conversationHash: "convhash",
       cfg: { session: {} } as any,
@@ -850,18 +858,18 @@ describe("buildApiInboundContext", () => {
       expect.stringContaining("api dispatch route"),
     );
     expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("user=api_f9db8c63722f76a920d852d85f502177"),
+      expect.stringContaining("user=wx_f9db8c63722f76a920d852d85f502177"),
     );
     expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("sessionKey=agent:main:claw-manager-api:global:direct:api:f9db:conv"),
+      expect.stringContaining("sessionKey=agent:user_f9db8c63722f76a920d852d85f502177:claw-manager-api:global:direct:api:f9db8c63722f76a920d852d85f502177:convhash"),
     );
   });
 
-  it("creates a per-API-user agent binding before dispatching from the default route", async () => {
+  it("reuses the explicit user agent and adds an API binding before dispatch", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-agent-"));
     vi.stubEnv("OPENCLAW_HOME", home);
     const senderHash = "f9db8c63722f76a920d852d85f502177";
-    const agentId = resolveApiDynamicAgentId(senderHash);
+    const agentId = "user_f9db8c63722f76a920d852d85f502177";
     const initialCfg = {
       session: {},
       channels: { "claw-manager-api": { enabled: true } },
@@ -901,8 +909,9 @@ describe("buildApiInboundContext", () => {
 
     await dispatchApiMessage({
       requestId: "req-dynamic-agent",
+      agentId,
       message: "hello",
-      openVikingUserId: `api_${senderHash}`,
+      openVikingUserId: `wx_${senderHash}`,
       senderHash,
       conversationHash: "convhash",
       cfg: initialCfg,
@@ -919,6 +928,9 @@ describe("buildApiInboundContext", () => {
         id: agentId,
         workspace: path.join(home, `.openclaw`, `workspace-${agentId}`),
         agentDir: path.join(home, `.openclaw`, "agents", agentId, "agent"),
+        tools: {
+          deny: expect.arrayContaining(["write", "edit", "apply_patch", "exec", "process"]),
+        },
       }),
     ]);
     expect(currentCfg.bindings).toEqual([
@@ -929,7 +941,7 @@ describe("buildApiInboundContext", () => {
           accountId: "global",
           peer: {
             kind: "direct",
-            id: `api:${senderHash}:convhash`,
+            id: `api:${senderHash}`,
           },
         },
       }),
@@ -937,7 +949,7 @@ describe("buildApiInboundContext", () => {
     await expect(fs.access(path.join(home, ".openclaw", `workspace-${agentId}`, "BOOTSTRAP.md")))
       .rejects.toThrow();
     await expect(fs.readFile(path.join(home, ".openclaw", `workspace-${agentId}`, "AGENTS.md"), "utf8"))
-      .resolves.toContain("Claw Manager API Agent");
+      .resolves.toContain("Claw Manager User Agent");
     const state = JSON.parse(
       await fs.readFile(path.join(home, ".openclaw", `workspace-${agentId}`, ".openclaw", "workspace-state.json"), "utf8"),
     );
@@ -949,11 +961,13 @@ describe("buildApiInboundContext", () => {
     );
   });
 
-  it("keeps dynamic agent bindings when two API users are created concurrently", async () => {
+  it("keeps explicit user-agent bindings when two API users are created concurrently", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-agent-concurrent-"));
     vi.stubEnv("OPENCLAW_HOME", home);
     const senderA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const senderB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const agentA = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const agentB = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const initialCfg = {
       session: {},
       channels: { "claw-manager-api": { enabled: true } },
@@ -999,8 +1013,9 @@ describe("buildApiInboundContext", () => {
     await Promise.all([
       dispatchApiMessage({
         requestId: "req-dynamic-agent-a",
+        agentId: agentA,
         message: "hello a",
-        openVikingUserId: `api_${senderA}`,
+        openVikingUserId: `wx_${senderA}`,
         senderHash: senderA,
         conversationHash: "convhash",
         cfg: initialCfg,
@@ -1009,8 +1024,9 @@ describe("buildApiInboundContext", () => {
       }),
       dispatchApiMessage({
         requestId: "req-dynamic-agent-b",
+        agentId: agentB,
         message: "hello b",
-        openVikingUserId: `api_${senderB}`,
+        openVikingUserId: `wx_${senderB}`,
         senderHash: senderB,
         conversationHash: "convhash",
         cfg: initialCfg,
@@ -1020,13 +1036,177 @@ describe("buildApiInboundContext", () => {
     ]);
 
     expect(currentCfg.agents.list.map((entry: any) => entry.id).sort()).toEqual([
-      resolveApiDynamicAgentId(senderA),
-      resolveApiDynamicAgentId(senderB),
+      agentA,
+      agentB,
     ].sort());
     expect(currentCfg.bindings.map((entry: any) => entry.agentId).sort()).toEqual([
-      resolveApiDynamicAgentId(senderA),
-      resolveApiDynamicAgentId(senderB),
+      agentA,
+      agentB,
     ].sort());
+  });
+
+  it("uses one API binding while conversations get distinct sessions", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-conversations-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const senderHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let currentCfg: any = { session: {}, agents: { list: [] }, bindings: [] };
+    const recordInboundSession = vi.fn().mockResolvedValue(undefined);
+    const runtime = makeRuntime();
+    runtime.session.recordInboundSession = recordInboundSession;
+    runtime.routing.resolveAgentRoute = vi.fn(({ cfg, peer }) => {
+      const binding = (cfg.bindings ?? []).find((entry: any) => entry.match?.peer?.id === peer.id);
+      return binding
+        ? { agentId: binding.agentId, sessionKey: "binding-session", mainSessionKey: `agent:${binding.agentId}:main` }
+        : { agentId: "main", sessionKey: "agent:main:main", mainSessionKey: "agent:main:main", matchedBy: "default" };
+    });
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result };
+    });
+    const base = {
+      agentId,
+      message: "hello",
+      openVikingUserId: "wx_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      senderHash,
+      cfg: currentCfg,
+      channelRuntime: runtime as any,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+    };
+
+    await dispatchApiMessage({ ...base, requestId: "conversation-a", conversationHash: "conv-a" });
+    await dispatchApiMessage({ ...base, requestId: "conversation-b", conversationHash: "conv-b" });
+
+    expect(currentCfg.bindings).toHaveLength(1);
+    expect(currentCfg.bindings[0].match.peer.id).toBe(`api:${senderHash}`);
+    expect(mutateConfigFile).toHaveBeenCalledTimes(1);
+    expect(recordInboundSession.mock.calls.map(([call]) => call.sessionKey)).toEqual([
+      `agent:${agentId}:claw-manager-api:global:direct:api:${senderHash}:conv-a`,
+      `agent:${agentId}:claw-manager-api:global:direct:api:${senderHash}:conv-b`,
+    ]);
+  });
+
+  it("provisions one user agent idempotently with a WeChat binding", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-ensure-agent-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const presetDir = path.join(home, ".openclaw", "claw-manager");
+    await fs.mkdir(presetDir, { recursive: true });
+    await fs.writeFile(path.join(presetDir, "workspace-preset.json"), JSON.stringify({
+      agentsMd: "# Unified preset agents\n",
+      soulMd: "# Unified preset soul\n",
+      identityMd: "# Unified preset identity\n",
+      toolsMd: "# Unified preset tools\n",
+      heartbeatMd: "# Unified preset heartbeat\n",
+      userMd: "# Unified preset user\n",
+      version: 1,
+    }), "utf8");
+    const agentId = "user_0123456789abcdef0123456789abcdef";
+    const initialCfg = { agents: { list: [] }, bindings: [] } as any;
+    let currentCfg = initialCfg;
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result };
+    });
+    const params = {
+      cfg: initialCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      openVikingUserId: "wx_0123456789abcdef0123456789abcdef",
+      wechatAccountId: "bot-a",
+      wechatPeerId: "wechat-peer-a",
+    };
+
+    await ensureApiUserAgentBinding(params);
+    await ensureApiUserAgentBinding(params);
+
+    expect(currentCfg.agents.list).toHaveLength(1);
+    expect(currentCfg.agents.list[0]).toMatchObject({
+      id: agentId,
+      workspace: path.join(home, ".openclaw", `workspace-${agentId}`),
+      tools: { deny: expect.arrayContaining(["write", "edit", "apply_patch", "exec", "process"]) },
+    });
+    expect(currentCfg.bindings).toEqual([{
+      agentId,
+      match: {
+        channel: "openclaw-weixin",
+        accountId: "bot-a",
+        peer: { kind: "direct", id: "wechat-peer-a" },
+      },
+    }]);
+    await expect(fs.readFile(path.join(home, ".openclaw", `workspace-${agentId}`, "AGENTS.md"), "utf8"))
+      .resolves.toBe("# Unified preset agents\n");
+  });
+
+  it("processes ensure_user_agent queue operations without dispatching a chat", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-ensure-queue-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const root = path.join(home, ".openclaw", "claw-manager-api");
+    await fs.mkdir(path.join(root, "requests"), { recursive: true });
+    await fs.writeFile(path.join(root, "requests", "ensure-1.json"), JSON.stringify({
+      operation: "ensure_user_agent",
+      requestId: "ensure-1",
+      agentId: "user_0123456789abcdef0123456789abcdef",
+      openVikingUserId: "wx_0123456789abcdef0123456789abcdef",
+      wechatAccountId: "bot-a",
+      wechatPeerId: "wechat-peer-a",
+    }), "utf8");
+    let currentCfg: any = { agents: { list: [] }, bindings: [] };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result };
+    });
+    const abortController = new AbortController();
+    const dispatchReplyFromConfig = vi.fn();
+    const monitor = monitorApiQueue({
+      cfg: currentCfg,
+      channelRuntime: makeRuntime({ dispatchReplyFromConfig }) as any,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      abortSignal: abortController.signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    const responsePath = path.join(root, "responses", "ensure-1.json");
+    await waitUntil(async () => fs.access(responsePath).then(() => true, () => false));
+    abortController.abort();
+    await monitor;
+
+    expect(JSON.parse(await fs.readFile(responsePath, "utf8"))).toMatchObject({
+      ok: true,
+      requestId: "ensure-1",
+      operation: "ensure_user_agent",
+      agentId: "user_0123456789abcdef0123456789abcdef",
+    });
+    expect(dispatchReplyFromConfig).not.toHaveBeenCalled();
+    expect(currentCfg.agents.list).toHaveLength(1);
+  });
+
+  it("rejects missing or malformed persisted user identities", async () => {
+    const runtime = makeRuntime();
+    await expect(dispatchApiMessage({
+      requestId: "req-missing-agent",
+      message: "hello",
+      openVikingUserId: "wx_0123456789abcdef0123456789abcdef",
+      senderHash: "0123456789abcdef0123456789abcdef",
+      conversationHash: "convhash",
+      cfg: { session: {} } as any,
+      channelRuntime: runtime as any,
+    })).rejects.toThrow("agentId");
+    await expect(dispatchApiMessage({
+      requestId: "req-invalid-openviking",
+      agentId: "user_0123456789abcdef0123456789abcdef",
+      message: "hello",
+      openVikingUserId: "wx_invalid",
+      senderHash: "0123456789abcdef0123456789abcdef",
+      conversationHash: "convhash",
+      cfg: { session: {} } as any,
+      channelRuntime: runtime as any,
+    })).rejects.toThrow("openVikingUserId");
   });
 
   it("streams delivered reply chunks when assistant agent events are unavailable", async () => {
@@ -1073,8 +1253,9 @@ describe("buildApiInboundContext", () => {
 
     const resultPromise = dispatchApiMessage({
       requestId: "req-stream",
+      agentId: "user_f9db8c63722f76a920d852d85f502177",
       message: "hello",
-      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
       senderHash: "f9db8c63722f76a920d852d85f502177",
       conversationHash: "convhash",
       cfg: { session: {} } as any,
@@ -1122,8 +1303,9 @@ describe("buildApiInboundContext", () => {
 
     const result = await dispatchApiMessage({
       requestId: "req-cumulative-deliver",
+      agentId: "user_f9db8c63722f76a920d852d85f502177",
       message: "hello",
-      openVikingUserId: "api_f9db8c63722f76a920d852d85f502177",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
       senderHash: "f9db8c63722f76a920d852d85f502177",
       conversationHash: "convhash",
       cfg: { session: {} } as any,

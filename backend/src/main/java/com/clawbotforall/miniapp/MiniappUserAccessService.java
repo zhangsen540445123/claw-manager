@@ -4,9 +4,10 @@ import com.clawbotforall.externalapi.ExternalApiIdentity;
 import com.clawbotforall.externalapi.ExternalApiIdentityService;
 import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.openviking.OpenVikingEffectiveSettings;
-import com.clawbotforall.openviking.OpenVikingIdentityService;
 import com.clawbotforall.openviking.OpenVikingSettingsService;
-import com.clawbotforall.openviking.OpenVikingSenderIdentity;
+import com.clawbotforall.useragent.UserAgentIdentityResult;
+import com.clawbotforall.useragent.UserAgentIdentityService;
+import com.clawbotforall.useragent.UserAgentProvisioningService;
 import com.clawbotforall.web.ApiException;
 import com.clawbotforall.wechat.WechatBindLinkEntity;
 import com.clawbotforall.wechat.WechatBindLinkMapper;
@@ -14,17 +15,21 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class MiniappUserAccessService {
   private static final Logger log = LoggerFactory.getLogger(MiniappUserAccessService.class);
   private static final SecureRandom RANDOM = new SecureRandom();
+  private static final Set<String> ACTIVE_SCAN_STATES = Set.of("pending", "waiting_scan", "initializing");
 
   private final MiniappUserBindingMapper bindingMapper;
   private final MiniappUserKeyMapper keyMapper;
@@ -32,7 +37,8 @@ public class MiniappUserAccessService {
   private final ExternalApiIdentityService identityService;
   private final MiniappInstanceService instanceService;
   private final WechatBindLinkMapper bindLinkMapper;
-  private final OpenVikingIdentityService openVikingIdentityService;
+  private final UserAgentIdentityService userAgentIdentityService;
+  private final UserAgentProvisioningService userAgentProvisioningService;
   private final Clock clock;
 
   @Autowired
@@ -43,7 +49,8 @@ public class MiniappUserAccessService {
       ExternalApiIdentityService identityService,
       MiniappInstanceService instanceService,
       WechatBindLinkMapper bindLinkMapper,
-      OpenVikingIdentityService openVikingIdentityService
+      UserAgentIdentityService userAgentIdentityService,
+      UserAgentProvisioningService userAgentProvisioningService
   ) {
     this(
         bindingMapper,
@@ -52,7 +59,8 @@ public class MiniappUserAccessService {
         identityService,
         instanceService,
         bindLinkMapper,
-        openVikingIdentityService,
+        userAgentIdentityService,
+        userAgentProvisioningService,
         Clock.systemUTC()
     );
   }
@@ -63,9 +71,21 @@ public class MiniappUserAccessService {
       OpenVikingSettingsService openVikingSettingsService,
       ExternalApiIdentityService identityService,
       MiniappInstanceService instanceService,
+      WechatBindLinkMapper bindLinkMapper,
+      UserAgentIdentityService userAgentIdentityService,
       Clock clock
   ) {
-    this(bindingMapper, keyMapper, openVikingSettingsService, identityService, instanceService, null, null, clock);
+    this(
+        bindingMapper,
+        keyMapper,
+        openVikingSettingsService,
+        identityService,
+        instanceService,
+        bindLinkMapper,
+        userAgentIdentityService,
+        null,
+        clock
+    );
   }
 
   MiniappUserAccessService(
@@ -75,7 +95,8 @@ public class MiniappUserAccessService {
       ExternalApiIdentityService identityService,
       MiniappInstanceService instanceService,
       WechatBindLinkMapper bindLinkMapper,
-      OpenVikingIdentityService openVikingIdentityService,
+      UserAgentIdentityService userAgentIdentityService,
+      UserAgentProvisioningService userAgentProvisioningService,
       Clock clock
   ) {
     this.bindingMapper = bindingMapper;
@@ -84,7 +105,8 @@ public class MiniappUserAccessService {
     this.identityService = identityService;
     this.instanceService = instanceService;
     this.bindLinkMapper = bindLinkMapper;
-    this.openVikingIdentityService = openVikingIdentityService;
+    this.userAgentIdentityService = userAgentIdentityService;
+    this.userAgentProvisioningService = userAgentProvisioningService;
     this.clock = clock;
   }
 
@@ -92,7 +114,7 @@ public class MiniappUserAccessService {
   public MiniappUserKeyResult createOrGetUserKey(String openid, boolean reset) {
     ExternalApiIdentity identity = resolveOpenid(openid);
     MiniappUserBindingEntity binding = reconcileBinding(identity.openidHash());
-    if (binding == null || !"connected".equals(binding.getBindStatus()) || blank(binding.getOpenvikingUserId())) {
+    if (!completeConnectedIdentity(binding)) {
       throw new ApiException(HttpStatus.CONFLICT, "小程序用户尚未完成微信扫码绑定。");
     }
     MiniappUserKeyEntity existing = keyMapper.findByOpenidHash(identity.openidHash());
@@ -144,15 +166,17 @@ public class MiniappUserAccessService {
       throw new ApiException(HttpStatus.FORBIDDEN, "请求 openid 与用户 key 不匹配。");
     }
     MiniappUserBindingEntity binding = reconcileBinding(key.getOpenidHash());
-    if (binding == null || !"connected".equals(binding.getBindStatus()) || blank(binding.getOpenvikingUserId())) {
+    if (!completeConnectedIdentity(binding)) {
       throw new ApiException(HttpStatus.CONFLICT, "小程序用户尚未完成微信扫码绑定。");
     }
     InstanceEntity instance = instanceService.requireUsableApiInstance(binding.getInstanceId());
+    ensureChatAgentReady(binding);
     keyMapper.updateLastUsed(key.getOpenidHash(), clock.instant().toString());
     return new MiniappChatRoute(
         instance,
         key.getOpenid(),
         key.getOpenidHash(),
+        binding.getAgentId(),
         binding.getOpenvikingUserId(),
         "miniapp:" + key.getOpenidHash()
     );
@@ -172,7 +196,16 @@ public class MiniappUserAccessService {
 
   MiniappUserBindingEntity reconcileBinding(String openidHash) {
     MiniappUserBindingEntity binding = bindingMapper.findByOpenidHash(openidHash);
-    if (binding == null || bindLinkMapper == null || openVikingIdentityService == null) {
+    if (binding == null) {
+      return binding;
+    }
+    if (completeConnectedIdentity(binding)) {
+      return binding;
+    }
+    if ("connected".equals(binding.getBindStatus())) {
+      return binding;
+    }
+    if (!ACTIVE_SCAN_STATES.contains(trim(binding.getBindStatus()))) {
       return binding;
     }
     String token = trim(binding.getCurrentBindToken());
@@ -191,29 +224,113 @@ public class MiniappUserAccessService {
     if (!"connected".equals(link.getStatus()) || blank(link.getScannedWechatUserId())) {
       return binding;
     }
-    OpenVikingSenderIdentity senderIdentity = openVikingIdentityService
-        .resolveSenderIdentity(
-            link.getScannedWechatUserId(),
-            openVikingSettingsService.effectiveSettings().identityHashSecret()
-        )
-        .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "无法派生微信用户 OpenViking 身份。"));
+    UserAgentIdentityResult userIdentity = userAgentIdentityService.resolve(
+        binding.getInstanceId(),
+        link.getScannedWechatUserId()
+    );
     String now = clock.instant().toString();
-    bindingMapper.markConnected(openidHash, link.getScannedWechatUserId(), senderIdentity.openVikingUserId(), now, now);
+    bindingMapper.markConnected(
+        openidHash,
+        link.getScannedWechatUserId(),
+        userIdentity.agentId(),
+        userIdentity.openVikingUserId(),
+        now,
+        now
+    );
     binding.setWechatUserId(link.getScannedWechatUserId());
-    binding.setOpenvikingUserId(senderIdentity.openVikingUserId());
+    binding.setAgentId(userIdentity.agentId());
+    binding.setOpenvikingUserId(userIdentity.openVikingUserId());
     binding.setBindStatus("connected");
     binding.setBoundAt(now);
     binding.setUpdatedAt(now);
+    scheduleProvisioningAfterCommit(
+        binding.getInstanceId(),
+        userIdentity.agentId(),
+        userIdentity.openVikingUserId(),
+        link.getTargetAccountId(),
+        link.getScannedWechatUserId()
+    );
     log.info(
-        "miniapp.binding.identityReady openidHash={} bindToken={} linkStatus={} instanceId={} wechatUserId={} openVikingUserId={}",
+        "miniapp.binding.identityReady openidHash={} bindTokenPresent={} linkStatus={} instanceId={} agentIdPreview={}",
         openidHash,
-        token,
+        token.isBlank() ? "absent" : "present",
         link.getStatus(),
         binding.getInstanceId(),
-        link.getScannedWechatUserId(),
-        senderIdentity.openVikingUserId()
+        agentPreview(userIdentity.agentId())
     );
     return binding;
+  }
+
+  private void ensureChatAgentReady(MiniappUserBindingEntity binding) {
+    if (userAgentProvisioningService == null) {
+      return;
+    }
+    WechatBindLinkEntity link = bindLinkMapper.findByToken(trim(binding.getCurrentBindToken()));
+    if (link == null
+        || !"connected".equals(link.getStatus())
+        || blank(link.getTargetAccountId())
+        || blank(link.getScannedWechatUserId())) {
+      throw new ApiException(HttpStatus.CONFLICT, "用户 Agent 尚未准备完成，请稍后重试。");
+    }
+    try {
+      userAgentProvisioningService.ensure(
+          binding.getInstanceId(),
+          binding.getAgentId(),
+          binding.getOpenvikingUserId(),
+          link.getTargetAccountId(),
+          link.getScannedWechatUserId()
+      );
+    } catch (RuntimeException error) {
+      log.warn(
+          "miniapp.agent.ensureFailed instanceId={} agentIdPreview={} errorType={}",
+          binding.getInstanceId(),
+          agentPreview(binding.getAgentId()),
+          error.getClass().getSimpleName()
+      );
+      throw new ApiException(HttpStatus.CONFLICT, "用户 Agent 尚未准备完成，请稍后重试。");
+    }
+  }
+
+  private void scheduleProvisioningAfterCommit(
+      String instanceId,
+      String agentId,
+      String openVikingUserId,
+      String wechatAccountId,
+      String wechatPeerId
+  ) {
+    if (userAgentProvisioningService == null) {
+      return;
+    }
+    Runnable task = () -> {
+      try {
+        userAgentProvisioningService.ensureAsync(
+            instanceId,
+            agentId,
+            openVikingUserId,
+            wechatAccountId,
+            wechatPeerId
+        );
+      } catch (RuntimeException error) {
+        log.warn(
+            "miniapp.agent.asyncScheduleFailed instanceId={} agentIdPreview={} accountIdPresent={} peerIdPresent={} errorType={}",
+            trim(instanceId),
+            agentPreview(agentId),
+            blank(wechatAccountId) ? "absent" : "present",
+            blank(wechatPeerId) ? "absent" : "present",
+            error.getClass().getSimpleName()
+        );
+      }
+    };
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          task.run();
+        }
+      });
+      return;
+    }
+    task.run();
   }
 
   private static String bearerToken(String authorization) {
@@ -245,7 +362,22 @@ public class MiniappUserAccessService {
     return trim(value).isBlank();
   }
 
+  private static boolean completeConnectedIdentity(MiniappUserBindingEntity binding) {
+    return binding != null
+        && "connected".equals(binding.getBindStatus())
+        && !blank(binding.getAgentId())
+        && !blank(binding.getOpenvikingUserId());
+  }
+
   private static String trim(String value) {
     return value == null ? "" : value.trim();
+  }
+
+  private static String agentPreview(String value) {
+    String normalized = trim(value);
+    if (normalized.length() <= 12) {
+      return normalized.isBlank() ? "-" : normalized;
+    }
+    return normalized.substring(0, 8) + "..." + normalized.substring(normalized.length() - 4);
   }
 }

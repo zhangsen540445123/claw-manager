@@ -6,28 +6,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   readOpenVikingSenderHandoff,
-  resolveOpenVikingSenderIdentity,
   writeOpenVikingSenderHandoff,
 } from "./openviking-handoff.js";
 
 describe("OpenViking sender handoff", () => {
-  it("derives the stable sender hash used by dynamic agents", () => {
-    const first = resolveOpenVikingSenderIdentity("wx_sender_ABC", "identity-secret");
-    const second = resolveOpenVikingSenderIdentity("wx_sender_ABC", "identity-secret");
-
-    expect(first).toEqual(second);
-    expect(first?.senderHash).toMatch(/^[a-f0-9]{32}$/);
-    expect(first?.openVikingUserId).toBe(`wx_${first?.senderHash}`);
-    expect(resolveOpenVikingSenderIdentity("", "identity-secret")).toBeUndefined();
-  });
-
-  it("stores derived identity for a session without persisting the raw sender id", async () => {
+  it("stores the persisted identity for a session without deriving it from the salt", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     try {
       await writeOpenVikingSenderHandoff({
         stateDir,
         sessionKey: "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
-        senderId: "wx_sender_ABC",
+        openVikingUserId: "wx_0123456789abcdef0123456789abcdef",
         secret: "identity-secret",
       });
 
@@ -37,8 +26,8 @@ describe("OpenViking sender handoff", () => {
         secret: "identity-secret",
       });
 
-      expect(handoff?.openVikingUserId).toMatch(/^wx_[a-f0-9]{32}$/);
-      expect(handoff?.senderHash).toMatch(/^[a-f0-9]{32}$/);
+      expect(handoff?.openVikingUserId).toBe("wx_0123456789abcdef0123456789abcdef");
+      expect(handoff?.senderHash).toBe("0123456789abcdef0123456789abcdef");
 
       const raw = await readFile(path.join(stateDir, "openviking", "sender-handoff.json"), "utf8");
       expect(raw).not.toContain("wx_sender_ABC");
@@ -49,19 +38,43 @@ describe("OpenViking sender handoff", () => {
     }
   });
 
-  it("does not write a handoff when sender identity is missing", async () => {
+  it("does not write a handoff when the persisted identity is missing or invalid", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));
     try {
       const wrote = await writeOpenVikingSenderHandoff({
         stateDir,
         sessionKey: "agent:main:openclaw-weixin:bot:direct:someone",
-        senderId: "",
+        openVikingUserId: "wx_invalid",
         secret: "identity-secret",
       });
 
       expect(wrote).toBe(false);
       await expect(readFile(path.join(stateDir, "openviking", "sender-handoff.json"), "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves every session entry during concurrent handoff writes", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-concurrent-"));
+    try {
+      const sessions = Array.from({ length: 12 }, (_, index) => `agent:user:wechat:session-${index}`);
+      await Promise.all(sessions.map((sessionKey, index) => writeOpenVikingSenderHandoff({
+        stateDir,
+        sessionKey,
+        openVikingUserId: `wx_${index.toString(16).padStart(32, "0")}`,
+        secret: "identity-secret",
+      })));
+
+      const entries = await Promise.all(sessions.map((sessionKey) => readOpenVikingSenderHandoff({
+        stateDir,
+        sessionKey,
+        secret: "identity-secret",
+      })));
+      expect(entries).toHaveLength(sessions.length);
+      expect(entries.every(Boolean)).toBe(true);
+      expect(new Set(entries.map((entry) => entry?.openVikingUserId)).size).toBe(sessions.length);
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }

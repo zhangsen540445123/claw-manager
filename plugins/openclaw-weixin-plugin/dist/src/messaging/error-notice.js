@@ -1,4 +1,5 @@
 import { logger } from "../util/logger.js";
+import { redactIdentity } from "../util/redact.js";
 import { sendMessageWeixin } from "./send.js";
 /**
  * Send a plain-text error notice back to the user.
@@ -7,7 +8,7 @@ import { sendMessageWeixin } from "./send.js";
  */
 export async function sendWeixinErrorNotice(params) {
     if (!params.contextToken) {
-        logger.warn(`sendWeixinErrorNotice: no contextToken for to=${params.to}, sending without context`);
+        logger.warn(`sendWeixinErrorNotice: no contextToken for to=${redactIdentity(params.to)}, sending without context`);
     }
     try {
         await sendMessageWeixin({ to: params.to, text: params.message, opts: {
@@ -16,10 +17,10 @@ export async function sendWeixinErrorNotice(params) {
                 contextToken: params.contextToken,
                 ...(params.runId ? { runId: params.runId } : {}),
             } });
-        logger.debug(`sendWeixinErrorNotice: sent to=${params.to}`);
+        logger.debug(`sendWeixinErrorNotice: sent to=${redactIdentity(params.to)}`);
     }
     catch (err) {
-        params.errLog(`[weixin] sendWeixinErrorNotice failed to=${params.to}: ${String(err)}`);
+        params.errLog(`[weixin] sendWeixinErrorNotice failed to=${redactIdentity(params.to)}: ${String(err)}`);
     }
 }
 //# sourceMappingURL=error-notice.js.map

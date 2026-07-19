@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { logger } from "../util/logger.js";
 import { generateId } from "../util/random.js";
+import { redactIdentity } from "../util/redact.js";
 import { MessageItemType } from "../api/types.js";
 import { resolveStateDir } from "../storage/state-dir.js";
 // ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ export function restoreContextTokens(accountId) {
                 count++;
             }
         }
-        logger.info(`restoreContextTokens: restored ${count} tokens for account=${accountId}`);
+        logger.info(`restoreContextTokens: restored ${count} tokens for account=${redactIdentity(accountId)}`);
     }
     catch (err) {
         logger.warn(`restoreContextTokens: failed to read ${filePath}: ${String(err)}`);
@@ -81,7 +82,7 @@ export function clearContextTokensForAccount(accountId) {
     catch (err) {
         logger.warn(`clearContextTokensForAccount: failed to remove ${filePath}: ${String(err)}`);
     }
-    logger.info(`clearContextTokensForAccount: cleared tokens for account=${accountId}`);
+    logger.info(`clearContextTokensForAccount: cleared tokens for account=${redactIdentity(accountId)}`);
 }
 /** Store a context token for a given account+user pair (memory + disk). */
 export function setContextToken(accountId, userId, token) {

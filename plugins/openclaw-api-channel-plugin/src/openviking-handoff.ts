@@ -15,7 +15,7 @@ type HandoffFile = {
   entries: Record<string, ApiOpenVikingHandoff>;
 };
 
-let handoffWriteChain: Promise<void> = Promise.resolve();
+const HANDOFF_WRITE_CHAIN_KEY = Symbol.for("claw-manager.openviking-handoff.write-chain");
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -71,11 +71,15 @@ export async function writeApiOpenVikingHandoff(params: {
   secret?: string;
   cmTraceId?: string;
 }): Promise<boolean> {
-  const write = handoffWriteChain
-    .catch(() => undefined)
-    .then(() => writeApiOpenVikingHandoffLocked(params));
-  handoffWriteChain = write.then(() => undefined, () => undefined);
-  return write;
+  return enqueueSharedHandoffWrite(() => writeApiOpenVikingHandoffLocked(params));
+}
+
+function enqueueSharedHandoffWrite<T>(work: () => Promise<T>): Promise<T> {
+  const shared = globalThis as unknown as Record<PropertyKey, unknown>;
+  const previous = shared[HANDOFF_WRITE_CHAIN_KEY] as Promise<void> | undefined;
+  const run = (previous ?? Promise.resolve()).catch(() => undefined).then(work);
+  shared[HANDOFF_WRITE_CHAIN_KEY] = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 async function writeApiOpenVikingHandoffLocked(params: {

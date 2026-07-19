@@ -245,11 +245,11 @@ public class WechatAccountSyncService {
       return true;
     } catch (IOException error) {
       log.warn(
-          "刷新重复微信原账号凭证失败：sourceInstanceId={}, sourceAccountId={}, targetInstanceId={}, targetAccountId={}, reason={}",
+          "刷新重复微信原账号凭证失败：sourceInstanceId={}, sourceAccountHash={}, targetInstanceId={}, targetAccountHash={}, reason={}",
           sourceInstance.getId(),
-          normalizedSourceAccountId,
+          WechatLogSanitizer.identityHashPreview(normalizedSourceAccountId),
           targetInstanceId,
-          targetAccountId,
+          WechatLogSanitizer.identityHashPreview(targetAccountId),
           error.getMessage()
       );
       return false;

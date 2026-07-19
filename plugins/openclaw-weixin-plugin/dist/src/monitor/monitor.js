@@ -2,6 +2,7 @@ import { getUpdates, classifyFetchError } from "../api/api.js";
 import { WeixinConfigManager } from "../api/config-cache.js";
 import { STALE_TOKEN_ERRCODE, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
 import { processOneMessage } from "../messaging/process-message.js";
+import { redactIdentity } from "../util/redact.js";
 import { getSyncBufFilePath, loadGetUpdatesBuf, saveGetUpdatesBuf } from "../storage/sync-buf.js";
 import { logger } from "../util/logger.js";
 import { redactBody } from "../util/redact.js";
@@ -23,7 +24,7 @@ export async function monitorWeixinProvider(opts) {
         aLog.error(msg);
         throw new Error(msg);
     }
-    log(`weixin monitor started (${baseUrl}, account=${accountId})`);
+    log(`weixin monitor started (${baseUrl}, account=${redactIdentity(accountId)})`);
     aLog.info(`Monitor started: baseUrl=${baseUrl} timeoutMs=${longPollTimeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS}`);
     const syncFilePath = getSyncBufFilePath(accountId);
     aLog.debug(`syncFilePath: ${syncFilePath}`);
@@ -64,7 +65,7 @@ export async function monitorWeixinProvider(opts) {
                 if (isStaleToken) {
                     pauseSession(accountId);
                     const pauseMs = getRemainingPauseMs(accountId);
-                    aLog.error(`getUpdates: token for ${accountId} is stale, pausing all requests for ${Math.ceil(pauseMs / 60_000)} min`);
+                    aLog.error(`getUpdates: token for ${redactIdentity(accountId)} is stale, pausing all requests for ${Math.ceil(pauseMs / 60_000)} min`);
                     consecutiveFailures = 0;
                     await sleep(pauseMs, abortSignal);
                     continue;
@@ -83,16 +84,10 @@ export async function monitorWeixinProvider(opts) {
                 }
                 continue;
             }
-            consecutiveFailures = 0;
             setStatus?.({ accountId, lastEventAt: Date.now() });
-            if (resp.get_updates_buf != null && resp.get_updates_buf !== "") {
-                saveGetUpdatesBuf(syncFilePath, resp.get_updates_buf);
-                getUpdatesBuf = resp.get_updates_buf;
-                aLog.debug(`Saved new get_updates_buf (${getUpdatesBuf.length} bytes)`);
-            }
             const list = resp.msgs ?? [];
             for (const full of list) {
-                aLog.info(`inbound message: from=${full.from_user_id} types=${full.item_list?.map((i) => i.type).join(",") ?? "none"}`);
+                aLog.info(`inbound message: from=${redactIdentity(full.from_user_id)} types=${full.item_list?.map((i) => i.type).join(",") ?? "none"}`);
                 const now = Date.now();
                 setStatus?.({ accountId, lastEventAt: now, lastInboundAt: now });
                 // allowFrom filtering is delegated to processOneMessage via the framework
@@ -112,6 +107,12 @@ export async function monitorWeixinProvider(opts) {
                     errLog,
                 });
             }
+            if (resp.get_updates_buf != null && resp.get_updates_buf !== "") {
+                saveGetUpdatesBuf(syncFilePath, resp.get_updates_buf);
+                getUpdatesBuf = resp.get_updates_buf;
+                aLog.debug(`Saved new get_updates_buf (${getUpdatesBuf.length} bytes)`);
+            }
+            consecutiveFailures = 0;
         }
         catch (err) {
             if (abortSignal?.aborted) {
@@ -135,13 +136,19 @@ export async function monitorWeixinProvider(opts) {
     }
     aLog.info(`Monitor ended`);
 }
-function sleep(ms, signal) {
-    return new Promise((resolve, reject) => {
-        const t = setTimeout(resolve, ms);
-        signal?.addEventListener("abort", () => {
-            clearTimeout(t);
-            reject(new Error("aborted"));
-        }, { once: true });
+export function sleep(ms, signal) {
+    return new Promise((resolve) => {
+        const finish = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", finish);
+            resolve();
+        };
+        const timer = setTimeout(finish, ms);
+        if (signal?.aborted) {
+            finish();
+            return;
+        }
+        signal?.addEventListener("abort", finish, { once: true });
     });
 }
 //# sourceMappingURL=monitor.js.map

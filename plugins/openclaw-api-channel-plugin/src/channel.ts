@@ -9,7 +9,9 @@ import type { ChannelPlugin, OpenClawConfig, PluginRuntime } from "openclaw/plug
 import { writeApiOpenVikingHandoff } from "./openviking-handoff.js";
 
 export type ApiSendMessageParams = {
+  operation?: "chat" | "ensure_user_agent";
   requestId?: string;
+  agentId?: string;
   openVikingUserId?: string;
   openvikingUserId?: string;
   senderHash?: string;
@@ -17,6 +19,8 @@ export type ApiSendMessageParams = {
   conversationId?: string;
   conversationHash?: string;
   message?: string;
+  wechatAccountId?: string;
+  wechatPeerId?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -74,6 +78,8 @@ type ApiConfigRuntime = {
 type ApiQueueResponse = {
   ok: boolean;
   requestId: string;
+  operation?: "chat" | "ensure_user_agent";
+  agentId?: string;
   messageId?: string;
   text?: string;
   error?: string;
@@ -99,7 +105,17 @@ const API_QUEUE_POLL_MS = 200;
 const API_HEARTBEAT_INTERVAL_MS = 1000;
 const API_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 const API_STATUS_FILE = "status.json";
-const API_DYNAMIC_AGENT_PREFIX = "api-";
+const USER_AGENT_ID_PATTERN = /^user_[0-9a-f]{32}$/;
+const OPENVIKING_USER_ID_PATTERN = /^wx_[0-9a-f]{32}$/;
+const REQUIRED_DENIED_TOOLS = ["write", "edit", "apply_patch", "exec", "process"] as const;
+const DEFAULT_USER_AGENT_WORKSPACE_PRESET = {
+  agentsMd: "# Claw Manager User Agent\n\nThis workspace belongs to one user across all connected channels.\n",
+  soulMd: "# SOUL.md - User Agent\n\nBe concise, useful, and do not claim tool success when an operation failed.\n",
+  identityMd: "# IDENTITY.md - User Agent\n\nClaw Manager cross-channel assistant.\n",
+  toolsMd: "# TOOLS.md - User Agent\n\nUse configured tools according to their schemas.\n",
+  heartbeatMd: "<!-- User Agent heartbeat tasks are disabled by default. -->\n",
+  userMd: "# USER.md - User\n\nThis file may be customized by the user and is private to this Agent.\n",
+};
 
 function apiTraceId(requestId: string): string {
   return `cmtrace_${requestId.replaceAll("-", "")}`;
@@ -414,7 +430,7 @@ export function buildApiInboundContext(params: ApiSendMessageParams): ApiMsgCont
     throw new Error("conversationHash is required");
   }
   const from = `api:${senderHash}`;
-  const to = `api:${senderHash}:${conversationHash}`;
+  const to = `api:${senderHash}`;
   return {
     Body: message,
     Text: message,
@@ -437,87 +453,138 @@ export function buildApiInboundContext(params: ApiSendMessageParams): ApiMsgCont
   };
 }
 
-export function resolveApiDynamicAgentId(senderHash: string): string {
-  const normalized = trim(senderHash).toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  if (!normalized) {
-    throw new Error("senderHash is required");
-  }
-  return `${API_DYNAMIC_AGENT_PREFIX}${normalized}`;
-}
-
-async function ensureApiDynamicAgentBinding(params: {
+export async function ensureApiUserAgentBinding(params: {
   cfg: OpenClawConfig;
-  channelRuntime: PluginRuntime["channel"];
   configRuntime?: ApiConfigRuntime;
-  peerId: string;
-  senderHash: string;
+  agentId: string;
+  openVikingUserId: string;
+  apiPeerId?: string;
+  wechatAccountId?: string;
+  wechatPeerId?: string;
   log?: ApiLogSink;
 }): Promise<OpenClawConfig> {
+  const agentId = requireUserAgentId(params.agentId);
+  requireOpenVikingUserId(params.openVikingUserId);
   const current = params.configRuntime?.current?.() ?? params.cfg;
-  const mutateConfigFile = params.configRuntime?.mutateConfigFile;
-  if (!mutateConfigFile) {
-    return current;
-  }
-
-  const agentId = resolveApiDynamicAgentId(params.senderHash);
-  const route = params.channelRuntime.routing.resolveAgentRoute({
-    cfg: current,
-    channel: API_CHANNEL_ID,
-    accountId: API_ACCOUNT_ID,
-    peer: { kind: "direct", id: params.peerId },
-  });
-  const matchedBy = trim((route as Record<string, unknown>).matchedBy);
-  if (route.agentId === agentId || (matchedBy && matchedBy !== "default")) {
-    return current;
-  }
-
   const workspace = resolveHomePath(`~/.openclaw/workspace-${agentId}`);
   const agentDir = resolveHomePath(`~/.openclaw/agents/${agentId}/agent`);
+  const binding = resolveRequestedUserAgentBinding(params);
+  const currentAgents = isRecord(current.agents) && Array.isArray(current.agents.list)
+    ? current.agents.list
+    : [];
+  const currentAgent = currentAgents.find((entry) => isRecord(entry) && entry.id === agentId);
+  const currentBindings = Array.isArray(current.bindings) ? current.bindings : [];
+  if (isRecord(currentAgent) && hasRequiredApiToolPolicy(currentAgent) &&
+      (!binding || currentBindings.some((entry) => isUserAgentBinding(entry, agentId, binding)))) {
+    await ensureApiAgentWorkspace(workspace);
+    return current as OpenClawConfig;
+  }
+  const mutateDraft = async (draft: Record<string, unknown>) => {
+    const agents = isRecord(draft.agents) ? draft.agents : {};
+    const list = Array.isArray(agents.list) ? [...agents.list] : [];
+    const existing = list.find((entry) => isRecord(entry) && entry.id === agentId);
+    await ensureApiAgentWorkspace(workspace);
+    await fs.mkdir(agentDir, { recursive: true });
+
+    const agent: Record<string, unknown> = isRecord(existing) ? { ...existing } : { id: agentId };
+    agent.id = agentId;
+    agent.workspace = workspace;
+    agent.agentDir = agentDir;
+    const tools = isRecord(agent.tools) ? { ...agent.tools } : {};
+    const denied = Array.isArray(tools.deny)
+      ? tools.deny.filter((value): value is string => typeof value === "string")
+      : [];
+    tools.deny = [...new Set([...denied, ...REQUIRED_DENIED_TOOLS])];
+    agent.tools = tools;
+    draft.agents = {
+      ...agents,
+      list: existing
+        ? list.map((entry) => isRecord(entry) && entry.id === agentId ? agent : entry)
+        : [...list, agent],
+    };
+
+    const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
+    const bindingExists = binding
+      ? bindings.some((entry) => isUserAgentBinding(entry, agentId, binding))
+      : true;
+    if (binding && !bindingExists) {
+      bindings.push({ agentId, match: binding });
+    }
+    draft.bindings = bindings;
+    return { agentId, created: !existing, bound: !bindingExists };
+  };
+
+  const mutateConfigFile = params.configRuntime?.mutateConfigFile;
+  if (!mutateConfigFile) {
+    const draft = structuredClone(current) as Record<string, unknown>;
+    await mutateDraft(draft);
+    return draft as OpenClawConfig;
+  }
   await serializeApiDynamicAgentBindingMutation(() => mutateConfigFile({
     base: "runtime",
     afterWrite: { mode: "auto" },
-    mutate: async (draft: Record<string, unknown>) => {
-      const agents = isRecord(draft.agents) ? draft.agents : {};
-      const list = Array.isArray(agents.list) ? [...agents.list] : [];
-      const agentExists = list.some((entry) => isRecord(entry) && entry.id === agentId);
-      if (!agentExists) {
-        await ensureApiAgentWorkspace(workspace);
-        await fs.mkdir(agentDir, { recursive: true });
-        list.push({ id: agentId, workspace, agentDir });
-      }
-      draft.agents = { ...agents, list };
-
-      const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
-      const bindingExists = bindings.some((entry) => {
-        if (!isRecord(entry) || entry.agentId !== agentId || !isRecord(entry.match)) {
-          return false;
-        }
-        const match = entry.match;
-        return match.channel === API_CHANNEL_ID &&
-          match.accountId === API_ACCOUNT_ID &&
-          isRecord(match.peer) &&
-          match.peer.kind === "direct" &&
-          match.peer.id === params.peerId;
-      });
-      if (!bindingExists) {
-        bindings.push({
-          agentId,
-          match: {
-            channel: API_CHANNEL_ID,
-            accountId: API_ACCOUNT_ID,
-            peer: { kind: "direct", id: params.peerId },
-          },
-        });
-        params.log?.info?.(
-          `[${API_ACCOUNT_ID}] api dynamic agent bound agent=${agentId} peer=${params.peerId}`,
-        );
-      }
-      draft.bindings = bindings;
-      return { agentId, created: !agentExists, bound: !bindingExists };
-    },
+    mutate: mutateDraft,
   }));
 
   return params.configRuntime?.current?.() ?? current;
+}
+
+function requireUserAgentId(value?: string): string {
+  const agentId = trim(value);
+  if (!USER_AGENT_ID_PATTERN.test(agentId)) {
+    throw new Error("agentId must match user_<32 lowercase hex>");
+  }
+  return agentId;
+}
+
+function requireOpenVikingUserId(value?: string): string {
+  const openVikingUserId = trim(value);
+  if (!OPENVIKING_USER_ID_PATTERN.test(openVikingUserId)) {
+    throw new Error("openVikingUserId must match wx_<32 lowercase hex>");
+  }
+  return openVikingUserId;
+}
+
+type UserAgentBindingMatch = {
+  channel: string;
+  accountId: string;
+  peer: { kind: "direct"; id: string };
+};
+
+function resolveRequestedUserAgentBinding(params: {
+  apiPeerId?: string;
+  wechatAccountId?: string;
+  wechatPeerId?: string;
+}): UserAgentBindingMatch | undefined {
+  const apiPeerId = trim(params.apiPeerId);
+  if (apiPeerId) {
+    return { channel: API_CHANNEL_ID, accountId: API_ACCOUNT_ID, peer: { kind: "direct", id: apiPeerId } };
+  }
+  const accountId = trim(params.wechatAccountId);
+  const peerId = trim(params.wechatPeerId);
+  if (accountId || peerId) {
+    if (!accountId || !peerId) {
+      throw new Error("wechatAccountId and wechatPeerId must be provided together");
+    }
+    return { channel: "openclaw-weixin", accountId, peer: { kind: "direct", id: peerId } };
+  }
+  return undefined;
+}
+
+function isUserAgentBinding(value: unknown, agentId: string, match: UserAgentBindingMatch): boolean {
+  if (!isRecord(value) || value.agentId !== agentId || !isRecord(value.match)) return false;
+  const candidate = value.match;
+  return candidate.channel === match.channel &&
+    candidate.accountId === match.accountId &&
+    isRecord(candidate.peer) &&
+    candidate.peer.kind === "direct" &&
+    candidate.peer.id === match.peer.id;
+}
+
+function hasRequiredApiToolPolicy(agent: Record<string, unknown>): boolean {
+  const tools = isRecord(agent.tools) ? agent.tools : undefined;
+  const denied = Array.isArray(tools?.deny) ? tools.deny : [];
+  return REQUIRED_DENIED_TOOLS.every((tool) => denied.includes(tool));
 }
 
 async function handleArtifactToolEvent(event: ApiAssistantAgentEvent, state: ApiAgentEventStreamState): Promise<boolean> {
@@ -558,51 +625,36 @@ function serializeApiDynamicAgentBindingMutation<T>(work: () => Promise<T>): Pro
 
 async function ensureApiAgentWorkspace(workspace: string): Promise<void> {
   await fs.mkdir(path.join(workspace, ".openclaw"), { recursive: true });
+  const preset = await loadApiWorkspacePreset();
   const now = new Date().toISOString();
-  await writeFileIfMissing(path.join(workspace, "AGENTS.md"), [
-    "# Claw Manager API Agent",
-    "",
-    "This workspace is dedicated to one external API openid.",
-    "Do not run first-run onboarding.",
-    "Do not use local workspace profile files as cross-user memory.",
-    "For user facts and preferences, rely on sender-scoped OpenViking memories injected into the current turn.",
-    "Answer the current API request directly.",
-    "",
-  ].join("\n"));
-  await writeFileIfMissing(path.join(workspace, "USER.md"), [
-    "# USER.md - API User",
-    "",
-    "No local user profile is stored here.",
-    "Use the sender-scoped OpenViking user memory for this API caller.",
-    "",
-  ].join("\n"));
-  await writeFileIfMissing(path.join(workspace, "SOUL.md"), [
-    "# SOUL.md - API Channel",
-    "",
-    "Be concise, useful, and follow the API request.",
-    "",
-  ].join("\n"));
-  await writeFileIfMissing(path.join(workspace, "TOOLS.md"), [
-    "# TOOLS.md - API Channel",
-    "",
-    "No local tool notes.",
-    "",
-  ].join("\n"));
-  await writeFileIfMissing(path.join(workspace, "IDENTITY.md"), [
-    "# IDENTITY.md - API Channel",
-    "",
-    "Claw Manager API channel assistant.",
-    "",
-  ].join("\n"));
-  await writeFileIfMissing(path.join(workspace, "HEARTBEAT.md"), [
-    "<!-- API channel heartbeat disabled. -->",
-    "",
-  ].join("\n"));
+  await writeFileIfMissing(path.join(workspace, "AGENTS.md"), preset.agentsMd);
+  await writeFileIfMissing(path.join(workspace, "USER.md"), preset.userMd);
+  await writeFileIfMissing(path.join(workspace, "SOUL.md"), preset.soulMd);
+  await writeFileIfMissing(path.join(workspace, "TOOLS.md"), preset.toolsMd);
+  await writeFileIfMissing(path.join(workspace, "IDENTITY.md"), preset.identityMd);
+  await writeFileIfMissing(path.join(workspace, "HEARTBEAT.md"), preset.heartbeatMd);
   await writeFileIfMissing(path.join(workspace, ".openclaw", "workspace-state.json"), JSON.stringify({
     version: 1,
     setupCompletedAt: now,
   }, null, 2));
   await safeUnlink(path.join(workspace, "BOOTSTRAP.md"));
+}
+
+async function loadApiWorkspacePreset(): Promise<typeof DEFAULT_USER_AGENT_WORKSPACE_PRESET> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(
+      resolveHomePath("~/.openclaw/claw-manager/workspace-preset.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    const keys = ["agentsMd", "soulMd", "identityMd", "toolsMd", "heartbeatMd", "userMd"] as const;
+    if (typeof parsed.version === "number" && Number.isInteger(parsed.version) && parsed.version >= 0 &&
+        keys.every((key) => typeof parsed[key] === "string" && trim(parsed[key]).length > 0)) {
+      return Object.fromEntries(keys.map((key) => [key, parsed[key]])) as typeof DEFAULT_USER_AGENT_WORKSPACE_PRESET;
+    }
+  } catch {
+    // Missing or invalid presets must not block user Agent provisioning.
+  }
+  return DEFAULT_USER_AGENT_WORKSPACE_PRESET;
 }
 
 export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promise<{
@@ -617,22 +669,33 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   if (!ctx.cfg) {
     throw new Error("ctx.cfg missing");
   }
+  const agentId = requireUserAgentId(ctx.agentId);
+  const openVikingUserId = requireOpenVikingUserId(ctx.openVikingUserId ?? ctx.openvikingUserId);
   const runtime = ctx.channelRuntime;
   const inbound = buildApiInboundContext(ctx);
-  const cfgForRoute = await ensureApiDynamicAgentBinding({
+  const cfgForRoute = await ensureApiUserAgentBinding({
     cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
-    channelRuntime: runtime,
     configRuntime: ctx.configRuntime,
-    peerId: inbound.To,
-    senderHash: trim(ctx.senderHash),
+    agentId,
+    openVikingUserId,
+    apiPeerId: inbound.To,
     log: ctx.log,
   });
-  const route = runtime.routing.resolveAgentRoute({
+  const resolvedRoute = runtime.routing.resolveAgentRoute({
     cfg: cfgForRoute,
     channel: API_CHANNEL_ID,
     accountId: API_ACCOUNT_ID,
     peer: { kind: "direct", id: inbound.To },
   });
+  const route = {
+    ...resolvedRoute,
+    agentId,
+    sessionKey: `agent:${agentId}:${API_CHANNEL_ID}:${API_ACCOUNT_ID}:direct:${inbound.To}:${trim(ctx.conversationHash)}`,
+    mainSessionKey: `agent:${agentId}:main`,
+    matchedBy: resolvedRoute.agentId === agentId
+      ? (resolvedRoute as Record<string, unknown>).matchedBy
+      : "explicit-user-agent",
+  };
   const sessionKey = route.sessionKey ?? inbound.SessionKey;
   inbound.SessionKey = sessionKey;
   ctx.log?.info?.(
@@ -908,7 +971,8 @@ async function readApiRequestForScheduling(requestPath: string): Promise<ApiSend
 }
 
 function apiRequestUserKey(request: ApiSendMessageParams | undefined, fallback: string): string {
-  return trim(request?.openVikingUserId)
+  return trim(request?.agentId)
+    || trim(request?.openVikingUserId)
     || trim(request?.openvikingUserId)
     || trim(request?.senderHash)
     || `invalid:${fallback}`;
@@ -949,6 +1013,34 @@ async function processApiRequestFile(
     await safeUnlink(streamPath);
     request = JSON.parse(await fs.readFile(processingPath, "utf8")) as ApiSendMessageParams;
     requestId = trim(request.requestId) || requestId;
+    const operation = request.operation ?? "chat";
+    if (operation === "ensure_user_agent") {
+      if (!ctx.cfg) throw new Error("ctx.cfg missing");
+      const agentId = requireUserAgentId(request.agentId);
+      const openVikingUserId = requireOpenVikingUserId(request.openVikingUserId ?? request.openvikingUserId);
+      await ensureApiUserAgentBinding({
+        cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
+        configRuntime: ctx.configRuntime,
+        agentId,
+        openVikingUserId,
+        wechatAccountId: request.wechatAccountId,
+        wechatPeerId: request.wechatPeerId,
+        log: ctx.log,
+      });
+      await writeQueueResponse(responsePath, {
+        ok: true,
+        requestId,
+        operation,
+        agentId,
+        finishedAt: new Date().toISOString(),
+      });
+      ctx.log?.info?.(`[${API_ACCOUNT_ID}] user agent ensured requestId=${requestId} agent=${agentId}`);
+      await safeUnlink(processingPath);
+      return;
+    }
+    if (operation !== "chat") {
+      throw new Error("unsupported operation");
+    }
     const cmTraceId = apiTraceId(requestId);
     await reportApiTrace({ traceId: cmTraceId, requestId, stage: "api.request.received", status: "completed",
       details: {

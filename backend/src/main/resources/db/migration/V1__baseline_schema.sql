@@ -182,10 +182,21 @@ CREATE TABLE IF NOT EXISTS miniapp_request_nonces (
   CONSTRAINT fk_miniapp_request_nonces_client FOREIGN KEY (app_id) REFERENCES miniapp_clients(app_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS user_agent_identities (
+  agent_id VARCHAR(37) PRIMARY KEY,
+  wechat_user_id VARCHAR(255) NOT NULL,
+  openviking_user_id VARCHAR(128) NOT NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  UNIQUE KEY uk_user_agent_identities_wechat_user_id (wechat_user_id),
+  UNIQUE KEY uk_user_agent_identities_openviking_user_id (openviking_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS miniapp_user_bindings (
   openid_hash VARCHAR(64) PRIMARY KEY,
   openid VARCHAR(255) NOT NULL,
   instance_id VARCHAR(64) NOT NULL,
+  agent_id VARCHAR(37) NULL,
   wechat_user_id VARCHAR(255) NULL,
   openviking_user_id VARCHAR(128) NULL,
   bind_status VARCHAR(40) NOT NULL,
@@ -195,9 +206,11 @@ CREATE TABLE IF NOT EXISTS miniapp_user_bindings (
   updated_at VARCHAR(40) NOT NULL,
   INDEX idx_miniapp_user_bindings_openid (openid),
   INDEX idx_miniapp_user_bindings_instance_id (instance_id),
+  INDEX idx_miniapp_user_bindings_agent_id (agent_id),
   INDEX idx_miniapp_user_bindings_wechat_user_id (wechat_user_id),
   INDEX idx_miniapp_user_bindings_openviking_user_id (openviking_user_id),
-  CONSTRAINT fk_miniapp_user_bindings_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE RESTRICT
+  CONSTRAINT fk_miniapp_user_bindings_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_miniapp_user_bindings_agent FOREIGN KEY (agent_id) REFERENCES user_agent_identities(agent_id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS miniapp_user_keys (
@@ -232,4 +245,108 @@ CREATE TABLE IF NOT EXISTS openviking_user_keys (
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   PRIMARY KEY (account_id, openviking_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS skill_repositories (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  repo_url TEXT NOT NULL,
+  branch_name VARCHAR(120) NOT NULL,
+  auth_type VARCHAR(40) NOT NULL,
+  access_token TEXT NULL,
+  token_preview VARCHAR(80) NULL,
+  last_commit_sha VARCHAR(80) NULL,
+  last_pull_status VARCHAR(40) NOT NULL DEFAULT 'never',
+  last_pull_message TEXT NULL,
+  last_pulled_at VARCHAR(40) NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  INDEX idx_skill_repositories_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS skill_definitions (
+  id VARCHAR(64) PRIMARY KEY,
+  repository_id VARCHAR(64) NOT NULL,
+  skill_name VARCHAR(120) NOT NULL,
+  original_name VARCHAR(120) NOT NULL,
+  relative_path VARCHAR(500) NOT NULL,
+  description TEXT NULL,
+  content_hash VARCHAR(128) NOT NULL,
+  warnings JSON NULL,
+  syncable TINYINT(1) NOT NULL DEFAULT 1,
+  last_commit_sha VARCHAR(80) NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  UNIQUE KEY uk_skill_definitions_repo_path (repository_id, relative_path),
+  INDEX idx_skill_definitions_name (skill_name),
+  INDEX idx_skill_definitions_syncable (syncable),
+  CONSTRAINT fk_skill_definitions_repository FOREIGN KEY (repository_id) REFERENCES skill_repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS skill_instance_syncs (
+  instance_id VARCHAR(64) NOT NULL,
+  skill_name VARCHAR(120) NOT NULL,
+  skill_id VARCHAR(64) NULL,
+  repository_id VARCHAR(64) NULL,
+  source_commit_sha VARCHAR(80) NULL,
+  status VARCHAR(40) NOT NULL,
+  message TEXT NULL,
+  synced_at VARCHAR(40) NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  PRIMARY KEY (instance_id, skill_name),
+  INDEX idx_skill_instance_syncs_skill_id (skill_id),
+  INDEX idx_skill_instance_syncs_repository_id (repository_id),
+  CONSTRAINT fk_skill_instance_syncs_instance FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+  CONSTRAINT fk_skill_instance_syncs_skill FOREIGN KEY (skill_id) REFERENCES skill_definitions(id) ON DELETE SET NULL,
+  CONSTRAINT fk_skill_instance_syncs_repository FOREIGN KEY (repository_id) REFERENCES skill_repositories(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS image_generation_settings (
+  id TINYINT PRIMARY KEY,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  provider_id VARCHAR(120) NOT NULL DEFAULT '',
+  model_id VARCHAR(200) NOT NULL DEFAULT '',
+  api_mode VARCHAR(80) NOT NULL DEFAULT '',
+  base_url TEXT NULL,
+  api_key TEXT NULL,
+  provider_config JSON NULL,
+  timeout_ms INT NOT NULL DEFAULT 180000,
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS integration_trace_events (
+  id VARCHAR(64) PRIMARY KEY,
+  trace_id VARCHAR(96) NOT NULL,
+  parent_request_id VARCHAR(128) NOT NULL DEFAULT '',
+  component VARCHAR(64) NOT NULL,
+  stage VARCHAR(120) NOT NULL,
+  status VARCHAR(24) NOT NULL,
+  channel VARCHAR(24) NOT NULL,
+  instance_id VARCHAR(64) NOT NULL DEFAULT '',
+  sender_hash VARCHAR(128) NOT NULL DEFAULT '',
+  session_key_hash VARCHAR(128) NOT NULL DEFAULT '',
+  tool_name VARCHAR(100) NOT NULL DEFAULT '',
+  request_id VARCHAR(128) NOT NULL DEFAULT '',
+  http_status INT NULL,
+  business_code INT NULL,
+  elapsed_ms BIGINT NULL,
+  error_code VARCHAR(80) NOT NULL DEFAULT '',
+  error_message VARCHAR(500) NOT NULL DEFAULT '',
+  detail_json JSON NULL,
+  created_at VARCHAR(40) NOT NULL,
+  INDEX idx_trace_id_created(trace_id, created_at),
+  INDEX idx_trace_filters(instance_id, channel, status, created_at),
+  INDEX idx_trace_created(created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS agent_workspace_presets (
+  id VARCHAR(32) PRIMARY KEY,
+  version INT NOT NULL DEFAULT 0,
+  agents_md MEDIUMTEXT NOT NULL,
+  soul_md MEDIUMTEXT NOT NULL,
+  identity_md MEDIUMTEXT NOT NULL,
+  tools_md MEDIUMTEXT NOT NULL,
+  heartbeat_md MEDIUMTEXT NOT NULL,
+  user_md MEDIUMTEXT NOT NULL,
+  updated_at VARCHAR(40) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -32,6 +32,7 @@ import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -58,6 +59,7 @@ public class WechatBindLinkService {
   private final ObjectMapper objectMapper;
   private final InstanceEventPublisher eventPublisher;
   private final OpenClawGatewayRpcService gatewayRpcService;
+  private final ApplicationEventPublisher bindEventPublisher;
   private final Executor executor;
   private final ConcurrentMap<String, Boolean> qrJobs = new ConcurrentHashMap<>();
 
@@ -72,7 +74,8 @@ public class WechatBindLinkService {
       ClawbotProperties properties,
       ObjectMapper objectMapper,
       InstanceEventPublisher eventPublisher,
-      OpenClawGatewayRpcService gatewayRpcService
+      OpenClawGatewayRpcService gatewayRpcService,
+      ApplicationEventPublisher bindEventPublisher
   ) {
     this(
         linkMapper,
@@ -85,6 +88,7 @@ public class WechatBindLinkService {
         objectMapper,
         eventPublisher,
         gatewayRpcService,
+        bindEventPublisher,
         defaultExecutor()
     );
   }
@@ -102,6 +106,36 @@ public class WechatBindLinkService {
       OpenClawGatewayRpcService gatewayRpcService,
       Executor executor
   ) {
+    this(
+        linkMapper,
+        aggregateMapper,
+        mutationMapper,
+        wechatBindService,
+        accountSyncService,
+        fileService,
+        properties,
+        objectMapper,
+        eventPublisher,
+        gatewayRpcService,
+        ignored -> {},
+        executor
+    );
+  }
+
+  WechatBindLinkService(
+      WechatBindLinkMapper linkMapper,
+      InstanceAggregateMapper aggregateMapper,
+      InstanceMutationMapper mutationMapper,
+      WechatBindService wechatBindService,
+      WechatAccountSyncService accountSyncService,
+      InstanceFileService fileService,
+      ClawbotProperties properties,
+      ObjectMapper objectMapper,
+      InstanceEventPublisher eventPublisher,
+      OpenClawGatewayRpcService gatewayRpcService,
+      ApplicationEventPublisher bindEventPublisher,
+      Executor executor
+  ) {
     this.linkMapper = linkMapper;
     this.aggregateMapper = aggregateMapper;
     this.mutationMapper = mutationMapper;
@@ -112,6 +146,7 @@ public class WechatBindLinkService {
     this.objectMapper = objectMapper;
     this.eventPublisher = eventPublisher;
     this.gatewayRpcService = gatewayRpcService;
+    this.bindEventPublisher = bindEventPublisher;
     this.executor = executor;
   }
 
@@ -412,11 +447,11 @@ public class WechatBindLinkService {
     String expectedAccountId = defaultString(link.getTargetAccountId()).trim();
     if (!expectedAccountId.equals(defaultString(completion.requestedAccountId()).trim())) {
       log.info(
-          "忽略非本链接微信登录完成事件：token={}, expectedAccountId={}, requestedAccountId={}, completedAccountId={}",
-          token,
-          expectedAccountId,
-          defaultString(completion.requestedAccountId()),
-          defaultString(completion.accountId())
+          "忽略非本链接微信登录完成事件：tokenPresent={}, expectedAccountHash={}, requestedAccountHash={}, completedAccountHash={}",
+          WechatLogSanitizer.present(token),
+          WechatLogSanitizer.identityHashPreview(expectedAccountId),
+          WechatLogSanitizer.identityHashPreview(completion.requestedAccountId()),
+          WechatLogSanitizer.identityHashPreview(completion.accountId())
       );
       return;
     }
@@ -522,6 +557,7 @@ public class WechatBindLinkService {
       markChannelError(account, "微信扫码绑定成功，但通道热启动失败。", "");
     }
     markConnected(link);
+    publishConnectedAfterCommit(link, accountId);
     log.info("新用户微信绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
@@ -573,6 +609,7 @@ public class WechatBindLinkService {
       markChannelError(pairedAccount, "老用户重新扫码成功，但通道热启动失败。", "");
     }
     markConnected(link);
+    publishConnectedAfterCommit(link, expectedAccountId);
     log.info("老用户微信重新绑定完成：instanceId={}", instance.getId());
     return linkMapper.findByToken(link.getToken());
   }
@@ -605,9 +642,9 @@ public class WechatBindLinkService {
     } catch (RuntimeException error) {
       markChannelError(account, "原账号微信通道重新激活失败。", error.getMessage());
       log.warn(
-          "重复微信拒绝后热启动原账号失败：instanceId={}, accountId={}, reason={}",
+          "重复微信拒绝后热启动原账号失败：instanceId={}, accountHash={}, reason={}",
           defaultString(account.getInstanceId()),
-          defaultString(account.getAccountId()),
+          WechatLogSanitizer.identityHashPreview(account.getAccountId()),
           error.getMessage()
       );
     }
@@ -622,11 +659,11 @@ public class WechatBindLinkService {
       accountSyncService.refreshAccountCredentialsFromRejectedLogin(sourceInstance, sourceAccountId, existingAccount);
     } catch (RuntimeException error) {
       log.warn(
-          "重复微信拒绝前刷新原账号凭证失败：sourceInstanceId={}, sourceAccountId={}, targetInstanceId={}, targetAccountId={}, reason={}",
+          "重复微信拒绝前刷新原账号凭证失败：sourceInstanceId={}, sourceAccountHash={}, targetInstanceId={}, targetAccountHash={}, reason={}",
           sourceInstance == null ? "" : sourceInstance.getId(),
-          defaultString(sourceAccountId),
+          WechatLogSanitizer.identityHashPreview(sourceAccountId),
           existingAccount == null ? "" : defaultString(existingAccount.getInstanceId()),
-          existingAccount == null ? "" : defaultString(existingAccount.getAccountId()),
+          WechatLogSanitizer.identityHashPreview(existingAccount == null ? "" : existingAccount.getAccountId()),
           error.getMessage()
       );
     }
@@ -638,9 +675,9 @@ public class WechatBindLinkService {
       return true;
     } catch (RuntimeException error) {
       log.warn(
-          "老用户重新绑定后热启动微信通道失败：instanceId={}, accountId={}, reason={}",
+          "老用户重新绑定后热启动微信通道失败：instanceId={}, accountHash={}, reason={}",
           instance.getId(),
-          accountId,
+          WechatLogSanitizer.identityHashPreview(accountId),
           error.getMessage()
       );
       return false;
@@ -867,15 +904,48 @@ public class WechatBindLinkService {
       String openVikingUserId
   ) {
     log.info(
-        "微信扫码链接状态更新：bindToken={}, status={}, instanceId={}, targetAccountId={}, wechatUserId={}, openVikingUserId={}, elapsedMs={}",
-        defaultString(link.getToken()),
+        "微信扫码链接状态更新：bindTokenPresent={}, status={}, instanceId={}, targetAccountHash={}, wechatUserHash={}, openVikingUserHash={}, elapsedMs={}",
+        WechatLogSanitizer.present(link.getToken()),
         status,
         defaultString(link.getInstanceId()),
-        defaultString(accountId),
-        defaultString(wechatUserId),
-        defaultString(openVikingUserId),
+        WechatLogSanitizer.identityHashPreview(accountId),
+        WechatLogSanitizer.identityHashPreview(wechatUserId),
+        WechatLogSanitizer.identityHashPreview(openVikingUserId),
         elapsedSinceStarted(link)
     );
+  }
+
+  private void publishConnectedAfterCommit(WechatBindLinkEntity link, String accountId) {
+    String instanceId = defaultString(link.getInstanceId()).trim();
+    String normalizedAccountId = defaultString(accountId).trim();
+    String wechatUserId = defaultString(link.getScannedWechatUserId()).trim();
+    if (instanceId.isBlank() || normalizedAccountId.isBlank() || wechatUserId.isBlank()) {
+      return;
+    }
+    WechatBindConnectedEvent event = new WechatBindConnectedEvent(instanceId, normalizedAccountId, wechatUserId);
+    Runnable publish = () -> {
+      try {
+        bindEventPublisher.publishEvent(event);
+      } catch (RuntimeException error) {
+        log.warn(
+            "wechatBind.connectedEvent.publishFailed instanceId={} accountHash={} wechatUserHash={} errorType={}",
+            instanceId,
+            WechatLogSanitizer.identityHashPreview(normalizedAccountId),
+            WechatLogSanitizer.identityHashPreview(wechatUserId),
+            error.getClass().getSimpleName()
+        );
+      }
+    };
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          publish.run();
+        }
+      });
+      return;
+    }
+    publish.run();
   }
 
   private long elapsedSinceStarted(WechatBindLinkEntity link) {

@@ -13,11 +13,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.clawbotforall.wechat.PublicWechatBindLink;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -36,15 +42,75 @@ class MiniappExternalControllerTest {
   MiniappUserAccessService userAccessService;
 
   MockMvc mockMvc;
+  Logger controllerLogger;
+  ListAppender<ILoggingEvent> logAppender;
 
   @BeforeEach
   void setUp() {
+    controllerLogger = (Logger) LoggerFactory.getLogger(MiniappExternalController.class);
+    logAppender = new ListAppender<>();
+    logAppender.start();
+    controllerLogger.addAppender(logAppender);
     mockMvc = MockMvcBuilders.standaloneSetup(new MiniappExternalController(
         authService,
         bindingService,
         userAccessService,
         new ObjectMapper()
     )).build();
+  }
+
+  @AfterEach
+  void tearDown() {
+    controllerLogger.detachAppender(logAppender);
+    logAppender.stop();
+  }
+
+  @Test
+  void bindLinkSuccessLogsDoNotExposeRawTokenOrUserIdentities() throws Exception {
+    String rawOpenid = "openid_1";
+    String rawToken = "wbl_sensitive_token";
+    String rawOpenVikingUserId = "wx_sensitive_identity";
+    when(bindingService.createWechatBindLink(rawOpenid, "")).thenReturn(new MiniappBindLinkResult(
+        rawOpenid,
+        rawToken,
+        "waiting_scan",
+        "inst_1",
+        rawOpenVikingUserId,
+        false,
+        null
+    ));
+    when(bindingService.getBindLink(rawToken, "")).thenReturn(new MiniappBindLinkResult(
+        rawOpenid,
+        rawToken,
+        "connected",
+        "inst_1",
+        rawOpenVikingUserId,
+        true,
+        null
+    ));
+
+    mockMvc.perform(post("/api/external/miniapp/wechat-bind-links")
+            .contentType(MediaType.APPLICATION_JSON)
+            .header("X-CM-App-Id", "miniapp_main")
+            .header("X-CM-Timestamp", "1783159200000")
+            .header("X-CM-Nonce", "nonce_log_1")
+            .header("X-CM-Signature", "signature")
+            .content("{\"openid\":\"openid_1\"}"))
+        .andExpect(status().isOk());
+    mockMvc.perform(get("/api/external/miniapp/wechat-bind-links/" + rawToken)
+            .header("X-CM-App-Id", "miniapp_main")
+            .header("X-CM-Timestamp", "1783159200000")
+            .header("X-CM-Nonce", "nonce_log_2")
+            .header("X-CM-Signature", "signature"))
+        .andExpect(status().isOk());
+
+    List<String> messages = logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+    assertThat(messages).allSatisfy(message -> {
+      assertThat(message).doesNotContain(rawOpenid);
+      assertThat(message).doesNotContain(rawToken);
+      assertThat(message).doesNotContain(rawOpenVikingUserId);
+    });
+    assertThat(messages).anySatisfy(message -> assertThat(message).contains("bindTokenPresent=present"));
   }
 
   @Test

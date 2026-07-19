@@ -3,6 +3,7 @@ import path from "node:path";
 import { withFileLock } from "openclaw/plugin-sdk/infra-runtime";
 import { resolveStateDir } from "../storage/state-dir.js";
 import { logger } from "../util/logger.js";
+import { redactIdentity } from "../util/redact.js";
 /**
  * Resolve the framework credentials directory (mirrors core resolveOAuthDir).
  * Path: $OPENCLAW_OAUTH_DIR || $OPENCLAW_STATE_DIR/credentials || ~/.openclaw/credentials
@@ -97,7 +98,7 @@ export async function registerUserInFrameworkStore(params) {
         }
         content.allowFrom.push(trimmedUserId);
         fs.writeFileSync(filePath, JSON.stringify(content, null, 2), "utf-8");
-        logger.info(`registerUserInFrameworkStore: added userId=${trimmedUserId} accountId=${accountId} path=${filePath}`);
+        logger.info(`registerUserInFrameworkStore: added userId=${redactIdentity(trimmedUserId)} accountId=${redactIdentity(accountId)}`);
         return { changed: true };
     });
 }

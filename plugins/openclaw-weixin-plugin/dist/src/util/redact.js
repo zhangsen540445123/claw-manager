@@ -22,6 +22,9 @@ export function redactToken(token, prefixLen = DEFAULT_TOKEN_PREFIX_LEN) {
         return `****(len=${token.length})`;
     return `${token.slice(0, prefixLen)}…(len=${token.length})`;
 }
+export function redactIdentity(value) {
+    return value?.trim() ? "present" : "missing";
+}
 /** Field names whose values should be masked in logged JSON bodies. */
 const SENSITIVE_FIELDS = /\b(context_token|bot_token|token|authorization|Authorization)\b/;
 /**

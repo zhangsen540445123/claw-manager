@@ -7,6 +7,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { resolveStateDir } from "../storage/state-dir.js";
 import { resolveFrameworkAllowFromPath } from "./pairing.js";
 import { logger } from "../util/logger.js";
+import { redactIdentity } from "../util/redact.js";
 
 export const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 export const CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
@@ -97,7 +98,7 @@ export function clearStaleAccountsForUserId(
     if (id === currentAccountId) continue;
     const data = loadWeixinAccount(id);
     if (data?.userId?.trim() === userId) {
-      logger.info(`clearStaleAccountsForUserId: removing stale account=${id} (same userId=${userId})`);
+      logger.info(`clearStaleAccountsForUserId: removing stale account=${redactIdentity(id)} (same userId=${redactIdentity(userId)})`);
       onClearContextTokens?.(id);
       clearWeixinAccount(id);
       unregisterWeixinAccountId(id);

@@ -5,6 +5,7 @@
     <id property="openidHash" column="openid_hash"/>
     <result property="openid" column="openid"/>
     <result property="instanceId" column="instance_id"/>
+    <result property="agentId" column="agent_id"/>
     <result property="wechatUserId" column="wechat_user_id"/>
     <result property="openvikingUserId" column="openviking_user_id"/>
     <result property="bindStatus" column="bind_status"/>
@@ -55,10 +56,10 @@
 
   <insert id="insert" parameterType="com.clawbotforall.miniapp.MiniappUserBindingEntity">
     INSERT INTO miniapp_user_bindings
-      (openid_hash, openid, instance_id, wechat_user_id, openviking_user_id, bind_status,
+      (openid_hash, openid, instance_id, agent_id, wechat_user_id, openviking_user_id, bind_status,
        current_bind_token, bound_at, created_at, updated_at)
     VALUES
-      (#{openidHash}, #{openid}, #{instanceId}, #{wechatUserId}, #{openvikingUserId}, #{bindStatus},
+      (#{openidHash}, #{openid}, #{instanceId}, #{agentId}, #{wechatUserId}, #{openvikingUserId}, #{bindStatus},
        #{currentBindToken}, #{boundAt}, #{createdAt}, #{updatedAt})
   </insert>
 
@@ -73,6 +74,7 @@
   <update id="markConnected">
     UPDATE miniapp_user_bindings
     SET wechat_user_id = #{wechatUserId},
+        agent_id = #{agentId},
         openviking_user_id = #{openvikingUserId},
         bind_status = 'connected',
         bound_at = #{boundAt},

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.useragent.UserAgentIdentityMapper">
+  <resultMap id="UserAgentIdentityMap" type="com.clawbotforall.useragent.UserAgentIdentityEntity">
+    <id property="agentId" column="agent_id"/>
+    <result property="wechatUserId" column="wechat_user_id"/>
+    <result property="openvikingUserId" column="openviking_user_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <select id="findByWechatUserId" resultMap="UserAgentIdentityMap">
+    SELECT agent_id, wechat_user_id, openviking_user_id, created_at, updated_at
+    FROM user_agent_identities
+    WHERE wechat_user_id = #{wechatUserId}
+    LIMIT 1
+  </select>
+
+  <select id="findByWechatUserIdForUpdate" resultMap="UserAgentIdentityMap">
+    SELECT agent_id, wechat_user_id, openviking_user_id, created_at, updated_at
+    FROM user_agent_identities
+    WHERE wechat_user_id = #{wechatUserId}
+    LIMIT 1
+    FOR UPDATE
+  </select>
+
+  <insert id="insert" parameterType="com.clawbotforall.useragent.UserAgentIdentityEntity">
+    INSERT INTO user_agent_identities
+      (agent_id, wechat_user_id, openviking_user_id, created_at, updated_at)
+    VALUES
+      (#{agentId}, #{wechatUserId}, #{openvikingUserId}, #{createdAt}, #{updatedAt})
+  </insert>
+</mapper>

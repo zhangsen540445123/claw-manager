@@ -25,6 +25,7 @@ public interface MiniappUserBindingMapper {
   int markConnected(
       @Param("openidHash") String openidHash,
       @Param("wechatUserId") String wechatUserId,
+      @Param("agentId") String agentId,
       @Param("openvikingUserId") String openvikingUserId,
       @Param("boundAt") String boundAt,
       @Param("updatedAt") String updatedAt

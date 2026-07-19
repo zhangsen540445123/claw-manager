@@ -2,6 +2,7 @@ package com.clawbotforall.miniapp;
 
 import com.clawbotforall.web.ApiException;
 import com.clawbotforall.web.ExternalRequestIds;
+import com.clawbotforall.wechat.WechatLogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -56,24 +57,24 @@ public class MiniappExternalController {
       CreateBindLinkRequest payload = read(raw, CreateBindLinkRequest.class);
       MiniappBindLinkResult result = bindingService.createWechatBindLink(payload.openid(), origin(request));
       log.info(
-          "miniapp.bindLink.create success cmRequestId={} appId={} openidPreview={} bindToken={} status={} instanceId={} openVikingUserId={} elapsedMs={}",
+          "miniapp.bindLink.create success cmRequestId={} appId={} openidHash={} bindTokenPresent={} status={} instanceId={} openVikingUserHash={} elapsedMs={}",
           cmRequestId,
           safe(appId),
-          preview(payload.openid()),
-          safe(result.bindToken()),
+          WechatLogSanitizer.identityHashPreview(payload.openid()),
+          WechatLogSanitizer.present(result.bindToken()),
           safe(result.status()),
           safe(result.instanceId()),
-          safe(result.openVikingUserId()),
+          WechatLogSanitizer.identityHashPreview(result.openVikingUserId()),
           elapsedMs(startedAt)
       );
       return Map.of("binding", publicBinding(result));
     } catch (RuntimeException error) {
       log.warn(
-          "miniapp.bindLink.create failed cmRequestId={} appId={} elapsedMs={} error={}",
+          "miniapp.bindLink.create failed cmRequestId={} appId={} elapsedMs={} errorType={}",
           cmRequestId,
           safe(appId),
           elapsedMs(startedAt),
-          errorMessage(error)
+          error.getClass().getSimpleName()
       );
       throw error;
     }
@@ -95,24 +96,24 @@ public class MiniappExternalController {
       authService.requireAuthorized(request.getMethod(), pathWithQuery(request), "", new MiniappHmacHeaders(appId, timestamp, nonce, signature));
       MiniappBindLinkResult result = bindingService.getBindLink(token, origin(request));
       log.info(
-          "miniapp.bindLink.get success cmRequestId={} appId={} bindToken={} status={} instanceId={} openVikingUserId={} elapsedMs={}",
+          "miniapp.bindLink.get success cmRequestId={} appId={} bindTokenPresent={} status={} instanceId={} openVikingUserHash={} elapsedMs={}",
           cmRequestId,
           safe(appId),
-          safe(result.bindToken()),
+          WechatLogSanitizer.present(result.bindToken()),
           safe(result.status()),
           safe(result.instanceId()),
-          safe(result.openVikingUserId()),
+          WechatLogSanitizer.identityHashPreview(result.openVikingUserId()),
           elapsedMs(startedAt)
       );
       return Map.of("binding", publicBinding(result));
     } catch (RuntimeException error) {
       log.warn(
-          "miniapp.bindLink.get failed cmRequestId={} appId={} bindToken={} elapsedMs={} error={}",
+          "miniapp.bindLink.get failed cmRequestId={} appId={} bindTokenPresent={} elapsedMs={} errorType={}",
           cmRequestId,
           safe(appId),
-          safe(token),
+          WechatLogSanitizer.present(token),
           elapsedMs(startedAt),
-          errorMessage(error)
+          error.getClass().getSimpleName()
       );
       throw error;
     }
@@ -136,24 +137,24 @@ public class MiniappExternalController {
       UserKeyRequest payload = read(raw, UserKeyRequest.class);
       MiniappUserKeyResult result = userAccessService.createOrGetUserKey(payload.openid(), payload.reset());
       log.info(
-          "miniapp.userKey.create success cmRequestId={} appId={} openidPreview={} keyPreview={} created={} instanceId={} openVikingUserId={} elapsedMs={}",
+          "miniapp.userKey.create success cmRequestId={} appId={} openidHash={} key={} created={} instanceId={} openVikingUserHash={} elapsedMs={}",
           cmRequestId,
           safe(appId),
-          preview(payload.openid()),
-          safe(result.keyPreview()),
+          WechatLogSanitizer.identityHashPreview(payload.openid()),
+          WechatLogSanitizer.present(result.keyPreview()),
           result.created(),
           safe(result.instanceId()),
-          safe(result.openVikingUserId()),
+          WechatLogSanitizer.identityHashPreview(result.openVikingUserId()),
           elapsedMs(startedAt)
       );
       return Map.of("userKey", publicUserKey(result));
     } catch (RuntimeException error) {
       log.warn(
-          "miniapp.userKey.create failed cmRequestId={} appId={} elapsedMs={} error={}",
+          "miniapp.userKey.create failed cmRequestId={} appId={} elapsedMs={} errorType={}",
           cmRequestId,
           safe(appId),
           elapsedMs(startedAt),
-          errorMessage(error)
+          error.getClass().getSimpleName()
       );
       throw error;
     }
@@ -221,22 +222,9 @@ public class MiniappExternalController {
     return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000L);
   }
 
-  private static String preview(String value) {
-    String normalized = defaultString(value).trim();
-    if (normalized.length() <= 10) {
-      return normalized;
-    }
-    return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
-  }
-
   private static String safe(String value) {
     String normalized = defaultString(value).trim();
     return normalized.isBlank() ? "-" : normalized;
-  }
-
-  private static String errorMessage(Throwable error) {
-    String message = error.getMessage();
-    return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
   }
 
   public record CreateBindLinkRequest(String openid) {}

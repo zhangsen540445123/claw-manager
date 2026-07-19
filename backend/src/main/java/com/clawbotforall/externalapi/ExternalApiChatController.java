@@ -4,6 +4,7 @@ import com.clawbotforall.web.ApiException;
 import com.clawbotforall.web.ExternalRequestIds;
 import com.clawbotforall.miniapp.MiniappChatRoute;
 import com.clawbotforall.miniapp.MiniappUserAccessService;
+import com.clawbotforall.wechat.WechatLogSanitizer;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -104,13 +105,13 @@ public class ExternalApiChatController {
       conversationId = trim(payload.conversationId()).isBlank() ? "default" : trim(payload.conversationId());
       conversationHash = userAccessService.conversationHash(conversationId);
       log.info(
-          "external.chat.accepted cmRequestId={} chatRequestId={} openidPreview={} senderHash={} instanceId={} openVikingUserId={} conversationId={} metadataSource={} messageLength={} elapsedMs={}",
+          "external.chat.accepted cmRequestId={} chatRequestId={} openidHash={} senderHash={} instanceId={} openVikingUserHash={} conversationId={} metadataSource={} messageLength={} elapsedMs={}",
           cmRequestId,
           requestId,
-          preview(route.openid()),
+          WechatLogSanitizer.identityHashPreview(route.openid()),
           safe(route.openidHash()),
           route.instance().getId(),
-          safe(route.openvikingUserId()),
+          WechatLogSanitizer.identityHashPreview(route.openvikingUserId()),
           safe(conversationId),
           metadataSource(payload.metadata()),
           message.length(),
@@ -118,9 +119,9 @@ public class ExternalApiChatController {
       );
     } catch (RuntimeException error) {
       log.warn(
-          "external.chat.rejected cmRequestId={} openidPreview={} metadataSource={} elapsedMs={} error={}",
+          "external.chat.rejected cmRequestId={} openidHash={} metadataSource={} elapsedMs={} error={}",
           cmRequestId,
-          preview(payload.openid()),
+          WechatLogSanitizer.identityHashPreview(payload.openid()),
           metadataSource(payload.metadata()),
           elapsedMs(acceptedAt),
           errorMessage(error)
@@ -146,11 +147,11 @@ public class ExternalApiChatController {
         ));
         stream.startHeartbeat();
         log.info(
-            "external.chat.streamStart cmRequestId={} chatRequestId={} instanceId={} openVikingUserId={} conversationId={}",
+            "external.chat.streamStart cmRequestId={} chatRequestId={} instanceId={} openVikingUserHash={} conversationId={}",
             cmRequestId,
             requestId,
             route.instance().getId(),
-            safe(route.openvikingUserId()),
+            WechatLogSanitizer.identityHashPreview(route.openvikingUserId()),
             safe(conversationId)
         );
         boolean[] sentDelta = {false};
@@ -186,11 +187,11 @@ public class ExternalApiChatController {
             "finishedAt", Instant.now().toString()
         ));
         log.info(
-            "external.chat.done cmRequestId={} chatRequestId={} instanceId={} openVikingUserId={} conversationId={} deltaCount={} firstDeltaMs={} elapsedMs={} messageId={}",
+            "external.chat.done cmRequestId={} chatRequestId={} instanceId={} openVikingUserHash={} conversationId={} deltaCount={} firstDeltaMs={} elapsedMs={} messageId={}",
             cmRequestId,
             requestId,
             route.instance().getId(),
-            safe(route.openvikingUserId()),
+            WechatLogSanitizer.identityHashPreview(route.openvikingUserId()),
             safe(conversationId),
             deltaCount[0],
             firstDeltaMs[0],
@@ -199,11 +200,11 @@ public class ExternalApiChatController {
         );
       } catch (RuntimeException | IOException error) {
         log.warn(
-            "external.chat.error cmRequestId={} chatRequestId={} instanceId={} openVikingUserId={} conversationId={} deltaCount={} firstDeltaMs={} elapsedMs={} error={}",
+            "external.chat.error cmRequestId={} chatRequestId={} instanceId={} openVikingUserHash={} conversationId={} deltaCount={} firstDeltaMs={} elapsedMs={} error={}",
             cmRequestId,
             requestId,
             route.instance().getId(),
-            safe(route.openvikingUserId()),
+            WechatLogSanitizer.identityHashPreview(route.openvikingUserId()),
             safe(conversationId),
             deltaCount[0],
             firstDeltaMs[0],
@@ -235,6 +236,7 @@ public class ExternalApiChatController {
   ) {
     Map<String, Object> params = new LinkedHashMap<>();
     params.put("requestId", requestId);
+    params.put("agentId", route.agentId());
     params.put("openVikingUserId", route.openvikingUserId());
     params.put("senderHash", route.openidHash());
     params.put("senderId", route.senderId());
@@ -321,14 +323,6 @@ public class ExternalApiChatController {
       return "-";
     }
     return safe(stringify(metadata.get("source")));
-  }
-
-  private static String preview(String value) {
-    String normalized = trim(value);
-    if (normalized.length() <= 10) {
-      return normalized.isBlank() ? "-" : normalized;
-    }
-    return normalized.substring(0, 6) + "..." + normalized.substring(normalized.length() - 4);
   }
 
   private static String safe(String value) {

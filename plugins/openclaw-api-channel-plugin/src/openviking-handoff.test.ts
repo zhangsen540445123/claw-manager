@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readApiOpenVikingHandoff, writeApiOpenVikingHandoff } from "./openviking-handoff.js";
+import { writeOpenVikingSenderHandoff } from "../../openclaw-weixin-plugin/src/messaging/openviking-handoff.js";
 
 describe("API OpenViking handoff", () => {
   it("stores an explicit api user identity without persisting raw session data", async () => {
@@ -85,6 +86,32 @@ describe("API OpenViking handoff", () => {
           senderHash: user.senderHash,
         });
       }
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves entries when API and WeChat plugins write concurrently", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "cross-channel-ov-handoff-"));
+    try {
+      const apiWrites = Array.from({ length: 10 }, (_, index) => writeApiOpenVikingHandoff({
+        stateDir,
+        sessionKey: `agent:user:api:${index}`,
+        openVikingUserId: `wx_${index.toString(16).padStart(32, "0")}`,
+        senderHash: index.toString(16).padStart(32, "0"),
+        secret: "identity-secret",
+      }));
+      const wechatWrites = Array.from({ length: 10 }, (_, index) => writeOpenVikingSenderHandoff({
+        stateDir,
+        sessionKey: `agent:user:wechat:${index}`,
+        openVikingUserId: `wx_${(index + 10).toString(16).padStart(32, "0")}`,
+        secret: "identity-secret",
+      }));
+
+      await Promise.all([...apiWrites, ...wechatWrites]);
+
+      const file = JSON.parse(await readFile(path.join(stateDir, "openviking", "sender-handoff.json"), "utf8"));
+      expect(Object.keys(file.entries)).toHaveLength(20);
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }

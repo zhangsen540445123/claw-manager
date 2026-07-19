@@ -54,8 +54,12 @@ function resolveMainLogPath() {
     return path.join(MAIN_LOG_DIR, `openclaw-${dateKey}.log`);
 }
 let logDirEnsured = false;
+export function loggerAccountLabel(accountId) {
+    return accountId?.trim() ? "account" : "";
+}
 function buildLoggerName(accountId) {
-    return accountId ? `${SUBSYSTEM}/${accountId}` : SUBSYSTEM;
+    const label = loggerAccountLabel(accountId);
+    return label ? `${SUBSYSTEM}/${label}` : SUBSYSTEM;
 }
 function writeLog(level, message, accountId) {
     const levelId = LEVEL_IDS[level] ?? LEVEL_IDS.INFO;
@@ -63,7 +67,8 @@ function writeLog(level, message, accountId) {
         return;
     const now = new Date();
     const loggerName = buildLoggerName(accountId);
-    const prefixedMessage = accountId ? `[${accountId}] ${message}` : message;
+    const accountLabel = loggerAccountLabel(accountId);
+    const prefixedMessage = accountLabel ? `[${accountLabel}] ${message}` : message;
     const entry = JSON.stringify({
         "0": loggerName,
         "1": prefixedMessage,

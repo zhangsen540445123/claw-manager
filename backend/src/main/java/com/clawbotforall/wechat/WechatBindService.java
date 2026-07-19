@@ -150,9 +150,9 @@ public class WechatBindService {
 
     fileService.writeInstanceFiles(instance, commandService.listModels(instance.getId()));
     log.info(
-        "开始微信插件扫码绑定任务：instanceId={}, accountId={}, forceRegenerate={}",
+        "开始微信插件扫码绑定任务：instanceId={}, accountHash={}, forceRegenerate={}",
         instance.getId(),
-        normalizedAccountId,
+        WechatLogSanitizer.identityHashPreview(normalizedAccountId),
         forceRegenerate
     );
 
@@ -203,11 +203,11 @@ public class WechatBindService {
                 }
               }
               log.info(
-                  "微信插件扫码登录已确认：instanceId={}, requestedAccountId={}, actualAccountId={}, wechatUserId={}",
+                  "微信插件扫码登录已确认：instanceId={}, requestedAccountHash={}, actualAccountHash={}, wechatUserHash={}",
                   instance.getId(),
-                  normalizedAccountId,
-                  completion == null ? "" : completion.accountId(),
-                  completion == null ? "" : completion.wechatUserId()
+                  WechatLogSanitizer.identityHashPreview(normalizedAccountId),
+                  WechatLogSanitizer.identityHashPreview(completion == null ? "" : completion.accountId()),
+                  WechatLogSanitizer.identityHashPreview(completion == null ? "" : completion.wechatUserId())
               );
               if (completion != null) {
                 notifyBindCompleted(completionCallback, completion);
@@ -283,7 +283,11 @@ public class WechatBindService {
     try {
       completionCallback.onConnected(completion);
     } catch (RuntimeException error) {
-      log.warn("微信扫码完成回调失败：accountId={}, reason={}", completion.accountId(), error.getMessage());
+      log.warn(
+          "微信扫码完成回调失败：accountHash={}, reason={}",
+          WechatLogSanitizer.identityHashPreview(completion.accountId()),
+          error.getMessage()
+      );
     }
   }
 

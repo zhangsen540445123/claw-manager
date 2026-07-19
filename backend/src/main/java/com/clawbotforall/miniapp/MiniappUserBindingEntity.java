@@ -4,6 +4,7 @@ public class MiniappUserBindingEntity {
   private String openidHash;
   private String openid;
   private String instanceId;
+  private String agentId;
   private String wechatUserId;
   private String openvikingUserId;
   private String bindStatus;
@@ -34,6 +35,14 @@ public class MiniappUserBindingEntity {
 
   public void setInstanceId(String instanceId) {
     this.instanceId = instanceId;
+  }
+
+  public String getAgentId() {
+    return agentId;
+  }
+
+  public void setAgentId(String agentId) {
+    this.agentId = agentId;
   }
 
   public String getWechatUserId() {

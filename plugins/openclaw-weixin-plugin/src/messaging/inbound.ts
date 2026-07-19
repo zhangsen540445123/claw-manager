@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { logger } from "../util/logger.js";
 import { generateId } from "../util/random.js";
+import { redactIdentity } from "../util/redact.js";
 import type { WeixinMessage, MessageItem } from "../api/types.js";
 import { MessageItemType } from "../api/types.js";
 import { resolveStateDir } from "../storage/state-dir.js";
@@ -71,7 +72,7 @@ export function restoreContextTokens(accountId: string): void {
         count++;
       }
     }
-    logger.info(`restoreContextTokens: restored ${count} tokens for account=${accountId}`);
+    logger.info(`restoreContextTokens: restored ${count} tokens for account=${redactIdentity(accountId)}`);
   } catch (err) {
     logger.warn(`restoreContextTokens: failed to read ${filePath}: ${String(err)}`);
   }
@@ -91,7 +92,7 @@ export function clearContextTokensForAccount(accountId: string): void {
   } catch (err) {
     logger.warn(`clearContextTokensForAccount: failed to remove ${filePath}: ${String(err)}`);
   }
-  logger.info(`clearContextTokensForAccount: cleared tokens for account=${accountId}`);
+  logger.info(`clearContextTokensForAccount: cleared tokens for account=${redactIdentity(accountId)}`);
 }
 
 /** Store a context token for a given account+user pair (memory + disk). */

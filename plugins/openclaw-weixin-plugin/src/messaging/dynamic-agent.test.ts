@@ -8,7 +8,7 @@ import {
   ensureWeixinAgentWorkspace,
   ensureWeixinDynamicAgentBinding,
   ensureWeixinDynamicAgentRoute,
-  resolveWeixinDynamicAgentId,
+  validateWeixinUserAgentId,
   resetWeixinDynamicAgentMutationChainForTest,
   type WeixinConfigRuntime,
 } from "./dynamic-agent.js";
@@ -43,9 +43,11 @@ afterEach(() => {
 });
 
 describe("Weixin dynamic agent", () => {
-  it("uses the OpenViking sender hash as a stable agent id", () => {
-    expect(resolveWeixinDynamicAgentId("ABCDEF0123456789abcdef0123456789"))
-      .toBe("wechat_abcdef0123456789abcdef0123456789");
+  it("accepts only persisted random user agent ids", () => {
+    expect(validateWeixinUserAgentId("user_abcdef0123456789abcdef0123456789"))
+      .toBe("user_abcdef0123456789abcdef0123456789");
+    expect(() => validateWeixinUserAgentId("wechat_abcdef0123456789abcdef0123456789"))
+      .toThrow("agentId");
   });
 
   it("creates one agent, its six templates, tool policy, and an account-peer binding", async () => {
@@ -57,15 +59,15 @@ describe("Weixin dynamic agent", () => {
         configRuntime: state.runtime,
         accountId: "bot-a",
         peerId: "user@im.wechat",
-        senderHash: "abcdef0123456789abcdef0123456789",
+        agentId: "user_abcdef0123456789abcdef0123456789",
         homeDir,
       });
 
-      const agentId = "wechat_abcdef0123456789abcdef0123456789";
-      const workspace = path.join(homeDir, ".openclaw", "workspace-wechat-abcdef0123456789abcdef0123456789");
+      const agentId = "user_abcdef0123456789abcdef0123456789";
+      const workspace = path.join(homeDir, ".openclaw", `workspace-${agentId}`);
       expect(cfg.agents.list).toEqual([expect.objectContaining({
         id: agentId,
-        workspace: path.join(homeDir, ".openclaw", "workspace-wechat-abcdef0123456789abcdef0123456789"),
+        workspace,
         agentDir: path.join(homeDir, ".openclaw", "agents", agentId, "agent"),
         tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] },
       })]);
@@ -90,7 +92,7 @@ describe("Weixin dynamic agent", () => {
     try {
       const state = createConfigRuntime();
       const base = { cfg: {}, configRuntime: state.runtime, peerId: "user@im.wechat",
-        senderHash: "abcdef0123456789abcdef0123456789", homeDir };
+        agentId: "user_abcdef0123456789abcdef0123456789", homeDir };
 
       await ensureWeixinDynamicAgentBinding({ ...base, accountId: "bot-a" });
       await ensureWeixinDynamicAgentBinding({ ...base, accountId: "bot-a" });
@@ -219,9 +221,9 @@ describe("Weixin dynamic agent", () => {
 
       await Promise.all([
         ensureWeixinDynamicAgentBinding({ cfg: {}, configRuntime: runtime, accountId: "bot-a",
-          peerId: "user-a@im.wechat", senderHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", homeDir }),
+          peerId: "user-a@im.wechat", agentId: "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", homeDir }),
         ensureWeixinDynamicAgentBinding({ cfg: {}, configRuntime: runtime, accountId: "bot-b",
-          peerId: "user-b@im.wechat", senderHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", homeDir }),
+          peerId: "user-b@im.wechat", agentId: "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", homeDir }),
       ]);
 
       expect(maxActiveMutations).toBe(1);
@@ -249,14 +251,33 @@ describe("Weixin dynamic agent", () => {
         channelRuntime: { routing: { resolveAgentRoute } } as any,
         accountId: "bot-a",
         peerId: "user@im.wechat",
-        senderHash: "abcdef0123456789abcdef0123456789",
+        agentId: "user_abcdef0123456789abcdef0123456789",
         homeDir,
       });
 
-      expect(result.route.agentId).toBe("wechat_abcdef0123456789abcdef0123456789");
+      expect(result.route.agentId).toBe("user_abcdef0123456789abcdef0123456789");
       expect(resolveAgentRoute).toHaveBeenLastCalledWith(expect.objectContaining({ cfg: result.cfg }));
     } finally {
       await rm(homeDir, { recursive: true, force: true });
     }
+  });
+
+  it("fails closed instead of routing a user to agent:main", async () => {
+    await expect(ensureWeixinDynamicAgentRoute({
+      cfg: {},
+      channelRuntime: {
+        routing: {
+          resolveAgentRoute: vi.fn(() => ({
+            agentId: "main",
+            sessionKey: "agent:main:openclaw-weixin:bot-a:direct:peer-a",
+            mainSessionKey: "agent:main:main",
+            matchedBy: "default",
+          })),
+        },
+      } as any,
+      accountId: "bot-a",
+      peerId: "peer-a",
+      agentId: "user_abcdef0123456789abcdef0123456789",
+    })).rejects.toThrow("resolved unexpected agent");
   });
 });

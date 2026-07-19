@@ -1,4 +1,5 @@
 import { logger } from "../util/logger.js";
+import { redactIdentity } from "../util/redact.js";
 const SESSION_PAUSE_DURATION_MS = 60 * 60 * 1000;
 /** Error code returned by the server when the bot token is stale / expired. */
 export const STALE_TOKEN_ERRCODE = -14;
@@ -7,7 +8,7 @@ const pauseUntilMap = new Map();
 export function pauseSession(accountId) {
     const until = Date.now() + SESSION_PAUSE_DURATION_MS;
     pauseUntilMap.set(accountId, until);
-    logger.info(`session-guard: paused accountId=${accountId} until=${new Date(until).toISOString()} (${SESSION_PAUSE_DURATION_MS / 1000}s)`);
+    logger.info(`session-guard: paused accountId=${redactIdentity(accountId)} until=${new Date(until).toISOString()} (${SESSION_PAUSE_DURATION_MS / 1000}s)`);
 }
 /** Returns `true` when the bot is still within its one-hour cooldown window. */
 export function isSessionPaused(accountId) {
@@ -36,7 +37,7 @@ export function getRemainingPauseMs(accountId) {
 export function assertSessionActive(accountId) {
     if (isSessionPaused(accountId)) {
         const remainingMin = Math.ceil(getRemainingPauseMs(accountId) / 60_000);
-        throw new Error(`session paused for accountId=${accountId}, ${remainingMin} min remaining (errcode ${STALE_TOKEN_ERRCODE})`);
+        throw new Error(`session paused for accountId=${redactIdentity(accountId)}, ${remainingMin} min remaining (errcode ${STALE_TOKEN_ERRCODE})`);
     }
 }
 /**

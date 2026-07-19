@@ -14,12 +14,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.miniapp.MiniappChatRoute;
 import com.clawbotforall.miniapp.MiniappUserAccessService;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -44,9 +48,15 @@ class ExternalApiChatControllerTest {
   MockMvc mockMvc;
   ExecutorService streamExecutor;
   ScheduledExecutorService heartbeatExecutor;
+  Logger controllerLogger;
+  ListAppender<ILoggingEvent> logAppender;
 
   @BeforeEach
   void setUp() {
+    controllerLogger = (Logger) LoggerFactory.getLogger(ExternalApiChatController.class);
+    logAppender = new ListAppender<>();
+    logAppender.start();
+    controllerLogger.addAppender(logAppender);
     streamExecutor = Executors.newSingleThreadExecutor();
     heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
     mockMvc = MockMvcBuilders
@@ -62,8 +72,50 @@ class ExternalApiChatControllerTest {
 
   @AfterEach
   void tearDown() {
+    controllerLogger.detachAppender(logAppender);
+    logAppender.stop();
     streamExecutor.shutdownNow();
     heartbeatExecutor.shutdownNow();
+  }
+
+  @Test
+  void chatLifecycleLogsDoNotExposeRawOpenidOrOpenVikingIdentity() throws Exception {
+    String rawOpenid = "openid_1";
+    String rawOpenVikingUserId = "wx_sensitive_identity";
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst_1");
+    MiniappChatRoute route = new MiniappChatRoute(
+        instance,
+        rawOpenid,
+        "openid_hash_1",
+        "user_0123456789abcdef0123456789abcdef",
+        rawOpenVikingUserId,
+        "miniapp:openid_hash_1"
+    );
+    when(userAccessService.resolveChatRoute("Bearer cm_user_secret", rawOpenid)).thenReturn(route);
+    when(userAccessService.conversationHash("conv_1")).thenReturn("conversationhash");
+    when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any(), any()))
+        .thenReturn(java.util.Map.of("ok", true, "messageId", "msg_1", "text", "完成"));
+
+    MvcResult result = mockMvc.perform(post("/api/external/openclaw/chat/stream")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer cm_user_secret")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {
+                  "openid": "openid_1",
+                  "conversationId": "conv_1",
+                  "message": "hello"
+                }
+                """))
+        .andExpect(request().asyncStarted())
+        .andReturn();
+    mockMvc.perform(asyncDispatch(result)).andExpect(status().isOk());
+
+    assertThat(logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).toList())
+        .allSatisfy(message -> {
+          assertThat(message).doesNotContain(rawOpenid);
+          assertThat(message).doesNotContain(rawOpenVikingUserId);
+        });
   }
 
   @Test
@@ -74,6 +126,7 @@ class ExternalApiChatControllerTest {
         instance,
         "local-test-user-001",
         "f9db8c63722f76a920d852d85f502177",
+        "user_0123456789abcdef0123456789abcdef",
         "wx_f9db8c63722f76a920d852d85f502177",
         "miniapp:f9db8c63722f76a920d852d85f502177"
     );
@@ -117,6 +170,7 @@ class ExternalApiChatControllerTest {
         instance,
         "local-test-user-001",
         "f9db8c63722f76a920d852d85f502177",
+        "user_0123456789abcdef0123456789abcdef",
         "wx_f9db8c63722f76a920d852d85f502177",
         "miniapp:f9db8c63722f76a920d852d85f502177"
     );
@@ -124,6 +178,8 @@ class ExternalApiChatControllerTest {
     when(userAccessService.conversationHash("conv_1")).thenReturn("conversationhash");
     when(queueService.streamApiChannelMessage(eq(instance), anyMap(), any(), any()))
         .thenAnswer(invocation -> {
+          java.util.Map<String, Object> params = invocation.getArgument(1);
+          assertThat(params.get("agentId")).isEqualTo("user_0123456789abcdef0123456789abcdef");
           ExternalApiQueueService.StreamDeltaConsumer onDelta = invocation.getArgument(2);
           ExternalApiQueueService.StreamArtifactConsumer onArtifact = invocation.getArgument(3);
           onDelta.accept("你");
@@ -182,6 +238,7 @@ class ExternalApiChatControllerTest {
         instance,
         "local-test-user-001",
         "f9db8c63722f76a920d852d85f502177",
+        "user_0123456789abcdef0123456789abcdef",
         "wx_f9db8c63722f76a920d852d85f502177",
         "miniapp:f9db8c63722f76a920d852d85f502177"
     );

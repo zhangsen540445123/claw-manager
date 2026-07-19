@@ -34,17 +34,18 @@ const DEFAULT_WORKSPACE_PRESET = {
         "",
     ].join("\n"),
 };
-export function resolveWeixinDynamicAgentId(senderHash) {
-    const normalized = senderHash.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-    if (!normalized)
-        throw new Error("senderHash is required");
-    return `wechat_${normalized}`;
+export function validateWeixinUserAgentId(agentId) {
+    const normalized = agentId.trim();
+    if (!/^user_[0-9a-f]{32}$/.test(normalized)) {
+        throw new Error("agentId must match user_<32 lowercase hex>");
+    }
+    return normalized;
 }
 export async function ensureWeixinDynamicAgentBinding(params) {
     const current = params.configRuntime?.current?.() ?? params.cfg;
-    const agentId = resolveWeixinDynamicAgentId(params.senderHash);
+    const agentId = validateWeixinUserAgentId(params.agentId);
     const homeDir = params.homeDir ?? process.env.OPENCLAW_HOME?.trim() ?? os.homedir();
-    const workspace = path.join(homeDir, ".openclaw", `workspace-wechat-${agentId.slice("wechat_".length)}`);
+    const workspace = path.join(homeDir, ".openclaw", `workspace-${agentId}`);
     const agentDir = path.join(homeDir, ".openclaw", "agents", agentId, "agent");
     const currentAgents = isRecord(current.agents) && Array.isArray(current.agents.list)
         ? current.agents.list
@@ -115,6 +116,9 @@ export async function ensureWeixinDynamicAgentRoute(params) {
         accountId: params.accountId,
         peer: { kind: "direct", id: params.peerId },
     });
+    if (route.agentId !== params.agentId) {
+        throw new Error("WeChat route resolved unexpected agent; refusing agent:main fallback");
+    }
     return { cfg, route };
 }
 export async function ensureWeixinAgentWorkspace(workspace, options = {}) {

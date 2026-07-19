@@ -1,4 +1,5 @@
 import { getConfig } from "./api.js";
+import { redactIdentity } from "../util/redact.js";
 
 /** Subset of getConfig fields that we actually need; add new fields here as needed. */
 export interface CachedConfig {
@@ -50,12 +51,12 @@ export class WeixinConfigManager {
             retryDelayMs: CONFIG_CACHE_INITIAL_RETRY_MS,
           });
           this.log(
-            `[weixin] config ${entry?.everSucceeded ? "refreshed" : "cached"} for ${userId}`,
+            `[weixin] config ${entry?.everSucceeded ? "refreshed" : "cached"} for ${redactIdentity(userId)}`,
           );
           fetchOk = true;
         }
       } catch (err) {
-        this.log(`[weixin] getConfig failed for ${userId} (ignored): ${String(err)}`);
+        this.log(`[weixin] getConfig failed for ${redactIdentity(userId)} (ignored): ${String(err)}`);
       }
       if (!fetchOk) {
         const prevDelay = entry?.retryDelayMs ?? CONFIG_CACHE_INITIAL_RETRY_MS;

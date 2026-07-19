@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { attachSenderRuntimeIdentity, reportWechatTrace, requestsImageGeneration } from "./process-message.js";
+import {
+  attachSenderRuntimeIdentity,
+  reportWechatTrace,
+  requestsImageGeneration,
+  resolveRequiredUserAgentIdentity,
+} from "./process-message.js";
 
 describe("WeChat trace reporting", () => {
   it("marks image requests without retaining the message text", () => {
@@ -27,6 +32,7 @@ describe("WeChat trace reporting", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       component: "wechat-plugin", stage: "wechat.media.send.failed", channel: "wechat", elapsedMs: 35,
     });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(String(init.body)).not.toContain("openid");
   });
 });
@@ -49,5 +55,26 @@ describe("attachSenderRuntimeIdentity", () => {
     expect(ctx.SenderId).toBe("");
     expect(ctx.senderId).toBe("");
     expect(ctx.requesterSenderId).toBe("");
+  });
+});
+
+describe("resolveRequiredUserAgentIdentity", () => {
+  it("propagates resolver failures instead of treating the message as handled", async () => {
+    const errLog = vi.fn();
+    const traceReporter = vi.fn(() => new Promise<void>(() => {}));
+
+    await expect(resolveRequiredUserAgentIdentity("wechat-user-secret", {
+      traceId: "cmtrace_test",
+      requestId: "run-test",
+      errLog,
+      traceReporter,
+      resolver: vi.fn(async () => {
+        throw new Error("temporary backend failure");
+      }),
+    })).rejects.toThrow("user Agent identity resolution failed");
+
+    expect(errLog).toHaveBeenCalledOnce();
+    expect(traceReporter).toHaveBeenCalledOnce();
+    expect(errLog.mock.calls[0]?.[0]).not.toContain("wechat-user-secret");
   });
 });

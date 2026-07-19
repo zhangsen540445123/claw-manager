@@ -1,4 +1,5 @@
 import { getConfig } from "./api.js";
+import { redactIdentity } from "../util/redact.js";
 const CONFIG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CONFIG_CACHE_INITIAL_RETRY_MS = 2_000;
 const CONFIG_CACHE_MAX_RETRY_MS = 60 * 60 * 1000;
@@ -34,12 +35,12 @@ export class WeixinConfigManager {
                         nextFetchAt: now + Math.random() * CONFIG_CACHE_TTL_MS,
                         retryDelayMs: CONFIG_CACHE_INITIAL_RETRY_MS,
                     });
-                    this.log(`[weixin] config ${entry?.everSucceeded ? "refreshed" : "cached"} for ${userId}`);
+                    this.log(`[weixin] config ${entry?.everSucceeded ? "refreshed" : "cached"} for ${redactIdentity(userId)}`);
                     fetchOk = true;
                 }
             }
             catch (err) {
-                this.log(`[weixin] getConfig failed for ${userId} (ignored): ${String(err)}`);
+                this.log(`[weixin] getConfig failed for ${redactIdentity(userId)} (ignored): ${String(err)}`);
             }
             if (!fetchOk) {
                 const prevDelay = entry?.retryDelayMs ?? CONFIG_CACHE_INITIAL_RETRY_MS;

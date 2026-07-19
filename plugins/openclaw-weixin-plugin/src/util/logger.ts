@@ -78,8 +78,13 @@ export type Logger = {
   close(): void;
 };
 
+export function loggerAccountLabel(accountId?: string): string {
+  return accountId?.trim() ? "account" : "";
+}
+
 function buildLoggerName(accountId?: string): string {
-  return accountId ? `${SUBSYSTEM}/${accountId}` : SUBSYSTEM;
+  const label = loggerAccountLabel(accountId);
+  return label ? `${SUBSYSTEM}/${label}` : SUBSYSTEM;
 }
 
 function writeLog(level: string, message: string, accountId?: string): void {
@@ -88,7 +93,8 @@ function writeLog(level: string, message: string, accountId?: string): void {
 
   const now = new Date();
   const loggerName = buildLoggerName(accountId);
-  const prefixedMessage = accountId ? `[${accountId}] ${message}` : message;
+  const accountLabel = loggerAccountLabel(accountId);
+  const prefixedMessage = accountLabel ? `[${accountLabel}] ${message}` : message;
   const entry = JSON.stringify({
     "0": loggerName,
     "1": prefixedMessage,

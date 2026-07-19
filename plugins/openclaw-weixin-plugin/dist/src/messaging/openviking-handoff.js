@@ -1,7 +1,8 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+const HANDOFF_WRITE_CHAIN_KEY = Symbol.for("claw-manager.openviking-handoff.write-chain");
 function trimString(value) {
     return typeof value === "string" ? value.trim() : "";
 }
@@ -19,18 +20,6 @@ export function resolveOpenVikingHandoffStateDir(stateDir) {
 }
 function handoffPath(stateDir) {
     return path.join(resolveOpenVikingHandoffStateDir(stateDir), "openviking", "sender-handoff.json");
-}
-export function resolveOpenVikingSenderIdentity(senderId, secret) {
-    const normalizedSender = trimString(senderId);
-    const normalizedSecret = trimString(secret);
-    if (!normalizedSender || !normalizedSecret) {
-        return undefined;
-    }
-    const senderHash = hmacSha256Hex(normalizedSecret, normalizedSender).slice(0, 32);
-    return {
-        senderHash,
-        openVikingUserId: `wx_${senderHash}`,
-    };
 }
 function sessionKeyHash(sessionKey, secret) {
     const normalizedSessionKey = trimString(sessionKey);
@@ -57,23 +46,34 @@ async function readHandoffFile(filePath) {
     }
 }
 export async function writeOpenVikingSenderHandoff(params) {
-    const derived = resolveOpenVikingSenderIdentity(params.senderId ?? "", params.secret ?? "");
+    const openVikingUserId = trimString(params.openVikingUserId);
+    const matchedIdentity = /^wx_([0-9a-f]{32})$/.exec(openVikingUserId);
     const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
-    if (!derived || !key) {
+    if (!matchedIdentity || !key) {
         return false;
     }
-    const filePath = handoffPath(params.stateDir);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    const file = await readHandoffFile(filePath);
-    file.entries[key] = {
-        ...derived,
-        cmTraceId: trimString(params.cmTraceId),
-        updatedAt: new Date().toISOString(),
-    };
-    const tempPath = `${filePath}.${process.pid}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-    await rename(tempPath, filePath);
-    return true;
+    return enqueueSharedHandoffWrite(async () => {
+        const filePath = handoffPath(params.stateDir);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        const file = await readHandoffFile(filePath);
+        file.entries[key] = {
+            openVikingUserId,
+            senderHash: matchedIdentity[1],
+            cmTraceId: trimString(params.cmTraceId),
+            updatedAt: new Date().toISOString(),
+        };
+        const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+        await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+        await rename(tempPath, filePath);
+        return true;
+    });
+}
+function enqueueSharedHandoffWrite(work) {
+    const shared = globalThis;
+    const previous = shared[HANDOFF_WRITE_CHAIN_KEY];
+    const run = (previous ?? Promise.resolve()).catch(() => undefined).then(work);
+    shared[HANDOFF_WRITE_CHAIN_KEY] = run.then(() => undefined, () => undefined);
+    return run;
 }
 export async function readOpenVikingSenderHandoff(params) {
     const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");

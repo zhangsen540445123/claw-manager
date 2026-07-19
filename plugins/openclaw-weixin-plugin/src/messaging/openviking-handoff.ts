@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,8 @@ type HandoffFile = {
   version: 1;
   entries: Record<string, OpenVikingSenderHandoff>;
 };
+
+const HANDOFF_WRITE_CHAIN_KEY = Symbol.for("claw-manager.openviking-handoff.write-chain");
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -37,22 +39,6 @@ export function resolveOpenVikingHandoffStateDir(stateDir?: string): string {
 
 function handoffPath(stateDir?: string): string {
   return path.join(resolveOpenVikingHandoffStateDir(stateDir), "openviking", "sender-handoff.json");
-}
-
-export function resolveOpenVikingSenderIdentity(
-  senderId: string,
-  secret: string,
-): Pick<OpenVikingSenderHandoff, "openVikingUserId" | "senderHash"> | undefined {
-  const normalizedSender = trimString(senderId);
-  const normalizedSecret = trimString(secret);
-  if (!normalizedSender || !normalizedSecret) {
-    return undefined;
-  }
-  const senderHash = hmacSha256Hex(normalizedSecret, normalizedSender).slice(0, 32);
-  return {
-    senderHash,
-    openVikingUserId: `wx_${senderHash}`,
-  };
 }
 
 function sessionKeyHash(sessionKey: string, secret: string): string | undefined {
@@ -83,28 +69,39 @@ async function readHandoffFile(filePath: string): Promise<HandoffFile> {
 export async function writeOpenVikingSenderHandoff(params: {
   stateDir?: string;
   sessionKey?: string;
-  senderId?: string;
+  openVikingUserId?: string;
   secret?: string;
   cmTraceId?: string;
 }): Promise<boolean> {
-  const derived = resolveOpenVikingSenderIdentity(params.senderId ?? "", params.secret ?? "");
+  const openVikingUserId = trimString(params.openVikingUserId);
+  const matchedIdentity = /^wx_([0-9a-f]{32})$/.exec(openVikingUserId);
   const key = sessionKeyHash(params.sessionKey ?? "", params.secret ?? "");
-  if (!derived || !key) {
+  if (!matchedIdentity || !key) {
     return false;
   }
+  return enqueueSharedHandoffWrite(async () => {
+    const filePath = handoffPath(params.stateDir);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    const file = await readHandoffFile(filePath);
+    file.entries[key] = {
+      openVikingUserId,
+      senderHash: matchedIdentity[1],
+      cmTraceId: trimString(params.cmTraceId),
+      updatedAt: new Date().toISOString(),
+    };
+    const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    await rename(tempPath, filePath);
+    return true;
+  });
+}
 
-  const filePath = handoffPath(params.stateDir);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const file = await readHandoffFile(filePath);
-  file.entries[key] = {
-    ...derived,
-    cmTraceId: trimString(params.cmTraceId),
-    updatedAt: new Date().toISOString(),
-  };
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  await rename(tempPath, filePath);
-  return true;
+function enqueueSharedHandoffWrite<T>(work: () => Promise<T>): Promise<T> {
+  const shared = globalThis as unknown as Record<PropertyKey, unknown>;
+  const previous = shared[HANDOFF_WRITE_CHAIN_KEY] as Promise<void> | undefined;
+  const run = (previous ?? Promise.resolve()).catch(() => undefined).then(work);
+  shared[HANDOFF_WRITE_CHAIN_KEY] = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 export async function readOpenVikingSenderHandoff(params: {

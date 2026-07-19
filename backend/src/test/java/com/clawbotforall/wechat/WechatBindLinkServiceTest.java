@@ -21,6 +21,9 @@ import com.clawbotforall.instance.InstanceProvisioningEntity;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.runtime.InstancePaths;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,12 +31,15 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class WechatBindLinkServiceTest {
@@ -62,11 +68,20 @@ class WechatBindLinkServiceTest {
   @Mock
   OpenClawGatewayRpcService gatewayRpcService;
 
+  @Mock
+  ApplicationEventPublisher applicationEventPublisher;
+
   WechatBindLinkService service;
   QueuedExecutor executor;
+  Logger serviceLogger;
+  ListAppender<ILoggingEvent> logAppender;
 
   @BeforeEach
   void setUp() {
+    serviceLogger = (Logger) LoggerFactory.getLogger(WechatBindLinkService.class);
+    logAppender = new ListAppender<>();
+    logAppender.start();
+    serviceLogger.addAppender(logAppender);
     executor = new QueuedExecutor();
     service = new WechatBindLinkService(
         linkMapper,
@@ -79,8 +94,15 @@ class WechatBindLinkServiceTest {
         new ObjectMapper(),
         eventPublisher,
         gatewayRpcService,
+        applicationEventPublisher,
         executor
     );
+  }
+
+  @AfterEach
+  void tearDown() {
+    serviceLogger.detachAppender(logAppender);
+    logAppender.stop();
   }
 
   @Test
@@ -378,6 +400,34 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void ignoredCompletionLogDoesNotExposeTokenOrAccountIdentities() {
+    String rawToken = "wbl_sensitive_token";
+    String expectedAccountId = "account_expected_sensitive";
+    String requestedAccountId = "account_requested_sensitive";
+    String completedAccountId = "account_completed_sensitive";
+    WechatBindLinkEntity stored = existingLink(rawToken, "inst_1");
+    stored.setStatus("waiting_scan");
+    stored.setTargetAccountId(expectedAccountId);
+    when(linkMapper.findByToken(rawToken)).thenReturn(stored);
+
+    service.completeBindAfterLogin(
+        rawToken,
+        completion(requestedAccountId, completedAccountId, "wechat_sensitive_identity"),
+        "https://admin.example.test"
+    );
+
+    List<String> messages = logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+    assertThat(messages).anySatisfy(message -> assertThat(message).contains("tokenPresent=present"));
+    assertThat(messages).allSatisfy(message -> {
+      assertThat(message).doesNotContain(rawToken);
+      assertThat(message).doesNotContain(expectedAccountId);
+      assertThat(message).doesNotContain(requestedAccountId);
+      assertThat(message).doesNotContain(completedAccountId);
+      assertThat(message).doesNotContain("wechat_sensitive_identity");
+    });
+  }
+
+  @Test
   void existingUserLinkConnectsOnlyAfterRawAccountRefreshAndRestartsThatChannel() {
     InstanceEntity instance = instance("inst_1", "实例一", "running");
     WechatBindLinkEntity stored = existingLink("token_existing_fresh_raw", "inst_1");
@@ -431,9 +481,19 @@ class WechatBindLinkServiceTest {
         completion("cmwx_status_steps", "554603a4df61-im-bot", "wechat-user"),
         "https://admin.example.test"
     );
+    service.completeBindAfterLogin(
+        "token_status_steps",
+        completion("cmwx_status_steps", "554603a4df61-im-bot", "wechat-user"),
+        "https://admin.example.test"
+    );
 
     assertThat(statusUpdates).containsSubsequence("scanned", "initializing", "connected");
     assertThat(saved.get().getStatus()).isEqualTo("connected");
+    verify(applicationEventPublisher).publishEvent(new WechatBindConnectedEvent(
+        "inst_1",
+        "554603a4df61-im-bot",
+        "wechat-user"
+    ));
   }
 
   @Test

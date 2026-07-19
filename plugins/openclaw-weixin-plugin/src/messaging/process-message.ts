@@ -18,7 +18,7 @@ import { downloadRemoteImageToTemp } from "../cdn/upload.js";
 import { resolveReplyProgressMessagesEnabled } from "../config/reply-progress.js";
 import { downloadMediaFromItem } from "../media/media-download.js";
 import { logger } from "../util/logger.js";
-import { redactBody, redactToken } from "../util/redact.js";
+import { redactBody, redactIdentity, redactToken } from "../util/redact.js";
 
 import { isDebugMode } from "./debug-mode.js";
 import { sendWeixinErrorNotice } from "./error-notice.js";
@@ -36,7 +36,7 @@ import { sendMessageWeixin } from "./send.js";
 import { WeixinReplyProgressSender } from "./reply-progress-sender.js";
 import { handleSlashCommand } from "./slash-commands.js";
 import { writeOpenVikingSenderHandoff } from "./openviking-handoff.js";
-import { resolveOpenVikingSenderIdentity } from "./openviking-handoff.js";
+import { resolveUserAgentIdentity } from "./user-agent-identity.js";
 import {
   ensureWeixinDynamicAgentRoute,
   type WeixinConfigRuntime,
@@ -87,23 +87,23 @@ export function attachSenderRuntimeIdentity<T extends object>(
 }
 
 function describeSenderForLog(senderId: string): string {
-  return senderId.trim() ? "present" : "missing";
+  return redactIdentity(senderId);
 }
 
 async function writeOpenVikingHandoffForTurn(params: {
   sessionKey?: string;
-  senderId: string;
+  openVikingUserId: string;
   log: (msg: string) => void;
   cmTraceId?: string;
 }): Promise<void> {
   const secret = process.env.OPENVIKING_IDENTITY_HASH_SECRET?.trim() ?? "";
-  if (!secret || !params.sessionKey || !params.senderId.trim()) {
+  if (!secret || !params.sessionKey || !params.openVikingUserId.trim()) {
     return;
   }
   try {
     const wrote = await writeOpenVikingSenderHandoff({
       sessionKey: params.sessionKey,
-      senderId: params.senderId,
+      openVikingUserId: params.openVikingUserId,
       secret,
       cmTraceId: params.cmTraceId,
     });
@@ -125,6 +125,7 @@ export async function reportWechatTrace(params: {
   details?: Record<string, unknown>;
   env?: NodeJS.ProcessEnv;
   fetcher?: typeof fetch;
+  timeoutMs?: number;
 }): Promise<void> {
   const env = params.env ?? process.env;
   const baseUrl = (env.CLAW_MANAGER_INTERNAL_BASE_URL ?? "").replace(/\/+$/, "");
@@ -132,7 +133,7 @@ export async function reportWechatTrace(params: {
   const instanceId = env.OPENVIKING_OPENCLAW_INSTANCE_ID ?? "";
   if (!baseUrl || !token || !instanceId) return;
   try {
-    const response = await (params.fetcher ?? fetch)(`${baseUrl}/api/internal/integration-traces/events`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": params.traceId }, body: JSON.stringify({ traceId: params.traceId, component: "wechat-plugin", stage: params.stage, status: params.status, channel: "wechat", instanceId, requestId: params.requestId, elapsedMs: params.elapsedMs, errorCode: params.status === "failed" ? "WECHAT_STAGE_FAILED" : "", errorMessage: sanitizeTraceError(params.errorMessage), details: params.details ?? {} }) });
+    const response = await (params.fetcher ?? fetch)(`${baseUrl}/api/internal/integration-traces/events`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "X-CM-Trace-Id": params.traceId }, body: JSON.stringify({ traceId: params.traceId, component: "wechat-plugin", stage: params.stage, status: params.status, channel: "wechat", instanceId, requestId: params.requestId, elapsedMs: params.elapsedMs, errorCode: params.status === "failed" ? "WECHAT_STAGE_FAILED" : "", errorMessage: sanitizeTraceError(params.errorMessage), details: params.details ?? {} }), signal: AbortSignal.timeout(params.timeoutMs ?? 5_000) });
     if (!response.ok) logger.warn(`trace report rejected traceId=${params.traceId} stage=${params.stage} status=${response.status}`);
   } catch (error) { logger.warn(`trace report failed traceId=${params.traceId}: ${String(error)}`); }
 }
@@ -147,6 +148,32 @@ function sanitizeTraceError(value?: string): string {
 
 export function requestsImageGeneration(message: string): boolean {
   return /(生图|生成.*(图|海报|卡片)|图片|海报|九宫格|image|poster)/i.test(message);
+}
+
+export async function resolveRequiredUserAgentIdentity(
+  senderId: string,
+  params: {
+    traceId: string;
+    requestId: string;
+    errLog: (message: string) => void;
+    resolver?: typeof resolveUserAgentIdentity;
+    traceReporter?: typeof reportWechatTrace;
+  },
+) {
+  try {
+    return await (params.resolver ?? resolveUserAgentIdentity)(senderId);
+  } catch (error) {
+    const message = `user Agent identity resolution failed: ${String(error)}`;
+    params.errLog(message);
+    void (params.traceReporter ?? reportWechatTrace)({
+      traceId: params.traceId,
+      stage: "wechat.route.resolved",
+      status: "failed",
+      requestId: params.requestId,
+      errorMessage: message,
+    });
+    throw new Error("user Agent identity resolution failed", { cause: error });
+  }
 }
 
 /**
@@ -308,40 +335,34 @@ export async function processOneMessage(
     );
   }
 
-  const senderIdentity = resolveOpenVikingSenderIdentity(
-    senderId,
-    process.env.OPENVIKING_IDENTITY_HASH_SECRET ?? "",
-  );
-  const dynamicRoute = senderIdentity
-    ? await ensureWeixinDynamicAgentRoute({
-        cfg: deps.config,
-        configRuntime: deps.configRuntime,
-        channelRuntime: deps.channelRuntime,
-        accountId: deps.accountId,
-        peerId: ctx.To,
-        senderHash: senderIdentity.senderHash,
-      })
-    : undefined;
-  const routedConfig = dynamicRoute?.cfg ?? deps.config;
-  const route = dynamicRoute?.route ?? deps.channelRuntime.routing.resolveAgentRoute({
-    cfg: routedConfig,
-    channel: "openclaw-weixin",
-    accountId: deps.accountId,
-    peer: { kind: "direct", id: ctx.To },
+  const senderIdentity = await resolveRequiredUserAgentIdentity(senderId, {
+    traceId: cmTraceId,
+    requestId: runId,
+    errLog: deps.errLog,
   });
+  const dynamicRoute = await ensureWeixinDynamicAgentRoute({
+    cfg: deps.config,
+    configRuntime: deps.configRuntime,
+    channelRuntime: deps.channelRuntime,
+    accountId: deps.accountId,
+    peerId: ctx.To,
+    agentId: senderIdentity.agentId,
+  });
+  const routedConfig = dynamicRoute.cfg;
+  const route = dynamicRoute.route;
   logger.debug(
-    `resolveAgentRoute: agentId=${route.agentId ?? "(none)"} sessionKey=${route.sessionKey ?? "(none)"} mainSessionKey=${route.mainSessionKey ?? "(none)"}`,
+    `resolveAgentRoute: agentId=${route.agentId ?? "(none)"} sessionKey=${route.sessionKey ? "present" : "none"} mainSessionKey=${route.mainSessionKey ? "present" : "none"}`,
   );
   if (!route.agentId) {
     logger.error(
-      `resolveAgentRoute: no agentId resolved for peer=${senderForLog} accountId=${deps.accountId} — message will not be dispatched`,
+      `resolveAgentRoute: no agentId resolved for peer=${senderForLog} accountId=${redactIdentity(deps.accountId)} — message will not be dispatched`,
     );
   }
   await reportWechatTrace({ traceId: cmTraceId, stage: "wechat.route.resolved", status: route.agentId ? "completed" : "failed", requestId: runId });
 
   if (debug) {
     debugTrace.push(
-      `│ route: agent=${route.agentId ?? "none"} session=${route.sessionKey ?? "none"}`,
+      `│ route: agent=${route.agentId ?? "none"} session=${route.sessionKey ? "present" : "none"}`,
     );
     debugTs.preDispatch = Date.now();
   }
@@ -357,7 +378,7 @@ export async function processOneMessage(
   ), senderId);
   await writeOpenVikingHandoffForTurn({
     sessionKey: route.sessionKey,
-    senderId,
+    openVikingUserId: senderIdentity.openVikingUserId,
     log: deps.log,
     cmTraceId,
   });
@@ -365,7 +386,10 @@ export async function processOneMessage(
   logger.info(
     `inbound: sender=${senderForLog} bodyLen=${(finalized.Body ?? "").length} hasMedia=${Boolean(finalized.MediaPath ?? finalized.MediaUrl)}`,
   );
-  logger.debug(`inbound context: ${redactBody(JSON.stringify(finalized))}`);
+  logger.debug(
+    `inbound context: bodyLen=${(finalized.Body ?? "").length} sender=${senderForLog} ` +
+      `media=${finalized.MediaPath || finalized.MediaUrl ? "present" : "none"}`,
+  );
 
   await deps.channelRuntime.session.recordInboundSession({
     storePath,
@@ -380,7 +404,7 @@ export async function processOneMessage(
     onRecordError: (err) => deps.errLog(`recordInboundSession: ${String(err)}`),
   });
   logger.debug(
-    `recordInboundSession: done storePath=${storePath} sessionKey=${route.sessionKey ?? "(none)"}`,
+    `recordInboundSession: done storePath=${storePath} sessionKey=${route.sessionKey ? "present" : "none"}`,
   );
 
   const contextToken = getContextTokenFromMsgContext(ctx);
@@ -598,7 +622,7 @@ export async function processOneMessage(
     await replyProgressSender?.finalize();
 
     logger.info(
-      `debug-check: accountId=${deps.accountId} debug=${String(debug)} hasContextToken=${Boolean(contextToken)}`,
+      `debug-check: accountId=${redactIdentity(deps.accountId)} debug=${String(debug)} hasContextToken=${Boolean(contextToken)}`,
     );
 
     if (debug && contextToken) {

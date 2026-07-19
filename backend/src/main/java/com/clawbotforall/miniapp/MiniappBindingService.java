@@ -119,7 +119,9 @@ public class MiniappBindingService {
 
   private MiniappBindLinkResult result(String openid, MiniappUserBindingEntity binding, PublicWechatBindLink link) {
     String status = link == null ? binding.getBindStatus() : link.status();
-    boolean connected = "connected".equals(binding.getBindStatus()) && !blank(binding.getOpenvikingUserId());
+    boolean connected = "connected".equals(binding.getBindStatus())
+        && !blank(binding.getOpenvikingUserId())
+        && !blank(binding.getAgentId());
     return new MiniappBindLinkResult(
         openid,
         link == null ? binding.getCurrentBindToken() : link.token(),
