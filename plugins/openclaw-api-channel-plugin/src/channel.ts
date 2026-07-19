@@ -6,6 +6,7 @@ import path from "node:path";
 import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-runtime";
 import type { ChannelPlugin, OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk/core";
 
+import { getApiConfigRuntime, type ApiConfigRuntime } from "./config-runtime.js";
 import { clearApiOpenVikingTurn, registerApiOpenVikingTurn, runWithApiOpenVikingTurn } from "./openviking-handoff.js";
 
 export type ApiSendMessageParams = {
@@ -70,17 +71,8 @@ export type ApiGatewayStartContext = {
   setStatus?: (next: Record<string, unknown>) => void;
 };
 
-type ApiConfigRuntime = {
-  current?: () => OpenClawConfig | Record<string, unknown>;
-  mutateConfigFile?: (params: Record<string, unknown>) => Promise<{ result?: unknown } | unknown>;
-};
-
-export const API_CONFIG_RUNTIME_SYMBOL = Symbol.for("claw-manager.api-channel.config-runtime");
-
 function resolveApiConfigRuntime(explicit?: ApiConfigRuntime): ApiConfigRuntime | undefined {
-  if (explicit?.current) return explicit;
-  const shared = (globalThis as Record<PropertyKey, unknown>)[API_CONFIG_RUNTIME_SYMBOL];
-  return shared && typeof shared === "object" ? shared as ApiConfigRuntime : undefined;
+  return explicit?.current ? explicit : getApiConfigRuntime();
 }
 
 type ApiQueueResponse = {

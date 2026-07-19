@@ -8,13 +8,13 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
 
 import {
-  API_CONFIG_RUNTIME_SYMBOL,
   apiChannelPlugin,
   ensureApiUserAgentBinding,
   handleApiAssistantAgentEvent,
   monitorApiQueue,
 } from "./src/channel.js";
 import type { ApiAssistantAgentEvent, ApiGatewayStartContext } from "./src/channel.js";
+import { setApiConfigRuntime } from "./src/config-runtime.js";
 
 type ApiLogSink = {
   info?: (message: string) => void;
@@ -280,7 +280,7 @@ const pluginEntry = {
     additionalProperties: false,
   }),
   register(api: OpenClawPluginApi) {
-    (globalThis as Record<PropertyKey, unknown>)[API_CONFIG_RUNTIME_SYMBOL] = api.runtime?.config;
+    setApiConfigRuntime(api.runtime?.config as never);
     api.registerChannel({ plugin: apiChannelPlugin });
     void installOpenClawInternalAgentEventBridge(api);
     registerApiGatewayStartMethod(api as GatewayMethodApi);

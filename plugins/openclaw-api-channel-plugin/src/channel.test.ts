@@ -17,6 +17,7 @@ import {
   startApiStreamHeartbeat,
   writeApiQueueHeartbeat,
 } from "./channel.js";
+import { resetApiConfigRuntimeForTest, setApiConfigRuntime } from "./config-runtime.js";
 
 let activeTurnStateDir: string | undefined;
 
@@ -30,7 +31,7 @@ afterEach(async () => {
   if (activeTurnStateDir) await fs.rm(activeTurnStateDir, { recursive: true, force: true });
   activeTurnStateDir = undefined;
   vi.unstubAllEnvs();
-  delete (globalThis as Record<PropertyKey, unknown>)[Symbol.for("claw-manager.api-channel.config-runtime")];
+  resetApiConfigRuntimeForTest();
 });
 
 describe("API trace reporting", () => {
@@ -168,9 +169,9 @@ describe("live API config routing", () => {
     const agentId = "user_f9db8c63722f76a920d852d85f502177";
     const senderHash = "f9db8c63722f76a920d852d85f502177";
     const liveConfig = persistedApiConfig(agentId, senderHash);
-    (globalThis as Record<PropertyKey, unknown>)[Symbol.for("claw-manager.api-channel.config-runtime")] = {
+    setApiConfigRuntime({
       current: () => liveConfig,
-    };
+    });
     const runtime = makeRuntime();
 
     await expect(dispatchApiMessage({
