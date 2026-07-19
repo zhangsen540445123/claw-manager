@@ -184,6 +184,53 @@ class InstanceFileServiceTest {
   }
 
   @Test
+  void preservesDynamicUserAgentsAndBindingsWhenRewritingManagedConfig() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+    String agentId = "user_8c2c63a5f96d294f03a9dbd4d7173348";
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Files.createDirectories(homeDir);
+    objectMapper.writeValue(homeDir.resolve("openclaw.json").toFile(), Map.of(
+        "agents", Map.of(
+            "defaults", Map.of("workspace", "/old-workspace"),
+            "list", List.of(Map.of("id", agentId, "workspace", "/users/" + agentId))
+        ),
+        "bindings", List.of(Map.of(
+            "agentId", agentId,
+            "match", Map.of(
+                "channel", "claw-manager-api",
+                "accountId", "global",
+                "peer", Map.of("kind", "direct", "id", "api:sender")
+            )
+        ))
+    ));
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("list")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .singleElement()
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("id", agentId);
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("defaults")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("workspace", "/workspace")
+        .containsEntry("skipBootstrap", true);
+    assertThat(config.get("bindings"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .hasSize(1);
+  }
+
+  @Test
   void enablesWechatChannelWhenPluginIsAllowedOnInstance() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");

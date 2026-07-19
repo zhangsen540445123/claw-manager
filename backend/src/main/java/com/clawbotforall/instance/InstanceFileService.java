@@ -365,6 +365,13 @@ public class InstanceFileService {
 
     Map<String, Object> result = new LinkedHashMap<>(existingConfig);
     result.putAll(managedConfig);
+    Map<String, Object> agents = mergeNestedObjectConfig(
+        existingConfig.get("agents"),
+        managedConfig.get("agents")
+    );
+    if (!agents.isEmpty()) {
+      result.put("agents", agents);
+    }
     Map<String, Object> channels = mergeNestedObjectConfig(
         existingConfig.get("channels"),
         managedConfig.get("channels")
