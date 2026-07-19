@@ -30,6 +30,7 @@ afterEach(async () => {
   if (activeTurnStateDir) await fs.rm(activeTurnStateDir, { recursive: true, force: true });
   activeTurnStateDir = undefined;
   vi.unstubAllEnvs();
+  delete (globalThis as Record<PropertyKey, unknown>)[Symbol.for("claw-manager.api-channel.config-runtime")];
 });
 
 describe("API trace reporting", () => {
@@ -161,6 +162,31 @@ function persistedApiConfigForUsers(users: Array<{ agentId: string; senderHash: 
     })),
   } as any;
 }
+
+describe("live API config routing", () => {
+  it("uses the plugin runtime config after provisioning instead of the queue monitor startup snapshot", async () => {
+    const agentId = "user_f9db8c63722f76a920d852d85f502177";
+    const senderHash = "f9db8c63722f76a920d852d85f502177";
+    const liveConfig = persistedApiConfig(agentId, senderHash);
+    (globalThis as Record<PropertyKey, unknown>)[Symbol.for("claw-manager.api-channel.config-runtime")] = {
+      current: () => liveConfig,
+    };
+    const runtime = makeRuntime();
+
+    await expect(dispatchApiMessage({
+      requestId: "req-live-config",
+      agentId,
+      message: "hello",
+      openVikingUserId: "wx_f9db8c63722f76a920d852d85f502177",
+      senderHash,
+      conversationHash: "convhash",
+      cfg: { session: {}, agents: { list: [] }, bindings: [] } as any,
+      channelRuntime: runtime as any,
+    })).resolves.toMatchObject({ channel: "claw-manager-api" });
+
+    expect(runtime.routing.resolveAgentRoute).toHaveBeenCalledWith(expect.objectContaining({ cfg: liveConfig }));
+  });
+});
 
 async function waitUntil(condition: () => boolean | Promise<boolean>, timeoutMs = 1500): Promise<void> {
   const deadline = Date.now() + timeoutMs;

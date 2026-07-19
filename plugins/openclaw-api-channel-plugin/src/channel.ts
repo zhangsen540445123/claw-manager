@@ -75,6 +75,14 @@ type ApiConfigRuntime = {
   mutateConfigFile?: (params: Record<string, unknown>) => Promise<{ result?: unknown } | unknown>;
 };
 
+export const API_CONFIG_RUNTIME_SYMBOL = Symbol.for("claw-manager.api-channel.config-runtime");
+
+function resolveApiConfigRuntime(explicit?: ApiConfigRuntime): ApiConfigRuntime | undefined {
+  if (explicit?.current) return explicit;
+  const shared = (globalThis as Record<PropertyKey, unknown>)[API_CONFIG_RUNTIME_SYMBOL];
+  return shared && typeof shared === "object" ? shared as ApiConfigRuntime : undefined;
+}
+
 type ApiQueueResponse = {
   ok: boolean;
   requestId: string;
@@ -717,8 +725,9 @@ export async function dispatchApiMessage(ctx: GatewaySendMessageContext): Promis
   const openVikingUserId = requireOpenVikingUserId(ctx.openVikingUserId ?? ctx.openvikingUserId);
   const runtime = ctx.channelRuntime;
   const inbound = buildApiInboundContext(ctx);
+  const configRuntime = resolveApiConfigRuntime(ctx.configRuntime);
   const cfgForRoute = requirePersistedApiUserAgentBinding({
-    cfg: ctx.configRuntime?.current?.() ?? ctx.cfg,
+    cfg: configRuntime?.current?.() ?? ctx.cfg,
     agentId,
     apiPeerId: inbound.To,
   });
