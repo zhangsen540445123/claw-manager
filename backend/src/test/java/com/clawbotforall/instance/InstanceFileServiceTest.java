@@ -43,7 +43,7 @@ class InstanceFileServiceTest {
         instanceDir.resolve("home").resolve("openclaw.json").toFile(),
         new TypeReference<>() {}
     );
-    assertThat(config).containsKeys("gateway", "agents", "models", "plugins", "session");
+    assertThat(config).containsKeys("gateway", "agents", "models", "skills", "plugins", "session");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> agents = (Map<String, Object>) config.get("agents");
@@ -78,6 +78,15 @@ class InstanceFileServiceTest {
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
         .containsEntry("contextWindow", 200_000)
         .containsEntry("maxTokens", 20_000);
+
+    assertThat(config.get("skills"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("load")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("watch", true)
+        .extractingByKey("extraDirs")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .containsExactly("/workspace/skills");
 
     Map<String, Object> agentModels = objectMapper.readValue(
         instanceDir.resolve("home").resolve(".openclaw").resolve("agents").resolve("main").resolve("agent").resolve("models.json").toFile(),
@@ -184,6 +193,67 @@ class InstanceFileServiceTest {
   }
 
   @Test
+  void mergesSharedSkillExtraDirWithExistingSkillsConfig() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Files.createDirectories(homeDir);
+    objectMapper.writeValue(homeDir.resolve("openclaw.json").toFile(), Map.of(
+        "skills", Map.of(
+            "allowBundled", List.of("github"),
+            "load", Map.of(
+                "extraDirs", List.of("/custom/skills", "/workspace/skills"),
+                "watch", false,
+                "watchDebounceMs", 500
+            ),
+            "entries", Map.of("custom-skill", Map.of("enabled", false))
+        )
+    ));
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    assertThat(config.get("skills"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsKey("allowBundled")
+        .containsKey("entries")
+        .extractingByKey("load")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("watch", false)
+        .containsEntry("watchDebounceMs", 500)
+        .extractingByKey("extraDirs")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .containsExactly("/custom/skills", "/workspace/skills");
+  }
+
+  @Test
+  void keepsSharedSkillExtraDirWhenInstanceFilesAreRewritten() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    assertThat(config.get("skills"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("load")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("extraDirs")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .containsExactly("/workspace/skills");
+  }
+
+  @Test
   void preservesDynamicUserAgentsAndBindingsWhenRewritingManagedConfig() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
@@ -228,6 +298,44 @@ class InstanceFileServiceTest {
     assertThat(config.get("bindings"))
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
         .hasSize(1);
+  }
+
+  @Test
+  void doesNotWriteAgentSkillAllowlistsForSharedSkillDirectory() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+    String agentId = "user_8c2c63a5f96d294f03a9dbd4d7173348";
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Files.createDirectories(homeDir);
+    objectMapper.writeValue(homeDir.resolve("openclaw.json").toFile(), Map.of(
+        "agents", Map.of(
+            "list", List.of(Map.of(
+                "id", agentId,
+                "workspace", "/var/lib/openclaw/.openclaw/workspace-" + agentId,
+                "agentDir", "/var/lib/openclaw/.openclaw/agents/" + agentId + "/agent"
+            ))
+        )
+    ));
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("defaults")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .doesNotContainKey("skills");
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("list")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .singleElement()
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .doesNotContainKey("skills");
   }
 
   @Test

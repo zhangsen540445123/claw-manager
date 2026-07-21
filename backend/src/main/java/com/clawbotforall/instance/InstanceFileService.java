@@ -127,6 +127,7 @@ public class InstanceFileService {
       ));
     }
 
+    managed.put("skills", OpenClawSkillLoadConfig.managedSkillsConfig());
     managed.put("plugins", pluginsConfig(instance));
     Map<String, Object> channels = channelsConfig(instance);
     if (!channels.isEmpty()) {
@@ -378,6 +379,10 @@ public class InstanceFileService {
     );
     if (!channels.isEmpty()) {
       result.put("channels", channels);
+    }
+    Map<String, Object> skills = OpenClawSkillLoadConfig.mergeSkillsConfig(existingConfig.get("skills"));
+    if (!skills.isEmpty()) {
+      result.put("skills", skills);
     }
     Map<String, Object> session = mergeNestedObjectConfig(
         existingConfig.get("session"),

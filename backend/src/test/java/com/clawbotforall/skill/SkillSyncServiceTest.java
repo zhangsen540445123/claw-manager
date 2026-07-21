@@ -9,13 +9,17 @@ import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.web.ApiException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +42,8 @@ class SkillSyncServiceTest {
 
   @Mock
   InstanceFileService fileService;
+
+  ObjectMapper objectMapper = new ObjectMapper();
 
   SkillSyncService service;
 
@@ -69,7 +75,15 @@ class SkillSyncServiceTest {
         """,
         StandardCharsets.UTF_8
     );
-    Path workspace = tempDir.resolve("workspace");
+    Path instanceBase = tempDir.resolve("instances").resolve("inst_ok");
+    Path home = instanceBase.resolve("home");
+    Path workspace = instanceBase.resolve("workspace");
+    Files.createDirectories(home);
+    objectMapper.writeValue(home.resolve("openclaw.json").toFile(), Map.of(
+        "skills", Map.of(
+            "load", Map.of("extraDirs", List.of("/existing/skills"))
+        )
+    ));
     InstanceEntity ok = new InstanceEntity();
     ok.setId("inst_ok");
     ok.setName("实例 A");
@@ -80,10 +94,10 @@ class SkillSyncServiceTest {
     when(instanceCommandService.requireInstance("inst_missing"))
         .thenThrow(new ApiException(HttpStatus.NOT_FOUND, "实例不存在。"));
     when(fileService.paths("inst_ok")).thenReturn(new InstancePaths(
-        tempDir.resolve("instances").resolve("inst_ok"),
-        tempDir.resolve("instances").resolve("inst_ok").resolve("home"),
+        instanceBase,
+        home,
         workspace,
-        tempDir.resolve("instances").resolve("inst_ok").resolve("logs")
+        instanceBase.resolve("logs")
     ));
 
     SkillSyncResponse response = service.sync(new SkillSyncRequest(List.of(
@@ -102,6 +116,93 @@ class SkillSyncServiceTest {
       assertThat(result.message()).isEqualTo("实例不存在。");
     });
     assertThat(workspace.resolve("skills").resolve("alpha-skill").resolve("SKILL.md")).exists();
+    Map<String, Object> config = objectMapper.readValue(home.resolve("openclaw.json").toFile(), new TypeReference<>() {});
+    assertThat(config.get("skills"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("load")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("extraDirs")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .containsExactly("/existing/skills", "/workspace/skills");
+  }
+
+  @Test
+  void syncAddsSharedSkillLoadConfigWhenInstanceConfigHasNoSkillsSection() throws Exception {
+    Path source = tempDir.resolve("skill-repositories").resolve("repo_1").resolve("alpha-skill");
+    Files.createDirectories(source);
+    Files.writeString(source.resolve("SKILL.md"), "---\nname: alpha-skill\ndescription: Alpha.\n---\n", StandardCharsets.UTF_8);
+    Path instanceBase = tempDir.resolve("instances").resolve("inst_ok");
+    Path home = instanceBase.resolve("home");
+    Path workspace = instanceBase.resolve("workspace");
+    Files.createDirectories(home);
+    objectMapper.writeValue(home.resolve("openclaw.json").toFile(), Map.of(
+        "gateway", Map.of("mode", "local"),
+        "agents", Map.of("defaults", Map.of("workspace", "/workspace"))
+    ));
+    InstanceEntity ok = new InstanceEntity();
+    ok.setId("inst_ok");
+    ok.setName("实例 A");
+
+    SkillDefinitionEntity skill = skill("skill_1", "repo_1", "alpha-skill");
+    when(mapper.findSkillById("skill_1")).thenReturn(skill);
+    when(instanceCommandService.requireInstance("inst_ok")).thenReturn(ok);
+    when(fileService.paths("inst_ok")).thenReturn(new InstancePaths(
+        instanceBase,
+        home,
+        workspace,
+        instanceBase.resolve("logs")
+    ));
+
+    service.sync(new SkillSyncRequest(List.of(new SkillSyncItem("skill_1", List.of("inst_ok")))));
+
+    Map<String, Object> config = objectMapper.readValue(home.resolve("openclaw.json").toFile(), new TypeReference<>() {});
+    assertThat(config.get("skills"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("load")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("watch", true)
+        .extractingByKey("extraDirs")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        .containsExactly("/workspace/skills");
+  }
+
+  @Test
+  void syncDoesNotRewriteConfigWhenSharedSkillLoadConfigAlreadyExists() throws Exception {
+    Path source = tempDir.resolve("skill-repositories").resolve("repo_1").resolve("alpha-skill");
+    Files.createDirectories(source);
+    Files.writeString(source.resolve("SKILL.md"), "---\nname: alpha-skill\ndescription: Alpha.\n---\n", StandardCharsets.UTF_8);
+    Path instanceBase = tempDir.resolve("instances").resolve("inst_ok");
+    Path home = instanceBase.resolve("home");
+    Path workspace = instanceBase.resolve("workspace");
+    Files.createDirectories(home);
+    Path configPath = home.resolve("openclaw.json");
+    objectMapper.writeValue(configPath.toFile(), Map.of(
+        "skills", Map.of(
+            "load", Map.of(
+                "extraDirs", List.of("/workspace/skills"),
+                "watch", true
+            )
+        )
+    ));
+    FileTime originalModifiedTime = FileTime.from(Instant.parse("2026-07-01T00:00:00Z"));
+    Files.setLastModifiedTime(configPath, originalModifiedTime);
+    InstanceEntity ok = new InstanceEntity();
+    ok.setId("inst_ok");
+    ok.setName("实例 A");
+
+    SkillDefinitionEntity skill = skill("skill_1", "repo_1", "alpha-skill");
+    when(mapper.findSkillById("skill_1")).thenReturn(skill);
+    when(instanceCommandService.requireInstance("inst_ok")).thenReturn(ok);
+    when(fileService.paths("inst_ok")).thenReturn(new InstancePaths(
+        instanceBase,
+        home,
+        workspace,
+        instanceBase.resolve("logs")
+    ));
+
+    service.sync(new SkillSyncRequest(List.of(new SkillSyncItem("skill_1", List.of("inst_ok")))));
+
+    assertThat(Files.getLastModifiedTime(configPath)).isEqualTo(originalModifiedTime);
   }
 
   private static SkillDefinitionEntity skill(String id, String repositoryId, String skillName) {

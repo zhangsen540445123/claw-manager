@@ -4,8 +4,13 @@ import com.clawbotforall.config.ClawbotProperties;
 import com.clawbotforall.instance.InstanceCommandService;
 import com.clawbotforall.instance.InstanceEntity;
 import com.clawbotforall.instance.InstanceFileService;
+import com.clawbotforall.instance.OpenClawSkillLoadConfig;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.web.ApiException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -23,6 +28,7 @@ public class SkillSyncService {
   private final SkillFileSynchronizer synchronizer;
   private final ClawbotProperties properties;
   private final Clock clock;
+  private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
   @Autowired
   public SkillSyncService(
@@ -79,6 +85,7 @@ public class SkillSyncService {
       Path sourceDir = sourcePath(skill);
       InstancePaths paths = fileService.paths(instance.getId());
       synchronizer.copySkill(sourceDir, paths.workspaceDir().resolve("skills"), skill.getSkillName());
+      ensureSharedSkillLoadConfig(paths);
       mapper.upsertInstanceSync(syncEntity(instance.getId(), skill, "success", "同步完成。", now, now));
       return new SkillSyncResult(
           skill.getId(),
@@ -103,6 +110,14 @@ public class SkillSyncService {
           message,
           ""
       );
+    }
+  }
+
+  private void ensureSharedSkillLoadConfig(InstancePaths paths) {
+    try {
+      OpenClawSkillLoadConfig.ensureConfigFile(paths.homeDir().resolve("openclaw.json"), objectMapper);
+    } catch (IOException error) {
+      throw new UncheckedIOException("写入 OpenClaw Skill 共享配置失败。", error);
     }
   }
 
