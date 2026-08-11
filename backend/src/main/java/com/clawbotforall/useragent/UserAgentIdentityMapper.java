@@ -10,4 +10,6 @@ public interface UserAgentIdentityMapper {
   UserAgentIdentityEntity findByWechatUserIdForUpdate(@Param("wechatUserId") String wechatUserId);
 
   int insert(UserAgentIdentityEntity identity);
+
+  int deleteByAgentId(@Param("agentId") String agentId);
 }

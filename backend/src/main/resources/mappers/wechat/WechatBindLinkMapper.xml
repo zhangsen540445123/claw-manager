@@ -14,6 +14,8 @@
     <result property="qrLink" column="qr_link"/>
     <result property="qrExpiresAt" column="qr_expires_at"/>
     <result property="errorMessage" column="error_message"/>
+    <result property="cleanupStage" column="cleanup_stage"/>
+    <result property="cleanupError" column="cleanup_error"/>
     <result property="createdByAdminId" column="created_by_admin_id"/>
     <result property="miniappOpenidHash" column="miniapp_openid_hash"/>
     <result property="createdAt" column="created_at"/>
@@ -28,6 +30,14 @@
     FROM wechat_bind_links
     WHERE token = #{token}
     LIMIT 1
+  </select>
+
+  <select id="findByTokenForUpdate" resultMap="WechatBindLinkMap">
+    SELECT *
+    FROM wechat_bind_links
+    WHERE token = #{token}
+    LIMIT 1
+    FOR UPDATE
   </select>
 
   <sql id="AdminLinkFilters">
@@ -46,7 +56,7 @@
               OR (
                 expires_at IS NOT NULL
                 AND expires_at &lt;= #{now}
-                AND status NOT IN ('connected', 'rejected', 'revoked')
+                AND status NOT IN ('connected', 'rejected', 'revoked', 'cleaning', 'cleanup_failed')
               )
             )
           </when>
@@ -55,7 +65,7 @@
             AND NOT (
               expires_at IS NOT NULL
               AND expires_at &lt;= #{now}
-              AND status NOT IN ('connected', 'rejected', 'revoked', 'expired')
+              AND status NOT IN ('connected', 'rejected', 'revoked', 'expired', 'cleaning', 'cleanup_failed')
             )
           </otherwise>
         </choose>
@@ -78,14 +88,23 @@
     <include refid="AdminLinkFilters"/>
   </select>
 
+  <select id="listProtectedAccountIds" resultType="string">
+    SELECT DISTINCT target_account_id
+    FROM wechat_bind_links
+    WHERE instance_id = #{instanceId}
+      AND status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')
+      AND target_account_id IS NOT NULL
+      AND target_account_id != ''
+  </select>
+
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">
     INSERT INTO wechat_bind_links
       (token, mode, phone, instance_id, target_account_id, scanned_wechat_user_id, status,
-       qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id, miniapp_openid_hash,
+       qr_mode, qr_payload, qr_link, qr_expires_at, error_message, cleanup_stage, cleanup_error, created_by_admin_id, miniapp_openid_hash,
        created_at, started_at, expires_at, completed_at, updated_at)
     VALUES
       (#{token}, #{mode}, #{phone}, #{instanceId}, #{targetAccountId}, #{scannedWechatUserId}, #{status},
-       #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{createdByAdminId}, #{miniappOpenidHash},
+       #{qrMode}, #{qrPayload}, #{qrLink}, #{qrExpiresAt}, #{errorMessage}, #{cleanupStage}, #{cleanupError}, #{createdByAdminId}, #{miniappOpenidHash},
        #{createdAt}, #{startedAt}, #{expiresAt}, #{completedAt}, #{updatedAt})
   </insert>
 
@@ -102,6 +121,8 @@
         qr_link = #{qrLink},
         qr_expires_at = #{qrExpiresAt},
         error_message = #{errorMessage},
+        cleanup_stage = #{cleanupStage},
+        cleanup_error = #{cleanupError},
         miniapp_openid_hash = #{miniappOpenidHash},
         started_at = #{startedAt},
         expires_at = #{expiresAt},
@@ -110,14 +131,32 @@
     WHERE token = #{token}
   </update>
 
-  <delete id="deleteByPhoneOrAccountId">
-    DELETE FROM wechat_bind_links
+  <update id="redactByPhoneOrAccountId">
+    UPDATE wechat_bind_links
+    SET target_account_id = NULL,
+        scanned_wechat_user_id = NULL,
+        qr_mode = NULL,
+        qr_payload = NULL,
+        qr_link = NULL,
+        qr_expires_at = NULL,
+        cleanup_error = NULL,
+        miniapp_openid_hash = NULL,
+        updated_at = #{updatedAt}
     WHERE phone = #{phone}
        OR target_account_id = #{accountId}
-  </delete>
+  </update>
 
-  <delete id="deleteByInstanceId">
-    DELETE FROM wechat_bind_links
+  <update id="redactByInstanceId">
+    UPDATE wechat_bind_links
+    SET target_account_id = NULL,
+        scanned_wechat_user_id = NULL,
+        qr_mode = NULL,
+        qr_payload = NULL,
+        qr_link = NULL,
+        qr_expires_at = NULL,
+        cleanup_error = NULL,
+        miniapp_openid_hash = NULL,
+        updated_at = #{updatedAt}
     WHERE instance_id = #{instanceId}
-  </delete>
+  </update>
 </mapper>

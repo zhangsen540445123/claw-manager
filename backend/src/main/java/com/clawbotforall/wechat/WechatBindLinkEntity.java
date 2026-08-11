@@ -17,6 +17,8 @@ public class WechatBindLinkEntity {
   private String qrLink;
   private String qrExpiresAt;
   private String errorMessage;
+  private String cleanupStage;
+  private String cleanupError;
   private String createdByAdminId;
   private String miniappOpenidHash;
   private String createdAt;
@@ -120,6 +122,14 @@ public class WechatBindLinkEntity {
   public void setErrorMessage(String errorMessage) {
     this.errorMessage = errorMessage;
   }
+
+  public String getCleanupStage() { return cleanupStage; }
+
+  public void setCleanupStage(String cleanupStage) { this.cleanupStage = cleanupStage; }
+
+  public String getCleanupError() { return cleanupError; }
+
+  public void setCleanupError(String cleanupError) { this.cleanupError = cleanupError; }
 
   public String getCreatedByAdminId() {
     return createdByAdminId;

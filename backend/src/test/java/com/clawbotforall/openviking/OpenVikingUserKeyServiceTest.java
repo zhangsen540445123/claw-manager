@@ -73,6 +73,26 @@ class OpenVikingUserKeyServiceTest {
   }
 
   @Test
+  void rotateUserKeyDeletesLocalCacheAndRegeneratesRemoteKey() {
+    FakeUserKeyMapper mapper = new FakeUserKeyMapper();
+    FakeAdminClient adminClient = new FakeAdminClient("rotated-key");
+    OpenVikingUserKeyEntity cached = new OpenVikingUserKeyEntity();
+    cached.setAccountId("claw-manager");
+    cached.setOpenvikingUserId("wx_0123456789abcdef0123456789abcdef");
+    cached.setUserKey("old-key");
+    mapper.upsert(cached);
+    OpenVikingUserKeyService service = service(mapper, adminClient, "root-key");
+
+    OpenVikingResolvedUserKey result = service.rotateUserKey("wx_0123456789abcdef0123456789abcdef");
+
+    assertThat(result.userKey()).isEqualTo("rotated-key");
+    assertThat(result.created()).isTrue();
+    assertThat(adminClient.regenerateCalls).isEqualTo(1);
+    assertThat(adminClient.registerCalls).isZero();
+    assertThat(mapper.find("claw-manager", result.openvikingUserId()).getUserKey()).isEqualTo("rotated-key");
+  }
+
+  @Test
   void resolveRejectsMissingIdentity() {
     OpenVikingUserKeyService service = service(new FakeUserKeyMapper(), new FakeAdminClient("user-key-a"), "root-key");
 
@@ -131,6 +151,11 @@ class OpenVikingUserKeyServiceTest {
     public int upsert(OpenVikingUserKeyEntity userKey) {
       rows.put(userKey.getAccountId() + ":" + userKey.getOpenvikingUserId(), userKey);
       return 1;
+    }
+
+    @Override
+    public int delete(String accountId, String openvikingUserId) {
+      return rows.remove(accountId + ":" + openvikingUserId) == null ? 0 : 1;
     }
   }
 

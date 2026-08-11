@@ -148,6 +148,76 @@ class UserAgentIdentityServiceTest {
     verify(mapper, never()).insert(any());
   }
 
+  @Test
+  void replaceForRebindCreatesRequestedAgentAndPreservesOpenVikingIdentity() {
+    UserAgentIdentityEntity existing = identity(
+        "user_11111111111111111111111111111111",
+        "wechat_user_1",
+        "wx_0123456789abcdef0123456789abcdef"
+    );
+    when(instanceService.requireUsableApiInstance("inst_1")).thenReturn(new InstanceEntity());
+    when(mapper.findByWechatUserIdForUpdate("wechat_user_1")).thenReturn(existing);
+    when(mapper.deleteByAgentId(existing.getAgentId())).thenReturn(1);
+    when(mapper.insert(any(UserAgentIdentityEntity.class))).thenReturn(1);
+
+    UserAgentIdentityResult result = service.replaceForRebind(
+        "inst_1",
+        "wechat_user_1",
+        existing.getAgentId(),
+        "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+
+    assertThat(result.agentId()).isEqualTo("user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assertThat(result.openVikingUserId()).isEqualTo(existing.getOpenvikingUserId());
+    assertThat(result.created()).isTrue();
+    verify(mapper).deleteByAgentId(existing.getAgentId());
+    ArgumentCaptor<UserAgentIdentityEntity> captor = ArgumentCaptor.forClass(UserAgentIdentityEntity.class);
+    verify(mapper).insert(captor.capture());
+    assertThat(captor.getValue().getWechatUserId()).isEqualTo("wechat_user_1");
+    assertThat(captor.getValue().getOpenvikingUserId()).isEqualTo(existing.getOpenvikingUserId());
+  }
+
+  @Test
+  void replaceForRebindReusesAlreadyReplacedIdentityOnRetry() {
+    UserAgentIdentityEntity current = identity(
+        "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "wechat_user_1",
+        "wx_0123456789abcdef0123456789abcdef"
+    );
+    when(instanceService.requireUsableApiInstance("inst_1")).thenReturn(new InstanceEntity());
+    when(mapper.findByWechatUserIdForUpdate("wechat_user_1")).thenReturn(current);
+
+    UserAgentIdentityResult result = service.replaceForRebind(
+        "inst_1",
+        "wechat_user_1",
+        "user_11111111111111111111111111111111",
+        current.getAgentId()
+    );
+
+    assertThat(result.agentId()).isEqualTo(current.getAgentId());
+    assertThat(result.created()).isFalse();
+    verify(mapper, never()).deleteByAgentId(any());
+    verify(mapper, never()).insert(any());
+  }
+
+  @Test
+  void replaceForRebindRejectsUnexpectedCurrentAgent() {
+    UserAgentIdentityEntity current = identity(
+        "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "wechat_user_1",
+        "wx_0123456789abcdef0123456789abcdef"
+    );
+    when(instanceService.requireUsableApiInstance("inst_1")).thenReturn(new InstanceEntity());
+    when(mapper.findByWechatUserIdForUpdate("wechat_user_1")).thenReturn(current);
+
+    assertThatThrownBy(() -> service.replaceForRebind(
+        "inst_1",
+        "wechat_user_1",
+        "user_11111111111111111111111111111111",
+        "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )).isInstanceOf(ApiException.class).hasMessageContaining("身份已发生变化");
+  }
+
   private static UserAgentIdentityEntity identity(String agentId, String wechatUserId, String openVikingUserId) {
     UserAgentIdentityEntity entity = new UserAgentIdentityEntity();
     entity.setAgentId(agentId);

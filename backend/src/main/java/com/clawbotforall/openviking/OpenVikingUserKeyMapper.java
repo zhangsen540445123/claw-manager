@@ -12,4 +12,6 @@ public interface OpenVikingUserKeyMapper {
   );
 
   int upsert(OpenVikingUserKeyEntity userKey);
+
+  int delete(@Param("accountId") String accountId, @Param("openvikingUserId") String openvikingUserId);
 }

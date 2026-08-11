@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { Ban, Clipboard, Eye, Link as LinkIcon, QrCode, RefreshCw, Search } from "lucide-vue-next";
+import { Ban, Clipboard, Eye, Link as LinkIcon, QrCode, RefreshCw, Search, Undo2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
@@ -10,6 +10,7 @@ import {
   bindStatusLabel,
   bindStatusTagType,
   canRevokeBindLink,
+  cleanupStageLabel,
   copyText,
   formatDateTime,
   isLinkExpired
@@ -52,6 +53,8 @@ const statusOptions = [
   { label: "等待扫码", value: "waiting_scan" },
   { label: "已扫码", value: "scanned" },
   { label: "初始化中", value: "initializing" },
+  { label: "清理迁移中", value: "cleaning" },
+  { label: "清理失败", value: "cleanup_failed" },
   { label: "已连接", value: "connected" },
   { label: "已过期", value: "expired" },
   { label: "已拒绝", value: "rejected" },
@@ -59,8 +62,8 @@ const statusOptions = [
   { label: "已失效", value: "revoked" }
 ];
 const connectedLinks = computed(() => links.value.filter((link) => link.status === "connected").length);
-const pendingLinks = computed(() => links.value.filter((link) => ["created", "starting", "waiting_scan", "scanned", "initializing"].includes(link.status)).length);
-const failedLinks = computed(() => links.value.filter((link) => ["expired", "rejected", "failed", "revoked"].includes(link.status)).length);
+const pendingLinks = computed(() => links.value.filter((link) => ["created", "starting", "waiting_scan", "scanned", "initializing", "cleaning"].includes(link.status)).length);
+const failedLinks = computed(() => links.value.filter((link) => ["cleanup_failed", "expired", "rejected", "failed", "revoked"].includes(link.status)).length);
 
 onMounted(() => {
   void loadLinks();
@@ -186,6 +189,66 @@ async function openDetail(token: string) {
   } finally {
     detailLoading.value = false;
   }
+}
+
+async function retryCleanup(link: PublicWechatBindLink) {
+  if (!link.retryable || link.status !== "cleanup_failed") return;
+  try {
+    await ElMessageBox.confirm(
+      `将从“${cleanupStageLabel(link.cleanupStage)}”之后继续执行清理迁移，不会重新生成 Agent。`,
+      "重试重新绑定清理",
+      {
+        type: "warning",
+        confirmButtonText: "确认重试",
+        cancelButtonText: "取消"
+      }
+    );
+  } catch {
+    return;
+  }
+  await runAction(`retry-cleanup:${link.token}`, async () => {
+    const retried = await admin.retryWechatLinkCleanup(link.token);
+    replaceLink(retried);
+    if (selectedLink.value?.token === retried.token) {
+      selectedLink.value = retried;
+      void updateSelectedQr();
+    }
+    if (generatedLink.value?.token === retried.token) {
+      generatedLink.value = retried;
+    }
+    ElMessage.success("重新绑定清理任务已继续执行。");
+    await loadLinks();
+  });
+}
+
+async function cancelCleanup(link: PublicWechatBindLink) {
+  if (link.status !== "cleanup_failed") return;
+  try {
+    await ElMessageBox.confirm(
+      "仅身份替换前的早期失败任务可以取消。取消后会删除本次扫码临时账号并恢复旧微信通道；若已进入不可逆阶段，请继续重试清理。",
+      "取消重新绑定清理",
+      {
+        type: "warning",
+        confirmButtonText: "确认取消",
+        cancelButtonText: "返回"
+      }
+    );
+  } catch {
+    return;
+  }
+  await runAction(`cancel-cleanup:${link.token}`, async () => {
+    const cancelled = await admin.cancelWechatLinkCleanup(link.token);
+    replaceLink(cancelled);
+    if (selectedLink.value?.token === cancelled.token) {
+      selectedLink.value = cancelled;
+      void updateSelectedQr();
+    }
+    if (generatedLink.value?.token === cancelled.token) {
+      generatedLink.value = cancelled;
+    }
+    ElMessage.success("重新绑定清理已取消，旧微信通道已恢复。");
+    await loadLinks();
+  });
 }
 
 async function revokeLink(link: PublicWechatBindLink) {
@@ -386,10 +449,31 @@ async function updateSelectedQr() {
         <el-table-column label="完成时间" min-width="170">
           <template #default="{ row }">{{ formatDateTime(row.completedAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="right" fixed="right">
+        <el-table-column label="操作" width="240" align="right" fixed="right">
           <template #default="{ row }">
             <el-tooltip content="查看详情">
               <el-button circle :icon="Eye" @click="openDetail(row.token)" />
+            </el-tooltip>
+            <el-tooltip v-if="row.retryable && row.status === 'cleanup_failed'" content="重试清理迁移">
+              <el-button
+                circle
+                type="warning"
+                :icon="RefreshCw"
+                :loading="actionLoading === `retry-cleanup:${row.token}`"
+                :disabled="actionLoading !== ''"
+                @click="retryCleanup(row)"
+              />
+            </el-tooltip>
+            <el-tooltip v-if="row.status === 'cleanup_failed'" content="取消早期失败的清理任务">
+              <el-button
+                circle
+                type="danger"
+                plain
+                :icon="Undo2"
+                :loading="actionLoading === `cancel-cleanup:${row.token}`"
+                :disabled="actionLoading !== ''"
+                @click="cancelCleanup(row)"
+              />
             </el-tooltip>
             <el-tooltip content="手动失效">
               <span>
@@ -439,6 +523,12 @@ async function updateSelectedQr() {
             <el-descriptions-item label="有效期">{{ formatDateTime(selectedLink.expiresAt) }}</el-descriptions-item>
             <el-descriptions-item label="完成时间">{{ formatDateTime(selectedLink.completedAt) }}</el-descriptions-item>
             <el-descriptions-item label="状态说明">{{ selectedLink.message || "-" }}</el-descriptions-item>
+            <el-descriptions-item v-if="selectedLink.cleanupStage" label="清理阶段">
+              {{ cleanupStageLabel(selectedLink.cleanupStage) }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="selectedLink.cleanupError" label="清理错误">
+              {{ selectedLink.cleanupError }}
+            </el-descriptions-item>
           </el-descriptions>
 
           <div class="token-created detail-link-row">
@@ -459,6 +549,27 @@ async function updateSelectedQr() {
           </section>
 
           <div class="button-row">
+            <el-button
+              v-if="selectedLink.retryable && selectedLink.status === 'cleanup_failed'"
+              type="warning"
+              :icon="RefreshCw"
+              :loading="actionLoading === `retry-cleanup:${selectedLink.token}`"
+              :disabled="actionLoading !== ''"
+              @click="retryCleanup(selectedLink)"
+            >
+              重试清理
+            </el-button>
+            <el-button
+              v-if="selectedLink.status === 'cleanup_failed'"
+              type="danger"
+              plain
+              :icon="Undo2"
+              :loading="actionLoading === `cancel-cleanup:${selectedLink.token}`"
+              :disabled="actionLoading !== ''"
+              @click="cancelCleanup(selectedLink)"
+            >
+              取消清理
+            </el-button>
             <el-button
               type="danger"
               plain

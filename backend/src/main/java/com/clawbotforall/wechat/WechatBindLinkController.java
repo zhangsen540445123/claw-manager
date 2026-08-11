@@ -88,6 +88,32 @@ public class WechatBindLinkController {
   }
 
   /**
+   * 管理员重试失败的老用户重新绑定清理任务。
+   */
+  @PostMapping("/api/admin/wechat-bind-links/{token}/retry-cleanup")
+  public Map<String, Object> retryCleanup(
+      @PathVariable String token,
+      Authentication authentication,
+      HttpServletRequest servletRequest
+  ) {
+    requireAdmin(authentication);
+    return Map.of("link", bindLinkService.retryCleanup(token, RequestOrigins.resolve(servletRequest)));
+  }
+
+  /**
+   * 管理员取消仍处于可逆阶段的失败清理任务。
+   */
+  @PostMapping("/api/admin/wechat-bind-links/{token}/cancel-cleanup")
+  public Map<String, Object> cancelCleanup(
+      @PathVariable String token,
+      Authentication authentication,
+      HttpServletRequest servletRequest
+  ) {
+    requireAdmin(authentication);
+    return Map.of("link", bindLinkService.cancelCleanup(token, RequestOrigins.resolve(servletRequest)));
+  }
+
+  /**
    * 管理员手动失效扫码链接。
    */
   @PostMapping("/api/admin/wechat-bind-links/{token}/revoke")

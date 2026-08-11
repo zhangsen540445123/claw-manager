@@ -186,6 +186,9 @@ export interface PublicWechatBindLink {
   qrExpiresAt?: string | null;
   qrExpired: boolean;
   message: string;
+  cleanupStage: string;
+  retryable: boolean;
+  cleanupError: string;
   expiresAt?: string | null;
   completedAt?: string | null;
   createdAt: string;

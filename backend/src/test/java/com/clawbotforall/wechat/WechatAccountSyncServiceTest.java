@@ -63,15 +63,47 @@ class WechatAccountSyncServiceTest {
   }
 
   @Test
-  void keepsRuntimeInitializingWhenRawAccountHasNoPersistedBinding() throws Exception {
+  void writesAccountIndexWithAtomicReplacementAndRemovesTemporaryFile() throws Exception {
+    Path indexPath = tempDir.resolve("openclaw-weixin").resolve("accounts.json");
+    Files.createDirectories(indexPath.getParent());
+    Files.writeString(indexPath, "[\"stale-account\"]");
+
+    service.writeAccountIndexAtomically(indexPath, List.of("wx_2", "wx_1", "wx_2"));
+
+    List<String> stored = new ObjectMapper().readValue(indexPath.toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+    assertThat(stored).containsExactly("wx_2", "wx_1", "wx_2");
+    try (var files = Files.list(indexPath.getParent())) {
+      assertThat(files.map(path -> path.getFileName().toString()))
+          .noneMatch(name -> name.startsWith("accounts.json.") && name.endsWith(".tmp"));
+    }
+  }
+
+  @Test
+  void keepsProtectedRuntimeInitializingAccountWhenRawAccountHasNoPersistedBinding() throws Exception {
     InstanceEntity instance = instanceWithStateAccount();
 
     when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
+    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of("wx_1"));
 
     service.syncInstanceAccounts(instance);
 
     verify(mutationMapper, never()).updateWechatAccountMetadata(any());
     verify(mutationMapper, never()).ensureWechatAccountChannel(any());
+  }
+
+  @Test
+  void removesUnprotectedGhostAccountFilesAndIndexEntry() throws Exception {
+    InstanceEntity instance = instanceWithStateAccount();
+    Path stateDir = tempDir.resolve("home").resolve(".openclaw").resolve("openclaw-weixin");
+    Files.writeString(stateDir.resolve("accounts").resolve("wx_1.sync.json"), "{}");
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
+    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of());
+
+    service.syncInstanceAccounts(instance);
+
+    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.json"))).isFalse();
+    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.sync.json"))).isFalse();
+    assertThat(Files.readString(stateDir.resolve("accounts.json"))).doesNotContain("wx_1");
   }
 
   @Test
@@ -106,7 +138,7 @@ class WechatAccountSyncServiceTest {
   }
 
   @Test
-  void deletingAccountRemovesRelatedBindLinksAndIdlesLastBinding() throws Exception {
+  void deletingAccountRedactsRelatedBindLinkAuditAndIdlesLastBinding() throws Exception {
     InstanceEntity instance = instanceWithStateAccount();
     WechatPairedAccountEntity existing = new WechatPairedAccountEntity();
     existing.setAccountId("wx_1");
@@ -118,7 +150,7 @@ class WechatAccountSyncServiceTest {
     service.deleteAccount(instance, "wx_1");
 
     verify(mutationMapper).deleteWechatAccount("inst_1", "wx_1");
-    verify(bindLinkMapper).deleteByPhoneOrAccountId("13572873189", "wx_1");
+    verify(bindLinkMapper).redactByPhoneOrAccountId(eq("13572873189"), eq("wx_1"), anyString());
   }
 
   @Test
@@ -208,7 +240,7 @@ class WechatAccountSyncServiceTest {
     assertThat(service.deleteAllAccounts(instance)).isTrue();
 
     verify(mutationMapper).deleteWechatAccountsForInstance("inst_1");
-    verify(bindLinkMapper).deleteByInstanceId("inst_1");
+    verify(bindLinkMapper).redactByInstanceId(eq("inst_1"), anyString());
   }
 
   @Test
@@ -219,7 +251,7 @@ class WechatAccountSyncServiceTest {
     assertThat(service.deleteAllAccounts(instance)).isFalse();
 
     verify(mutationMapper).deleteWechatAccountsForInstance("inst_1");
-    verify(bindLinkMapper).deleteByInstanceId("inst_1");
+    verify(bindLinkMapper).redactByInstanceId(eq("inst_1"), anyString());
   }
 
   @Test

@@ -10,15 +10,18 @@ import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -73,10 +76,16 @@ public class WechatAccountSyncService {
     }
 
     List<WechatPairedAccountEntity> rawAccounts = readRawAccounts(instance, remarks);
+    Set<String> protectedAccountIds = new LinkedHashSet<>(bindLinkMapper.listProtectedAccountIds(instance.getId()));
     String now = Instant.now().toString();
     for (WechatPairedAccountEntity raw : rawAccounts) {
       WechatPairedAccountEntity existingAccount = existingByAccountId.get(raw.getAccountId());
       if (existingAccount == null) {
+        if (!protectedAccountIds.contains(raw.getAccountId())) {
+          removeAccountStateFiles(fileService.paths(instance.getId()), raw.getAccountId());
+          log.warn("清理未落库微信账号：instanceId={}, accountHash={}", instance.getId(),
+              WechatLogSanitizer.identityHashPreview(raw.getAccountId()));
+        }
         continue;
       }
       String rawWechatUserId = defaultString(raw.getWechatUserId()).trim();
@@ -181,7 +190,7 @@ public class WechatAccountSyncService {
     }
     removeAccountStateFiles(fileService.paths(instance.getId()), accountId);
     mutationMapper.deleteWechatAccount(instance.getId(), accountId);
-    bindLinkMapper.deleteByPhoneOrAccountId(account.getPhone(), accountId);
+    bindLinkMapper.redactByPhoneOrAccountId(account.getPhone(), accountId, Instant.now().toString());
     List<WechatPairedAccountEntity> latest = syncInstanceAccounts(instance);
     log.info("已删除微信绑定账号：instanceId={}, remainingCount={}", instance.getId(), latest.size());
     return latest;
@@ -195,7 +204,7 @@ public class WechatAccountSyncService {
     boolean hadAccounts = !aggregateMapper.listWechatAccountsByInstanceIds(List.of(instance.getId())).isEmpty();
     removeStateDir(fileService.paths(instance.getId()));
     mutationMapper.deleteWechatAccountsForInstance(instance.getId());
-    bindLinkMapper.deleteByInstanceId(instance.getId());
+    bindLinkMapper.redactByInstanceId(instance.getId(), Instant.now().toString());
     log.info("已删除实例全部微信绑定账号：instanceId={}, hadAccounts={}", instance.getId(), hadAccounts);
     return hadAccounts;
   }
@@ -208,7 +217,11 @@ public class WechatAccountSyncService {
     Path accountsDir = stateDir.resolve("accounts");
     for (String suffix : List.of(".json", ".sync.json", ".context-tokens.json")) {
       try {
-        Files.deleteIfExists(accountsDir.resolve(accountId + suffix));
+        Path candidate = accountsDir.resolve(accountId + suffix).toAbsolutePath().normalize();
+        Path normalizedAccountsDir = accountsDir.toAbsolutePath().normalize();
+        if (candidate.startsWith(normalizedAccountsDir) && !candidate.equals(normalizedAccountsDir)) {
+          Files.deleteIfExists(candidate);
+        }
       } catch (IOException ignored) {
         // 尽力处理；下次同步会反映剩余状态。
       }
@@ -318,8 +331,7 @@ public class WechatAccountSyncService {
       }
     }
     accountIds.add(accountId);
-    Files.createDirectories(indexPath.getParent());
-    objectMapper.writerWithDefaultPrettyPrinter().writeValue(indexPath.toFile(), new ArrayList<>(accountIds));
+    writeAccountIndexAtomically(indexPath, accountIds);
   }
 
   private void rewriteAccountIndex(Path indexPath, String removedAccountId) {
@@ -335,9 +347,34 @@ public class WechatAccountSyncService {
           accountIds.add(value);
         }
       }
-      objectMapper.writerWithDefaultPrettyPrinter().writeValue(indexPath.toFile(), new ArrayList<>(accountIds));
+      writeAccountIndexAtomically(indexPath, accountIds);
     } catch (IOException ignored) {
       // 尽力处理。
+    }
+  }
+
+  void writeAccountIndexAtomically(Path indexPath, Collection<String> accountIds) throws IOException {
+    Path normalizedIndex = indexPath.toAbsolutePath().normalize();
+    Path parent = normalizedIndex.getParent();
+    if (parent == null) {
+      throw new IOException("微信账号索引缺少父目录。");
+    }
+    Files.createDirectories(parent);
+    Path temporary = Files.createTempFile(parent, normalizedIndex.getFileName() + ".", ".tmp");
+    try {
+      objectMapper.writerWithDefaultPrettyPrinter().writeValue(temporary.toFile(), new ArrayList<>(accountIds));
+      try {
+        Files.move(
+            temporary,
+            normalizedIndex,
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING
+        );
+      } catch (AtomicMoveNotSupportedException ignored) {
+        Files.move(temporary, normalizedIndex, StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      Files.deleteIfExists(temporary);
     }
   }
 

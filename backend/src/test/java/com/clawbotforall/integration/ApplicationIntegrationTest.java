@@ -93,7 +93,44 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
+        .isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_rebind_operations'
+              AND table_collation = 'utf8mb4_unicode_ci'
+            """,
+        Long.class
+    ))
         .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_bind_links'
+              AND column_name IN ('cleanup_stage', 'cleanup_error')
+            """,
+        Long.class
+    ))
+        .isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_rebind_operations'
+              AND non_unique = 0
+              AND index_name IN (
+                'uk_wechat_rebind_operations_active_phone',
+                'uk_wechat_rebind_operations_active_wechat_user'
+              )
+            """,
+        Long.class
+    ))
+        .isEqualTo(2);
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admins", Long.class))
         .isEqualTo(1);
     assertThat(jdbcTemplate.queryForObject(

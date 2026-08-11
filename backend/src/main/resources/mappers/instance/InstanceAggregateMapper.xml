@@ -173,6 +173,14 @@
     LIMIT 1
   </select>
 
+  <select id="findWechatAccountByAccountIdForUpdate" resultMap="WechatAccountMap">
+    SELECT *
+    FROM wechat_paired_accounts
+    WHERE account_id = #{accountId}
+    LIMIT 1
+    FOR UPDATE
+  </select>
+
   <select id="findWechatAccountByWechatUserId" resultMap="WechatAccountMap">
     SELECT *
     FROM wechat_paired_accounts

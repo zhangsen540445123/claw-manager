@@ -12,6 +12,8 @@ public interface WechatBindLinkMapper {
 
   WechatBindLinkEntity findByToken(@Param("token") String token);
 
+  WechatBindLinkEntity findByTokenForUpdate(@Param("token") String token);
+
   List<WechatBindLinkEntity> listAdminLinks(
       @Param("mode") String mode,
       @Param("status") String status,
@@ -28,14 +30,20 @@ public interface WechatBindLinkMapper {
       @Param("now") String now
   );
 
+  List<String> listProtectedAccountIds(@Param("instanceId") String instanceId);
+
   int insert(WechatBindLinkEntity link);
 
   int update(WechatBindLinkEntity link);
 
-  int deleteByPhoneOrAccountId(
+  int redactByPhoneOrAccountId(
       @Param("phone") String phone,
-      @Param("accountId") String accountId
+      @Param("accountId") String accountId,
+      @Param("updatedAt") String updatedAt
   );
 
-  int deleteByInstanceId(@Param("instanceId") String instanceId);
+  int redactByInstanceId(
+      @Param("instanceId") String instanceId,
+      @Param("updatedAt") String updatedAt
+  );
 }

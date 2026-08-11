@@ -14,4 +14,6 @@ public interface MiniappUserKeyMapper {
   int replaceKey(MiniappUserKeyEntity key);
 
   int updateLastUsed(@Param("openidHash") String openidHash, @Param("lastUsedAt") String lastUsedAt);
+
+  int deleteByAgentId(@Param("agentId") String agentId);
 }

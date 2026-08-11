@@ -12,6 +12,7 @@ import {
   ensureApiUserAgentBinding,
   handleApiAssistantAgentEvent,
   monitorApiQueue,
+  replaceApiUserAgent,
 } from "./src/channel.js";
 import type { ApiAssistantAgentEvent, ApiGatewayStartContext } from "./src/channel.js";
 import { setApiConfigRuntime } from "./src/config-runtime.js";
@@ -46,6 +47,7 @@ const requireFromHere = createRequire(import.meta.url);
 export const API_CHANNEL_START_RPC = "claw-manager-api.start";
 export const API_ENSURE_USER_AGENT_RPC = "claw-manager-api.ensure-user-agent";
 export const API_ENSURE_API_BINDING_RPC = "claw-manager-api.ensure-api-binding";
+export const API_REPLACE_USER_AGENT_RPC = "claw-manager-api.replace-user-agent";
 
 export function resetOpenClawInternalAgentEventBridgeForTest(): void {
   internalAgentEventBridgeStop?.();
@@ -81,6 +83,28 @@ export function registerApiProvisioningMethods(api: GatewayMethodApi): void {
   });
   api.registerGatewayMethod(API_ENSURE_API_BINDING_RPC, async ({ params, respond }) => {
     await handleProvisioningRpc({ api, configRuntime, params, respond, kind: "api" });
+  });
+  api.registerGatewayMethod(API_REPLACE_USER_AGENT_RPC, async ({ params, respond }) => {
+    if (!configRuntime?.current || !configRuntime?.mutateConfigFile) {
+      respond(false, { code: "CONFIG_RUNTIME_UNAVAILABLE", message: "OpenClaw config runtime is unavailable" });
+      return;
+    }
+    const input = params && typeof params === "object" ? params as Record<string, unknown> : {};
+    try {
+      const result = await replaceApiUserAgent({
+        cfg: configRuntime.current(),
+        configRuntime,
+        newAgentId: String(input.newAgentId ?? "").trim(),
+        oldAgentId: String(input.oldAgentId ?? "").trim(),
+        openVikingUserId: String(input.openVikingUserId ?? "").trim(),
+        wechatAccountId: String(input.wechatAccountId ?? "").trim(),
+        wechatPeerId: String(input.wechatPeerId ?? "").trim(),
+        apiPeerIds: Array.isArray(input.apiPeerIds) ? input.apiPeerIds.map((value) => String(value).trim()).filter(Boolean) : [],
+      });
+      respond(true, result);
+    } catch (error) {
+      respond(false, { code: errorMessage(error), message: errorMessage(error) });
+    }
   });
 }
 

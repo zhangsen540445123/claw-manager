@@ -797,6 +797,18 @@ export const useAdminStore = defineStore("admin", {
       });
       return response.link;
     },
+    async retryWechatLinkCleanup(token: string) {
+      const response = await api<{ link: PublicWechatBindLink }>(`/api/admin/wechat-bind-links/${encodeURIComponent(token)}/retry-cleanup`, {
+        method: "POST"
+      });
+      return response.link;
+    },
+    async cancelWechatLinkCleanup(token: string) {
+      const response = await api<{ link: PublicWechatBindLink }>(`/api/admin/wechat-bind-links/${encodeURIComponent(token)}/cancel-cleanup`, {
+        method: "POST"
+      });
+      return response.link;
+    },
     async findBindingByPhone(phone: string) {
       const response = await api<{ binding: WechatBindingLookup | null }>(`/api/admin/wechat-bindings?phone=${encodeURIComponent(phone)}`);
       return response.binding;

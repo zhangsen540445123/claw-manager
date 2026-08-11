@@ -7,6 +7,7 @@ import {
   buildApiInboundContext,
   dispatchApiMessage,
   ensureApiUserAgentBinding,
+  replaceApiUserAgent,
   handleApiAssistantAgentEvent,
   imageRequestIntentReason,
   monitorApiQueue,
@@ -1199,6 +1200,190 @@ describe("buildApiInboundContext", () => {
     }]);
     await expect(fs.readFile(path.join(home, ".openclaw", `workspace-${agentId}`, "AGENTS.md"), "utf8"))
       .resolves.toBe("# Unified preset agents\n");
+  });
+
+  it("replaces a conflicting WeChat binding without pruning agents outside an explicit rebind", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-rebind-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const oldAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const newAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const peerBinding = {
+      channel: "openclaw-weixin",
+      accountId: "bot-a",
+      peer: { kind: "direct", id: "wechat-peer-a" },
+    };
+    let currentCfg: any = {
+      agents: {
+        list: [
+          {
+            id: oldAgentId,
+            workspace: path.join(home, ".openclaw", `workspace-${oldAgentId}`),
+            agentDir: path.join(home, ".openclaw", "agents", oldAgentId, "agent"),
+            tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] },
+          },
+          {
+            id: newAgentId,
+            workspace: path.join(home, ".openclaw", `workspace-${newAgentId}`),
+            agentDir: path.join(home, ".openclaw", "agents", newAgentId, "agent"),
+            tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] },
+          },
+        ],
+      },
+      bindings: [
+        { agentId: oldAgentId, match: peerBinding },
+        { agentId: newAgentId, match: peerBinding },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    await ensureApiUserAgentBinding({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId: newAgentId,
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      wechatAccountId: peerBinding.accountId,
+      wechatPeerId: peerBinding.peer.id,
+    });
+
+    expect(currentCfg.bindings).toEqual([{ agentId: newAgentId, match: peerBinding }]);
+    expect(currentCfg.agents.list.map((entry: any) => entry.id)).toEqual([oldAgentId, newAgentId]);
+  });
+
+  it("keeps an old agent when it still owns another binding", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-rebind-shared-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const oldAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const newAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const replacedBinding = {
+      channel: "openclaw-weixin",
+      accountId: "bot-a",
+      peer: { kind: "direct", id: "wechat-peer-a" },
+    };
+    const retainedBinding = {
+      channel: "openclaw-weixin",
+      accountId: "bot-a",
+      peer: { kind: "direct", id: "wechat-peer-b" },
+    };
+    let currentCfg: any = {
+      agents: {
+        list: [
+          {
+            id: oldAgentId,
+            workspace: path.join(home, ".openclaw", `workspace-${oldAgentId}`),
+            agentDir: path.join(home, ".openclaw", "agents", oldAgentId, "agent"),
+            tools: { deny: ["write", "edit", "apply_patch", "exec", "process"] },
+          },
+        ],
+      },
+      bindings: [
+        { agentId: oldAgentId, match: replacedBinding },
+        { agentId: oldAgentId, match: retainedBinding },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    await ensureApiUserAgentBinding({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId: newAgentId,
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      wechatAccountId: replacedBinding.accountId,
+      wechatPeerId: replacedBinding.peer.id,
+    });
+
+    expect(currentCfg.bindings).toEqual([
+      { agentId: oldAgentId, match: retainedBinding },
+      { agentId: newAgentId, match: replacedBinding },
+    ]);
+    expect(currentCfg.agents.list.map((entry: any) => entry.id)).toEqual([oldAgentId, newAgentId]);
+  });
+
+  it("replaces the same WeChat peer across account IDs and removes only the explicit old agent", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-explicit-rebind-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const oldAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const newAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const unrelatedAgentId = "user_cccccccccccccccccccccccccccccccc";
+    let currentCfg: any = {
+      agents: { list: [{ id: oldAgentId }, { id: unrelatedAgentId }] },
+      bindings: [{
+        agentId: oldAgentId,
+        match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer-a" } },
+      }],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await replaceApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      newAgentId,
+      oldAgentId,
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      wechatAccountId: "new-account",
+      wechatPeerId: "wechat-peer-a",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      persisted: true,
+      runtimeApplied: true,
+      bindingCreated: true,
+      displacedAgentIds: [oldAgentId],
+      conflictingBindings: [],
+    }));
+    expect(currentCfg.bindings).toEqual([{
+      agentId: newAgentId,
+      match: { channel: "openclaw-weixin", accountId: "new-account", peer: { kind: "direct", id: "wechat-peer-a" } },
+    }]);
+    expect(currentCfg.agents.list.map((entry: any) => entry.id)).toEqual([unrelatedAgentId, newAgentId]);
+  });
+
+  it("reports a conflict without mutation when the displaced agent owns another binding", async () => {
+    const oldAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const newAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let currentCfg: any = {
+      agents: { list: [{ id: oldAgentId }] },
+      bindings: [
+        { agentId: oldAgentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer-a" } } },
+        { agentId: oldAgentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "another-peer" } } },
+      ],
+    };
+    const before = structuredClone(currentCfg);
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await replaceApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      newAgentId,
+      oldAgentId,
+      openVikingUserId: "wx_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      wechatAccountId: "new-account",
+      wechatPeerId: "wechat-peer-a",
+    });
+
+    expect(result.persisted).toBe(false);
+    expect(result.conflictingBindings).toEqual([expect.objectContaining({ agentId: oldAgentId, peerId: "another-peer" })]);
+    expect(mutateConfigFile).not.toHaveBeenCalled();
+    expect(currentCfg).toEqual(before);
   });
 
   it("rejects legacy ensure_user_agent queue operations without mutating config", async () => {

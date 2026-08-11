@@ -6,6 +6,7 @@ import com.clawbotforall.runtime.RuntimeExecListener;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -84,6 +85,43 @@ public class OpenClawGatewayRpcService {
         "openVikingUserId", openVikingUserId,
         "apiPeerId", apiPeerId
     ), "apiBindingCreated");
+  }
+
+  public ReplaceUserAgentResult replaceUserAgent(
+      InstanceEntity instance,
+      String newAgentId,
+      String openVikingUserId,
+      String wechatAccountId,
+      String wechatPeerId,
+      String oldAgentId,
+      List<String> apiPeerIds
+  ) {
+    Map<String, Object> params = new java.util.LinkedHashMap<>();
+    params.put("newAgentId", newAgentId);
+    params.put("openVikingUserId", openVikingUserId);
+    params.put("wechatAccountId", wechatAccountId);
+    params.put("wechatPeerId", wechatPeerId);
+    params.put("oldAgentId", oldAgentId);
+    params.put("apiPeerIds", apiPeerIds == null ? List.of() : apiPeerIds);
+    JsonNode result = runGatewayJsonMethodRaw(instance, "claw-manager-api.replace-user-agent", params);
+    return new ReplaceUserAgentResult(
+        result.path("persisted").asBoolean(false),
+        result.path("runtimeApplied").asBoolean(false),
+        result.path("bindingCreated").asBoolean(false),
+        objectMapper.convertValue(result.path("displacedAgentIds"), new TypeReference<List<String>>() {}),
+        objectMapper.convertValue(result.path("conflictingBindings"), new TypeReference<List<Map<String, Object>>>() {})
+    );
+  }
+
+  public void stopWechatChannel(InstanceEntity instance, List<String> accountIds) {
+    Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
+    if (normalizedAccountIds.isEmpty()) {
+      stopAccount(instance, WECHAT_CHANNEL_ID, null);
+      return;
+    }
+    for (String accountId : normalizedAccountIds) {
+      stopAccount(instance, WECHAT_CHANNEL_ID, accountId);
+    }
   }
 
   public void restartWechatChannel(InstanceEntity instance, List<String> accountIds) {
@@ -181,6 +219,15 @@ public class OpenClawGatewayRpcService {
       Map<String, Object> params,
       String bindingCreatedField
   ) {
+    JsonNode result = runGatewayJsonMethodRaw(instance, method, params);
+    requireTrue(method, result, "persisted");
+    requireTrue(method, result, "runtimeApplied");
+    if (!result.has(bindingCreatedField) || !result.get(bindingCreatedField).isBoolean()) {
+      throw new IllegalStateException("OpenClaw " + method + " 响应缺少布尔字段 " + bindingCreatedField + "。");
+    }
+  }
+
+  private JsonNode runGatewayJsonMethodRaw(InstanceEntity instance, String method, Map<String, Object> params) {
     String methodLiteral;
     String paramsLiteral;
     try {
@@ -204,13 +251,7 @@ public class OpenClawGatewayRpcService {
         });
         console.log(JSON.stringify(result));
         """.formatted(methodLiteral, paramsLiteral);
-    String output = runGatewayScript(instance, method, script);
-    JsonNode result = parseLastJsonLine(method, output);
-    requireTrue(method, result, "persisted");
-    requireTrue(method, result, "runtimeApplied");
-    if (!result.has(bindingCreatedField) || !result.get(bindingCreatedField).isBoolean()) {
-      throw new IllegalStateException("OpenClaw " + method + " 响应缺少布尔字段 " + bindingCreatedField + "。");
-    }
+    return parseLastJsonLine(method, runGatewayScript(instance, method, script));
   }
 
   private JsonNode parseLastJsonLine(String method, String output) {
@@ -306,4 +347,21 @@ public class OpenClawGatewayRpcService {
       throw new IllegalStateException("OpenClaw API Channel 启动重试被中断。", error);
     }
   }
+  public record ReplaceUserAgentResult(
+      boolean persisted,
+      boolean runtimeApplied,
+      boolean bindingCreated,
+      List<String> displacedAgentIds,
+      List<Map<String, Object>> conflictingBindings
+  ) {
+    public ReplaceUserAgentResult {
+      displacedAgentIds = displacedAgentIds == null ? List.of() : List.copyOf(displacedAgentIds);
+      conflictingBindings = conflictingBindings == null ? List.of() : List.copyOf(conflictingBindings);
+    }
+
+    public boolean success() {
+      return persisted && runtimeApplied && bindingCreated && conflictingBindings.isEmpty();
+    }
+  }
+
 }

@@ -99,6 +99,63 @@ public class UserAgentIdentityService {
     }
   }
 
+  @Transactional
+  public UserAgentIdentityResult replaceForRebind(
+      String instanceId,
+      String wechatUserId,
+      String expectedOldAgentId,
+      String requestedNewAgentId
+  ) {
+    String normalizedInstanceId = normalize(instanceId);
+    if (normalizedInstanceId.isBlank()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "instanceId 不能为空。");
+    }
+    instanceService.requireUsableApiInstance(normalizedInstanceId);
+    String normalizedWechatUserId = normalize(wechatUserId);
+    String normalizedOldAgentId = normalize(expectedOldAgentId);
+    String normalizedNewAgentId = normalize(requestedNewAgentId);
+    if (normalizedWechatUserId.isBlank() || normalizedOldAgentId.isBlank()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "重新绑定身份参数不完整。");
+    }
+    if (normalizedNewAgentId.isBlank()) {
+      normalizedNewAgentId = generateAgentId();
+    }
+    if (!normalizedNewAgentId.matches("user_[0-9a-f]{32}")) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "新 Agent ID 格式无效。");
+    }
+
+    UserAgentIdentityEntity current = mapper.findByWechatUserIdForUpdate(normalizedWechatUserId);
+    if (current == null) {
+      throw new ApiException(HttpStatus.CONFLICT, "旧用户 Agent 身份不存在，无法重新绑定。");
+    }
+    if (normalizedNewAgentId.equals(current.getAgentId())) {
+      return result(current, false);
+    }
+    if (!normalizedOldAgentId.equals(current.getAgentId())) {
+      throw new ApiException(HttpStatus.CONFLICT, "用户 Agent 身份已发生变化，请重新核对后重试。");
+    }
+
+    String now = clock.instant().toString();
+    UserAgentIdentityEntity replacement = new UserAgentIdentityEntity();
+    replacement.setAgentId(normalizedNewAgentId);
+    replacement.setWechatUserId(normalizedWechatUserId);
+    replacement.setOpenvikingUserId(current.getOpenvikingUserId());
+    replacement.setCreatedAt(now);
+    replacement.setUpdatedAt(now);
+    if (mapper.deleteByAgentId(normalizedOldAgentId) != 1) {
+      throw new ApiException(HttpStatus.CONFLICT, "旧用户 Agent 身份删除失败，请重试。");
+    }
+    mapper.insert(replacement);
+    log.info(
+        "userAgent.identity.replaced instanceId={} oldAgentId={} newAgentId={} wechatUserHash={}",
+        normalizedInstanceId,
+        normalizedOldAgentId,
+        normalizedNewAgentId,
+        Integer.toHexString(normalizedWechatUserId.hashCode())
+    );
+    return result(replacement, true);
+  }
+
   private static UserAgentIdentityResult result(UserAgentIdentityEntity entity, boolean created) {
     return new UserAgentIdentityResult(entity.getAgentId(), entity.getOpenvikingUserId(), created);
   }

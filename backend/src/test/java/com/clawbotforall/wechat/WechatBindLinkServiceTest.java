@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,9 @@ class WechatBindLinkServiceTest {
   @Mock
   ApplicationEventPublisher applicationEventPublisher;
 
+  @Mock
+  WechatUserRebindService rebindService;
+
   WechatBindLinkService service;
   QueuedExecutor executor;
   Logger serviceLogger;
@@ -94,6 +98,7 @@ class WechatBindLinkServiceTest {
         new ObjectMapper(),
         eventPublisher,
         gatewayRpcService,
+        rebindService,
         applicationEventPublisher,
         executor
     );
@@ -305,6 +310,9 @@ class WechatBindLinkServiceTest {
     stored.setStatus("waiting_scan");
     stored.setQrPayload("data:image/png;base64,abc");
     stored.setQrLink("https://qr.example.test");
+    stored.setCleanupError("cleanup-sensitive");
+    stored.setScannedWechatUserId("wechat-sensitive");
+    stored.setMiniappOpenidHash("miniapp-sensitive");
     stored.setQrExpiresAt(Instant.now().minusSeconds(1).toString());
     when(linkMapper.findByToken("token_4")).thenReturn(stored);
     when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
@@ -315,7 +323,13 @@ class WechatBindLinkServiceTest {
     ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
     verify(linkMapper).update(captor.capture());
     assertThat(captor.getValue().getStatus()).isEqualTo("expired");
-    assertThat(captor.getValue().getQrPayload()).isEmpty();
+    assertThat(captor.getValue().getQrPayload()).isNull();
+    assertThat(captor.getValue().getQrLink()).isNull();
+    assertThat(captor.getValue().getTargetAccountId()).isNull();
+    assertThat(captor.getValue().getScannedWechatUserId()).isNull();
+    assertThat(captor.getValue().getMiniappOpenidHash()).isNull();
+    assertThat(captor.getValue().getCleanupError()).isNull();
+    assertThat(captor.getValue().getCompletedAt()).isNotBlank();
     assertThat(link.status()).isEqualTo("expired");
     assertThat(link.qrExpired()).isFalse();
     assertThat(link.qrPayload()).isEmpty();
@@ -428,31 +442,123 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
-  void existingUserLinkConnectsOnlyAfterRawAccountRefreshAndRestartsThatChannel() {
+  void existingUserAllowsNewAccountIdAndDelegatesToRecoverableRebind() {
     InstanceEntity instance = instance("inst_1", "实例一", "running");
     WechatBindLinkEntity stored = existingLink("token_existing_fresh_raw", "inst_1");
     stored.setStatus("waiting_scan");
     stored.setTargetAccountId("wx_existing");
     stored.setStartedAt("2026-06-20T08:17:49Z");
+    WechatPairedAccountEntity oldAccount = pairedAccount("wx_existing", "13572873189", "inst_1");
     AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
     when(linkMapper.findByToken("token_existing_fresh_raw")).thenAnswer(invocation -> saved.get());
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing")).thenReturn(oldAccount);
+    WechatBindLinkEntity connected = existingLink("token_existing_fresh_raw", "inst_1");
+    connected.setStatus("connected");
+    when(rebindService.startOrResume(stored, oldAccount, instance, "wx_new", "wechat-user"))
+        .thenReturn(connected);
+
+    service.completeBindAfterLogin(
+        "token_existing_fresh_raw",
+        completion("wx_existing", "wx_new", "wechat-user"),
+        "https://admin.example.test"
+    );
+
+    verify(rebindService).startOrResume(stored, oldAccount, instance, "wx_new", "wechat-user");
+    verify(accountSyncService, never()).syncInstanceAccounts(instance);
+    verify(gatewayRpcService, never()).restartWechatChannel(any(), any());
+  }
+
+  @Test
+  void cleansActualTemporaryAccountWhenExistingDatabaseAccountDisappearedBeforeFinalize() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = existingLink("token_existing_missing_account", "inst_1");
+    stored.setStatus("waiting_scan");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_existing_missing_account")).thenAnswer(invocation -> saved.get());
     when(linkMapper.update(any())).thenAnswer(invocation -> {
       saved.set(invocation.getArgument(0));
       return 1;
     });
     when(aggregateMapper.findById("inst_1")).thenReturn(instance);
-    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
-    when(aggregateMapper.findWechatAccountByAccountId("wx_existing")).thenReturn(pairedAccount("wx_existing", "13572873189", "inst_1"));
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing")).thenReturn(null);
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
 
     service.completeBindAfterLogin(
-        "token_existing_fresh_raw",
-        completion("wx_existing", "wx_existing", "wechat-user"),
+        "token_existing_missing_account",
+        completion("wx_existing", "wx_new", "wechat-user"),
         "https://admin.example.test"
     );
 
-    assertThat(saved.get().getStatus()).isEqualTo("connected");
-    verify(accountSyncService).syncInstanceAccounts(instance);
-    verify(gatewayRpcService).restartWechatChannel(instance, List.of("wx_existing"));
+    assertThat(saved.get().getStatus()).isEqualTo("rejected");
+    assertThat(saved.get().getCompletedAt()).isNotNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("wx_new"));
+    verify(accountSyncService, never()).removeAccountStateFiles(any(InstancePaths.class), eq("wx_existing"));
+  }
+
+  @Test
+  void rejectsAndCleansTemporaryAccountWhenRebindInitializationFailsBeforeOperationCreation() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = existingLink("token_existing_rebind_init_failure", "inst_1");
+    stored.setStatus("waiting_scan");
+    WechatPairedAccountEntity oldAccount = pairedAccount("wx_existing", "13572873189", "inst_1");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_existing_rebind_init_failure")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing")).thenReturn(oldAccount);
+    doThrow(new com.clawbotforall.web.ApiException(
+        org.springframework.http.HttpStatus.CONFLICT, "旧用户 Agent 身份不存在，无法重新绑定。"))
+        .when(rebindService).startOrResume(stored, oldAccount, instance, "wx_new", "wechat-user");
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
+
+    service.completeBindAfterLogin(
+        "token_existing_rebind_init_failure",
+        completion("wx_existing", "wx_new", "wechat-user"),
+        "https://admin.example.test"
+    );
+
+    assertThat(saved.get().getStatus()).isEqualTo("rejected");
+    assertThat(saved.get().getCompletedAt()).isNotNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("wx_new"));
+    verify(accountSyncService, never()).removeAccountStateFiles(any(InstancePaths.class), eq("wx_existing"));
+  }
+
+  @Test
+  void rejectsAndCleansActualTemporaryAccountWhenInstanceDisappearsBeforeFinalize() {
+    WechatBindLinkEntity stored = existingLink("token_existing_missing_instance", "inst_deleted");
+    stored.setStatus("waiting_scan");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_existing_missing_instance")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_deleted")).thenReturn(null);
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing"))
+        .thenReturn(pairedAccount("wx_existing", "13572873189", "inst_deleted"));
+    when(fileService.paths("inst_deleted")).thenReturn(testPaths());
+
+    service.completeBindAfterLogin(
+        "token_existing_missing_instance",
+        completion("wx_existing", "wx_new", "wechat-user"),
+        "https://admin.example.test"
+    );
+
+    assertThat(saved.get().getStatus()).isEqualTo("rejected");
+    assertThat(saved.get().getCompletedAt()).isNotNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("wx_new"));
+    verify(accountSyncService, never()).removeAccountStateFiles(any(InstancePaths.class), eq("wx_existing"));
+    verify(rebindService, never()).startOrResume(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -489,6 +595,13 @@ class WechatBindLinkServiceTest {
 
     assertThat(statusUpdates).containsSubsequence("scanned", "initializing", "connected");
     assertThat(saved.get().getStatus()).isEqualTo("connected");
+    assertThat(saved.get().getCompletedAt()).isNotBlank();
+    assertThat(saved.get().getQrPayload()).isNull();
+    assertThat(saved.get().getQrLink()).isNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    assertThat(saved.get().getMiniappOpenidHash()).isNull();
+    assertThat(saved.get().getCleanupError()).isNull();
     verify(applicationEventPublisher).publishEvent(new WechatBindConnectedEvent(
         "inst_1",
         "554603a4df61-im-bot",
@@ -505,6 +618,10 @@ class WechatBindLinkServiceTest {
     stored.setPhone("13900000001");
     stored.setInstanceId("inst_1");
     stored.setTargetAccountId("cmwx_duplicate_wechat");
+    stored.setQrPayload("data:image/png;base64,sensitive");
+    stored.setQrLink("https://qr.example.test/sensitive");
+    stored.setMiniappOpenidHash("miniapp-sensitive");
+    stored.setCleanupError("cleanup-sensitive");
     AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
     when(linkMapper.findByToken("token_duplicate_wechat")).thenAnswer(invocation -> saved.get());
     when(linkMapper.update(any())).thenAnswer(invocation -> {
@@ -525,6 +642,13 @@ class WechatBindLinkServiceTest {
 
     assertThat(saved.get().getStatus()).isEqualTo("rejected");
     assertThat(saved.get().getErrorMessage()).isEqualTo("该微信已绑定到其他手机号或实例，请联系管理员处理。");
+    assertThat(saved.get().getCompletedAt()).isNotBlank();
+    assertThat(saved.get().getQrPayload()).isNull();
+    assertThat(saved.get().getQrLink()).isNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    assertThat(saved.get().getMiniappOpenidHash()).isNull();
+    assertThat(saved.get().getCleanupError()).isNull();
     verify(mutationMapper, never()).insertWechatAccount(any());
     verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("cmwx_duplicate_wechat"));
     verify(gatewayRpcService).restartWechatChannel(instance, List.of("wx_existing"));
@@ -606,6 +730,104 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void stopsWechatChannelWhenNewUserAgentInitializationFails() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = newLink("token_agent_init_failure");
+    stored.setStatus("waiting_scan");
+    stored.setPhone("13900000001");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("cmwx_agent_init_failure");
+    stored.setStartedAt("2026-08-09T17:40:00Z");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_agent_init_failure")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByWechatUserId("wechat-new-user")).thenReturn(null);
+    when(aggregateMapper.findWechatAccountByAccountId("new-account-id")).thenReturn(null);
+    doThrow(new IllegalStateException("agent init failed"))
+        .when(applicationEventPublisher).publishEvent(any(WechatBindConnectedEvent.class));
+
+    service.completeBindAfterLogin(
+        "token_agent_init_failure",
+        completion("cmwx_agent_init_failure", "new-account-id", "wechat-new-user"),
+        "https://admin.example.test"
+    );
+
+    assertThat(saved.get().getStatus()).isEqualTo("failed");
+    assertThat(saved.get().getTargetAccountId()).isEqualTo("new-account-id");
+    assertThat(saved.get().getScannedWechatUserId()).isEqualTo("wechat-new-user");
+    assertThat(saved.get().getCompletedAt()).isNull();
+    InOrder order = inOrder(gatewayRpcService, applicationEventPublisher);
+    order.verify(gatewayRpcService).restartWechatChannel(instance, List.of("new-account-id"));
+    order.verify(applicationEventPublisher).publishEvent(any(WechatBindConnectedEvent.class));
+    order.verify(gatewayRpcService).stopWechatChannel(instance, List.of("new-account-id"));
+  }
+
+  @Test
+  void retryAgentProvisioningRestartsWechatChannelOnlyAfterAgentInitializationSucceeds() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = newLink("token_agent_retry_success");
+    stored.setStatus("failed");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("new-account-id");
+    stored.setScannedWechatUserId("wechat-new-user");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_agent_retry_success")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink result = service.retryAgentProvisioning(
+        "token_agent_retry_success",
+        "https://admin.example.test"
+    );
+
+    assertThat(result.status()).isEqualTo("connected");
+    InOrder order = inOrder(applicationEventPublisher, gatewayRpcService);
+    order.verify(applicationEventPublisher).publishEvent(any(WechatBindConnectedEvent.class));
+    order.verify(gatewayRpcService).restartWechatChannel(instance, List.of("new-account-id"));
+  }
+
+  @Test
+  void retryAgentProvisioningKeepsWechatChannelStoppedWhenInitializationFailsAgain() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = newLink("token_agent_retry_failure");
+    stored.setStatus("failed");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("new-account-id");
+    stored.setScannedWechatUserId("wechat-new-user");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_agent_retry_failure")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+    doThrow(new IllegalStateException("agent init failed again"))
+        .when(applicationEventPublisher).publishEvent(any(WechatBindConnectedEvent.class));
+
+    PublicWechatBindLink result = service.retryAgentProvisioning(
+        "token_agent_retry_failure",
+        "https://admin.example.test"
+    );
+
+    assertThat(result.status()).isEqualTo("failed");
+    assertThat(saved.get().getTargetAccountId()).isEqualTo("new-account-id");
+    assertThat(saved.get().getScannedWechatUserId()).isEqualTo("wechat-new-user");
+    verify(gatewayRpcService).stopWechatChannel(instance, List.of("new-account-id"));
+    verify(gatewayRpcService, never()).restartWechatChannel(instance, List.of("new-account-id"));
+  }
+
+  @Test
   void acceptsNewUserOnlyWhenPluginCompletionReturnsActualAccountAndWechatUserId() {
     InstanceEntity instance = instance("inst_1", "实例一", "running");
     WechatBindLinkEntity stored = newLink("token_plugin_generated_account");
@@ -631,7 +853,8 @@ class WechatBindLinkServiceTest {
     );
 
     assertThat(saved.get().getStatus()).isEqualTo("connected");
-    assertThat(saved.get().getScannedWechatUserId()).isEqualTo("wechat-new-user");
+    assertThat(saved.get().getScannedWechatUserId()).isNull();
+    assertThat(saved.get().getTargetAccountId()).isNull();
     ArgumentCaptor<WechatPairedAccountEntity> accountCaptor = ArgumentCaptor.forClass(WechatPairedAccountEntity.class);
     verify(mutationMapper).insertWechatAccount(accountCaptor.capture());
     assertThat(accountCaptor.getValue().getAccountId()).isEqualTo("554603a4df61-im-bot");
@@ -725,6 +948,7 @@ class WechatBindLinkServiceTest {
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
     when(aggregateMapper.countWechatAccountsByInstanceId("inst_1")).thenReturn(0);
     when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
     when(wechatBindService.startBind(eq(instance), eq(false), any(), any()))
         .thenThrow(new IllegalStateException("微信二维码生成失败：未捕获二维码链接。"));
 
@@ -742,26 +966,37 @@ class WechatBindLinkServiceTest {
     assertThat(saved.get().getStatus()).isEqualTo("failed");
     assertThat(saved.get().getErrorMessage()).isEqualTo("微信二维码生成失败：未捕获二维码链接。");
     assertThat(saved.get().getTargetAccountId()).startsWith("cmwx_wbl_");
+    verify(accountSyncService).removeAccountStateFiles(
+        any(InstancePaths.class), eq(saved.get().getTargetAccountId()));
   }
 
   @Test
   void publicStatusExpiresLinkAfterOneDay() {
     WechatBindLinkEntity stored = newLink("token_expired");
     stored.setStatus("starting");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("cmwx_expired");
     stored.setExpiresAt(Instant.now().minusSeconds(1).toString());
     stored.setQrPayload("data:image/png;base64,abc");
     stored.setQrLink("https://qr.example.test");
     when(linkMapper.findByToken("token_expired")).thenReturn(stored);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
 
     PublicWechatBindLink link = service.getPublicStatus("token_expired", "https://admin.example.test");
 
     ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
     verify(linkMapper).update(captor.capture());
     assertThat(captor.getValue().getStatus()).isEqualTo("expired");
-    assertThat(captor.getValue().getQrPayload()).isEmpty();
+    assertThat(captor.getValue().getQrPayload()).isNull();
+    assertThat(captor.getValue().getQrLink()).isNull();
+    assertThat(captor.getValue().getTargetAccountId()).isNull();
+    assertThat(captor.getValue().getCompletedAt()).isNotBlank();
     assertThat(link.status()).isEqualTo("expired");
     assertThat(link.statusLabel()).isEqualTo("已过期");
     assertThat(link.message()).isEqualTo("扫码链接已过期，请联系管理员重新生成。");
+    verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("cmwx_expired"));
   }
 
   @Test
@@ -797,24 +1032,222 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
-  void adminCanRevokeLink() {
-    WechatBindLinkEntity stored = existingLink("token_revoke", "inst_1");
+  void refreshExistingLinkRecoversRedactedTargetAccountFromPhone() {
+    WechatBindLinkEntity stored = existingLink("token_existing_redacted_target", "inst_1");
+    stored.setStatus("expired");
+    stored.setTargetAccountId(null);
+    stored.setErrorMessage("二维码已过期，请重新生成后扫码绑定。");
+    stored.setExpiresAt(Instant.now().plusSeconds(3600).toString());
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_existing_redacted_target")).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatPairedAccountEntity account = pairedAccount("wx_existing", "13572873189", "inst_1");
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByPhone("13572873189")).thenReturn(account);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+    when(wechatBindService.startBind(eq(instance), eq(true), eq("wx_existing"), any()))
+        .thenReturn(startResult("wx_existing", "https://liteapp.weixin.qq.com/q/refresh"));
+
+    service.refreshQr("token_existing_redacted_target", "https://admin.example.test");
+    executor.runNext();
+
+    assertThat(saved.get().getTargetAccountId()).isEqualTo("wx_existing");
+    verify(wechatBindService).startBind(eq(instance), eq(true), eq("wx_existing"), any());
+  }
+
+  @Test
+  void retryCleanupDelegatesOnlyForCleanupFailedLink() {
+    WechatBindLinkEntity stored = existingLink("token_cleanup_retry", "inst_1");
+    stored.setStatus("cleanup_failed");
+    stored.setCleanupStage("routing_replaced");
+    WechatBindLinkEntity completed = existingLink("token_cleanup_retry", "inst_1");
+    completed.setStatus("connected");
+    when(linkMapper.findByToken("token_cleanup_retry")).thenReturn(stored);
+    when(rebindService.retry("token_cleanup_retry")).thenReturn(completed);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink result = service.retryCleanup("token_cleanup_retry", "https://admin.example.test");
+
+    assertThat(result.status()).isEqualTo("connected");
+    verify(rebindService).retry("token_cleanup_retry");
+  }
+
+  @Test
+  void cancelCleanupDelegatesOnlyForCleanupFailedLink() {
+    WechatBindLinkEntity stored = existingLink("token_cleanup_cancel", "inst_1");
+    stored.setStatus("cleanup_failed");
+    WechatBindLinkEntity cancelled = existingLink("token_cleanup_cancel", "inst_1");
+    cancelled.setStatus("revoked");
+    cancelled.setTargetAccountId(null);
+    when(linkMapper.findByToken("token_cleanup_cancel")).thenReturn(stored);
+    when(rebindService.cancelFailed("token_cleanup_cancel")).thenReturn(cancelled);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink result = service.cancelCleanup("token_cleanup_cancel", "https://admin.example.test");
+
+    assertThat(result.status()).isEqualTo("revoked");
+    verify(rebindService).cancelFailed("token_cleanup_cancel");
+  }
+
+  @Test
+  void retryCleanupRejectsNonFailedLink() {
+    WechatBindLinkEntity stored = existingLink("token_cleanup_active", "inst_1");
+    stored.setStatus("cleaning");
+    when(linkMapper.findByToken("token_cleanup_active")).thenReturn(stored);
+
+    assertThatThrownBy(() -> service.retryCleanup("token_cleanup_active", "https://admin.example.test"))
+        .isInstanceOf(com.clawbotforall.web.ApiException.class)
+        .hasMessageContaining("不需要重试");
+
+    verify(rebindService, never()).retry(any());
+  }
+
+  @Test
+  void cleaningStatusDoesNotExpireAndCleanupFailureIsRetryable() {
+    WechatBindLinkEntity cleaning = existingLink("token_cleaning", "inst_1");
+    cleaning.setStatus("cleaning");
+    cleaning.setCleanupStage("identity_replaced");
+    cleaning.setExpiresAt(Instant.now().minusSeconds(60).toString());
+    when(linkMapper.findByToken("token_cleaning")).thenReturn(cleaning);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+
+    PublicWechatBindLink cleaningResult = service.getPublicStatus("token_cleaning", "https://admin.example.test");
+
+    assertThat(cleaningResult.status()).isEqualTo("cleaning");
+    assertThat(cleaningResult.statusLabel()).isEqualTo("清理迁移中");
+    assertThat(cleaningResult.message()).contains("正在替换旧身份");
+    assertThat(cleaningResult.retryable()).isFalse();
+
+    WechatBindLinkEntity failed = existingLink("token_cleanup_failed", "inst_1");
+    failed.setStatus("cleanup_failed");
+    failed.setCleanupStage("routing_replaced");
+    failed.setCleanupError("token=secret-value route failed");
+    failed.setExpiresAt(Instant.now().minusSeconds(60).toString());
+    when(linkMapper.findByToken("token_cleanup_failed")).thenReturn(failed);
+
+    PublicWechatBindLink failedResult = service.getPublicStatus("token_cleanup_failed", "https://admin.example.test");
+
+    assertThat(failedResult.status()).isEqualTo("cleanup_failed");
+    assertThat(failedResult.statusLabel()).isEqualTo("清理失败");
+    assertThat(failedResult.retryable()).isTrue();
+    assertThat(failedResult.cleanupError()).doesNotContain("secret-value");
+  }
+
+  @Test
+  void adminCanRevokeLinkAndRemovesUnboundTemporaryAccountState() {
+    WechatBindLinkEntity stored = newLink("token_revoke");
     stored.setStatus("waiting_scan");
+    stored.setInstanceId("inst_1");
+    stored.setTargetAccountId("cmwx_revoke");
     stored.setQrPayload("data:image/png;base64,abc");
     stored.setQrLink("https://qr.example.test");
+    stored.setScannedWechatUserId("wechat-sensitive");
+    stored.setMiniappOpenidHash("miniapp-sensitive");
     when(linkMapper.findByToken("token_revoke")).thenReturn(stored);
     when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
 
     PublicWechatBindLink link = service.revokeLink("token_revoke", "https://admin.example.test");
 
     ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
     verify(linkMapper).update(captor.capture());
     assertThat(captor.getValue().getStatus()).isEqualTo("revoked");
-    assertThat(captor.getValue().getQrPayload()).isEmpty();
+    assertThat(captor.getValue().getQrPayload()).isNull();
+    assertThat(captor.getValue().getQrLink()).isNull();
+    assertThat(captor.getValue().getTargetAccountId()).isNull();
+    assertThat(captor.getValue().getScannedWechatUserId()).isNull();
+    assertThat(captor.getValue().getMiniappOpenidHash()).isNull();
+    assertThat(captor.getValue().getCleanupError()).isNull();
+    assertThat(captor.getValue().getCompletedAt()).isNotBlank();
     assertThat(link.status()).isEqualTo("revoked");
     assertThat(link.statusLabel()).isEqualTo("已失效");
     assertThat(link.message()).isEqualTo("扫码链接已手动失效。");
+    verify(accountSyncService).removeAccountStateFiles(any(InstancePaths.class), eq("cmwx_revoke"));
+  }
+
+  @Test
+  void revokeRejectsCleaningAndCleanupFailedRebindTasks() {
+    WechatBindLinkEntity cleaning = existingLink("token_revoke_cleaning", "inst_1");
+    cleaning.setStatus("cleaning");
+    when(linkMapper.findByToken("token_revoke_cleaning")).thenReturn(cleaning);
+
+    assertThatThrownBy(() -> service.revokeLink("token_revoke_cleaning", "https://admin.example.test"))
+        .isInstanceOf(com.clawbotforall.web.ApiException.class)
+        .hasMessageContaining("不能直接失效");
+
+    WechatBindLinkEntity failed = existingLink("token_revoke_cleanup_failed", "inst_1");
+    failed.setStatus("cleanup_failed");
+    when(linkMapper.findByToken("token_revoke_cleanup_failed")).thenReturn(failed);
+
+    assertThatThrownBy(() -> service.revokeLink("token_revoke_cleanup_failed", "https://admin.example.test"))
+        .isInstanceOf(com.clawbotforall.web.ApiException.class)
+        .hasMessageContaining("不能直接失效");
+
+    verify(linkMapper, never()).update(any());
+    verify(accountSyncService, never()).removeAccountStateFiles(any(), any());
+  }
+
+  @Test
+  void revokeDoesNotDeletePersistedWechatAccountState() {
+    WechatBindLinkEntity stored = existingLink("token_revoke_existing", "inst_1");
+    stored.setStatus("waiting_scan");
+    when(linkMapper.findByToken("token_revoke_existing")).thenReturn(stored);
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing"))
+        .thenReturn(pairedAccount("wx_existing", "13572873189", "inst_1"));
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+
+    service.revokeLink("token_revoke_existing", "https://admin.example.test");
+
+    verify(accountSyncService, never()).removeAccountStateFiles(any(), any());
+  }
+
+  @Test
+  void queuedQrJobExpiresAndCleansTemporaryAccountBeforeStartingGateway() {
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>();
+    when(linkMapper.insert(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    when(linkMapper.findByToken(any())).thenAnswer(invocation -> saved.get());
+    when(linkMapper.update(any())).thenAnswer(invocation -> {
+      saved.set(invocation.getArgument(0));
+      return 1;
+    });
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    when(aggregateMapper.listAll()).thenReturn(List.of(instance));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
+    when(aggregateMapper.countWechatAccountsByInstanceId("inst_1")).thenReturn(0);
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
+
+    service.createLink(
+        admin(),
+        new WechatBindLinkService.CreateBindLinkRequest("new", "13900000003"),
+        "https://admin.example.test"
+    );
+    saved.get().setExpiresAt(Instant.now().minusSeconds(1).toString());
+    String temporaryAccountId = saved.get().getTargetAccountId();
+
+    executor.runNext();
+
+    assertThat(saved.get().getStatus()).isEqualTo("expired");
+    verify(wechatBindService, never()).startBind(any(), any(Boolean.class), any(), any());
+    verify(accountSyncService).removeAccountStateFiles(
+        any(InstancePaths.class), eq(temporaryAccountId));
+    assertThat(saved.get().getTargetAccountId()).isNull();
   }
 
   private static AuthenticatedAdmin admin() {

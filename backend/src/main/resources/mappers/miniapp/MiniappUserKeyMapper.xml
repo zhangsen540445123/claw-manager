@@ -50,4 +50,9 @@
         updated_at = #{lastUsedAt}
     WHERE openid_hash = #{openidHash}
   </update>
+  <delete id="deleteByAgentId">
+    DELETE k FROM miniapp_user_keys k
+    INNER JOIN miniapp_user_bindings b ON b.openid_hash = k.openid_hash
+    WHERE b.agent_id = #{agentId}
+  </delete>
 </mapper>

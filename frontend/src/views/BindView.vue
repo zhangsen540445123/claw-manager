@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import { RefreshCw, Smartphone } from "lucide-vue-next";
 import { ApiError, api } from "../api/http";
 import type { PublicWechatBindLink } from "../api/types";
-import { bindStatusLabel, bindStatusTagType, formatDateTime, isLinkExpired } from "../utils/adminUi";
+import { bindStatusLabel, bindStatusTagType, cleanupStageLabel, formatDateTime, isLinkExpired } from "../utils/adminUi";
 import { renderQrDataUrl } from "../utils/qr";
 import clawManagerLogo from "../claw-manager.png";
 
@@ -131,6 +131,23 @@ async function updateQrImage() {
           <el-tag :type="bindStatusTagType(link.status)" effect="plain">{{ bindStatusLabel(link.status, link.statusLabel) }}</el-tag>
           <span>{{ link.message }}</span>
         </div>
+
+        <el-alert
+          v-if="link.status === 'cleaning'"
+          :title="`正在处理：${cleanupStageLabel(link.cleanupStage)}`"
+          description="请保持页面开启并等待处理完成，期间无需重复扫码。"
+          type="warning"
+          show-icon
+          :closable="false"
+        />
+        <el-alert
+          v-else-if="link.status === 'cleanup_failed'"
+          title="旧账号清理迁移暂未完成"
+          :description="link.cleanupError || '管理员可以从失败阶段继续重试，请联系管理员处理。'"
+          type="error"
+          show-icon
+          :closable="false"
+        />
 
         <div v-if="showQr" class="qr-box">
           <img :src="qrImage" alt="微信二维码" />

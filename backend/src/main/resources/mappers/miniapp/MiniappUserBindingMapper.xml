@@ -88,4 +88,10 @@
         updated_at = #{updatedAt}
     WHERE openid_hash = #{openidHash}
   </update>
+  <select id="listByAgentId" resultMap="MiniappUserBindingMap">
+    SELECT * FROM miniapp_user_bindings WHERE agent_id = #{agentId}
+  </select>
+  <delete id="deleteByAgentId">
+    DELETE FROM miniapp_user_bindings WHERE agent_id = #{agentId}
+  </delete>
 </mapper>

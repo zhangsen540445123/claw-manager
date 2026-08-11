@@ -478,7 +478,7 @@ export async function ensureApiUserAgentBinding(params: {
     throw new Error("API_BINDING_NOT_READY");
   }
   if (agentReady &&
-      (!binding || currentBindings.some((entry) => isUserAgentBinding(entry, agentId, binding)))) {
+      (!binding || hasUniqueUserAgentBinding(currentBindings, agentId, binding))) {
     if (!params.apiPeerId) {
       await ensureApiAgentWorkspace(workspace);
     }
@@ -493,12 +493,8 @@ export async function ensureApiUserAgentBinding(params: {
       base: "runtime",
       afterWrite: { mode: "auto" },
       mutate: (draft: Record<string, unknown>) => {
-        const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
-        if (!bindings.some((entry) => isUserAgentBinding(entry, agentId, binding))) {
-          bindings.push({ agentId, match: binding });
-        }
-        draft.bindings = bindings;
-        return { agentId, created: false, bound: true };
+        const result = replaceUserAgentBinding(draft, agentId, binding);
+        return { agentId, created: false, bound: result.bound };
       },
     }));
     return params.configRuntime?.current?.() ?? current;
@@ -526,16 +522,10 @@ export async function ensureApiUserAgentBinding(params: {
         ? list.map((entry) => isRecord(entry) && entry.id === agentId ? agent : entry)
         : [...list, agent],
     };
-
-    const bindings = Array.isArray(draft.bindings) ? [...draft.bindings] : [];
-    const bindingExists = binding
-      ? bindings.some((entry) => isUserAgentBinding(entry, agentId, binding))
-      : true;
-    if (binding && !bindingExists) {
-      bindings.push({ agentId, match: binding });
-    }
-    draft.bindings = bindings;
-    return { agentId, created: !existing, bound: !bindingExists };
+    const result = binding
+      ? replaceUserAgentBinding(draft, agentId, binding)
+      : { bound: false };
+    return { agentId, created: !existing, bound: result.bound };
   };
 
   await serializeApiDynamicAgentBindingMutation(() => mutateConfigFile({
@@ -617,12 +607,201 @@ function resolveRequestedUserAgentBinding(params: {
 
 function isUserAgentBinding(value: unknown, agentId: string, match: UserAgentBindingMatch): boolean {
   if (!isRecord(value) || value.agentId !== agentId || !isRecord(value.match)) return false;
-  const candidate = value.match;
-  return candidate.channel === match.channel &&
-    candidate.accountId === match.accountId &&
-    isRecord(candidate.peer) &&
-    candidate.peer.kind === "direct" &&
-    candidate.peer.id === match.peer.id;
+  return isSameUserAgentBindingMatch(value.match, match);
+}
+
+function hasUniqueUserAgentBinding(bindings: unknown[], agentId: string, match: UserAgentBindingMatch): boolean {
+  let sameMatchCount = 0;
+  let hasTargetBinding = false;
+  for (const entry of bindings) {
+    if (!isRecord(entry) || !isRecord(entry.match) || !isSameUserAgentBindingMatch(entry.match, match)) {
+      continue;
+    }
+    sameMatchCount += 1;
+    if (entry.agentId === agentId) {
+      hasTargetBinding = true;
+    }
+  }
+  return hasTargetBinding && sameMatchCount === 1;
+}
+
+function isSameUserAgentBindingMatch(value: Record<string, unknown>, match: UserAgentBindingMatch): boolean {
+  if (value.channel !== match.channel ||
+      !isRecord(value.peer) ||
+      value.peer.kind !== "direct" ||
+      value.peer.id !== match.peer.id) {
+    return false;
+  }
+  // A WeChat login can issue a new accountId for the same peer. Routing ownership is
+  // therefore peer-scoped, while API bindings remain account-scoped.
+  return match.channel === "openclaw-weixin" || value.accountId === match.accountId;
+}
+
+function replaceUserAgentBinding(
+  draft: Record<string, unknown>,
+  agentId: string,
+  binding: UserAgentBindingMatch,
+): { bound: boolean; displacedAgentIds: string[] } {
+  const currentBindings = Array.isArray(draft.bindings) ? draft.bindings : [];
+  const nextBindings: unknown[] = [];
+  const displacedAgentIds = new Set<string>();
+
+  for (const entry of currentBindings) {
+    if (!isRecord(entry) || !isRecord(entry.match)) {
+      nextBindings.push(entry);
+      continue;
+    }
+    if (isSameUserAgentBindingMatch(entry.match, binding)) {
+      if (typeof entry.agentId === "string" && entry.agentId !== agentId) {
+        displacedAgentIds.add(entry.agentId);
+      }
+      continue;
+    }
+    nextBindings.push(entry);
+  }
+
+  nextBindings.push({ agentId, match: binding });
+  draft.bindings = nextBindings;
+  return { bound: true, displacedAgentIds: [...displacedAgentIds] };
+}
+
+export type ReplaceUserAgentConflict = {
+  agentId: string;
+  channel: string;
+  accountId: string;
+  peerId: string;
+};
+
+export type ReplaceUserAgentResult = {
+  persisted: boolean;
+  runtimeApplied: boolean;
+  bindingCreated: boolean;
+  displacedAgentIds: string[];
+  conflictingBindings: ReplaceUserAgentConflict[];
+};
+
+/** Atomically replace one user's WeChat route and remove only the explicitly displaced Agent. */
+export async function replaceApiUserAgent(params: {
+  cfg: OpenClawConfig;
+  configRuntime?: ApiConfigRuntime;
+  newAgentId: string;
+  openVikingUserId: string;
+  wechatAccountId: string;
+  wechatPeerId: string;
+  oldAgentId?: string;
+  apiPeerIds?: string[];
+}): Promise<ReplaceUserAgentResult> {
+  const newAgentId = requireUserAgentId(params.newAgentId);
+  const oldAgentId = trim(params.oldAgentId);
+  if (oldAgentId && !USER_AGENT_ID_PATTERN.test(oldAgentId)) throw new Error("invalid oldAgentId");
+  requireOpenVikingUserId(params.openVikingUserId);
+  const binding = resolveRequestedUserAgentBinding({
+    wechatAccountId: params.wechatAccountId,
+    wechatPeerId: params.wechatPeerId,
+  });
+  if (!binding) throw new Error("wechatAccountId and wechatPeerId must be provided together");
+  const runtime = params.configRuntime;
+  if (!runtime?.current || !runtime.mutateConfigFile) throw new Error("CONFIG_RUNTIME_UNAVAILABLE");
+
+  const current = runtime.current();
+  const bindings = Array.isArray(current.bindings) ? current.bindings : [];
+  const apiPeerIds = new Set((params.apiPeerIds ?? []).map(trim).filter(Boolean));
+  const removedIndexes = new Set<number>();
+  const displacedAgentIds = new Set<string>();
+
+  bindings.forEach((entry, index) => {
+    if (!isRecord(entry) || !isRecord(entry.match)) return;
+    const owner = typeof entry.agentId === "string" ? trim(entry.agentId) : "";
+    if (isSameUserAgentBindingMatch(entry.match, binding)) {
+      removedIndexes.add(index);
+      if (owner && owner !== newAgentId) displacedAgentIds.add(owner);
+      return;
+    }
+    if (oldAgentId && owner === oldAgentId && isApiPeerBinding(entry.match, apiPeerIds)) {
+      removedIndexes.add(index);
+    }
+  });
+
+  const conflictingBindings: ReplaceUserAgentConflict[] = [];
+  for (const displaced of displacedAgentIds) {
+    if (!oldAgentId || displaced !== oldAgentId) {
+      conflictingBindings.push({ agentId: displaced, channel: binding.channel, accountId: binding.accountId, peerId: binding.peer.id });
+    }
+  }
+  if (oldAgentId && oldAgentId !== newAgentId) {
+    bindings.forEach((entry, index) => {
+      if (removedIndexes.has(index) || !isRecord(entry) || entry.agentId !== oldAgentId || !isRecord(entry.match)) return;
+      conflictingBindings.push(bindingConflict(oldAgentId, entry.match));
+    });
+  }
+  if (conflictingBindings.length > 0) {
+    return { persisted: false, runtimeApplied: false, bindingCreated: false, displacedAgentIds: [...displacedAgentIds], conflictingBindings };
+  }
+
+  const workspace = resolveHomePath(`~/.openclaw/workspace-${newAgentId}`);
+  const agentDir = resolveHomePath(`~/.openclaw/agents/${newAgentId}/agent`);
+  await ensureApiAgentWorkspace(workspace);
+  await fs.mkdir(agentDir, { recursive: true });
+  await serializeApiDynamicAgentBindingMutation(() => runtime.mutateConfigFile!({
+    base: "runtime",
+    afterWrite: { mode: "auto" },
+    mutate: (draft: Record<string, unknown>) => {
+      const draftAgents = isRecord(draft.agents) ? draft.agents : {};
+      const list = Array.isArray(draftAgents.list) ? [...draftAgents.list] : [];
+      const existing = list.find((entry) => isRecord(entry) && entry.id === newAgentId);
+      const agent: Record<string, unknown> = isRecord(existing) ? { ...existing } : { id: newAgentId };
+      agent.id = newAgentId;
+      agent.workspace = workspace;
+      agent.agentDir = agentDir;
+      const tools = isRecord(agent.tools) ? { ...agent.tools } : {};
+      const denied = Array.isArray(tools.deny) ? tools.deny.filter((value): value is string => typeof value === "string") : [];
+      tools.deny = [...new Set([...denied, ...REQUIRED_DENIED_TOOLS])];
+      agent.tools = tools;
+      const nextAgentList = existing
+        ? list.map((entry) => isRecord(entry) && entry.id === newAgentId ? agent : entry)
+        : [...list, agent];
+      draft.agents = {
+        ...draftAgents,
+        list: oldAgentId && oldAgentId !== newAgentId
+          ? nextAgentList.filter((entry) => !isRecord(entry) || entry.id !== oldAgentId)
+          : nextAgentList,
+      };
+      const draftBindings = Array.isArray(draft.bindings) ? draft.bindings : [];
+      draft.bindings = draftBindings.filter((entry) => {
+        if (!isRecord(entry) || !isRecord(entry.match)) return true;
+        if (isSameUserAgentBindingMatch(entry.match, binding)) return false;
+        return !(oldAgentId && entry.agentId === oldAgentId && isApiPeerBinding(entry.match, apiPeerIds));
+      });
+      (draft.bindings as unknown[]).push({ agentId: newAgentId, match: binding });
+      return { bindingCreated: true, displacedAgentIds: [...displacedAgentIds] };
+    },
+  }));
+
+  const applied = runtime.current();
+  const appliedBindings = Array.isArray(applied.bindings) ? applied.bindings : [];
+  const runtimeApplied = hasUniqueUserAgentBinding(appliedBindings, newAgentId, binding);
+  return {
+    persisted: runtimeApplied,
+    runtimeApplied,
+    bindingCreated: runtimeApplied,
+    displacedAgentIds: [...displacedAgentIds],
+    conflictingBindings: [],
+  };
+}
+
+function isApiPeerBinding(match: Record<string, unknown>, apiPeerIds: Set<string>): boolean {
+  return apiPeerIds.size > 0 && match.channel === API_CHANNEL_ID && match.accountId === API_ACCOUNT_ID &&
+    isRecord(match.peer) && match.peer.kind === "direct" && typeof match.peer.id === "string" &&
+    apiPeerIds.has(trim(match.peer.id));
+}
+
+function bindingConflict(agentId: string, match: Record<string, unknown>): ReplaceUserAgentConflict {
+  return {
+    agentId,
+    channel: trim(match.channel),
+    accountId: trim(match.accountId),
+    peerId: isRecord(match.peer) ? trim(match.peer.id) : "",
+  };
 }
 
 function hasRequiredApiToolPolicy(agent: Record<string, unknown>): boolean {

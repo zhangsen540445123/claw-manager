@@ -91,6 +91,52 @@ class OpenClawGatewayRpcServiceTest {
         .hasMessageContaining("runtimeApplied");
   }
 
+  @Test
+  void replaceUserAgentReturnsDisplacedAgentsAndRejectsConflicts() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":true,\"bindingCreated\":true,\"displacedAgentIds\":[\"user_old\"],\"conflictingBindings\":[]}");
+
+    OpenClawGatewayRpcService.ReplaceUserAgentResult result = service.replaceUserAgent(
+        instance(), "user_new", "wx_1", "bot-new", "peer-a", "user_old", List.of("api:old"));
+
+    assertThat(result.displacedAgentIds()).containsExactly("user_old");
+    assertThat(capturedCommand.get().get(3)).contains("claw-manager-api.replace-user-agent");
+  }
+
+  @Test
+  void replaceUserAgentReportsConflictingBindingsWithoutTreatingThemAsSuccess() {
+    completeExecWith("{\"persisted\":false,\"runtimeApplied\":false,\"bindingCreated\":false,\"displacedAgentIds\":[],\"conflictingBindings\":[{\"channel\":\"other\"}]}");
+
+    OpenClawGatewayRpcService.ReplaceUserAgentResult result = service.replaceUserAgent(
+        instance(), "user_new", "wx_1", "bot-new", "peer-a", "user_old", List.of());
+
+    assertThat(result.success()).isFalse();
+    assertThat(result.conflictingBindings()).hasSize(1);
+  }
+
+  @Test
+  void replaceUserAgentTreatsMissingOptionalArraysAsEmpty() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":true,\"bindingCreated\":true}");
+
+    OpenClawGatewayRpcService.ReplaceUserAgentResult result = service.replaceUserAgent(
+        instance(), "user_new", "wx_1", "bot-new", "peer-a", "user_old", List.of());
+
+    assertThat(result.displacedAgentIds()).isEmpty();
+    assertThat(result.conflictingBindings()).isEmpty();
+    assertThat(result.success()).isTrue();
+  }
+
+  @Test
+  void replaceUserAgentTreatsNullOptionalArraysAsEmpty() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":true,\"bindingCreated\":true,\"displacedAgentIds\":null,\"conflictingBindings\":null}");
+
+    OpenClawGatewayRpcService.ReplaceUserAgentResult result = service.replaceUserAgent(
+        instance(), "user_new", "wx_1", "bot-new", "peer-a", "user_old", List.of());
+
+    assertThat(result.displacedAgentIds()).isEmpty();
+    assertThat(result.conflictingBindings()).isEmpty();
+    assertThat(result.success()).isTrue();
+  }
+
   private void completeExecWith(String output) {
     doAnswer(invocation -> {
       @SuppressWarnings("unchecked")

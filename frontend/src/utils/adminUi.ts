@@ -19,6 +19,8 @@ export function bindStatusLabel(status: string, fallback = "") {
     waiting_scan: "等待扫码",
     scanned: "已扫码",
     initializing: "初始化中",
+    cleaning: "清理迁移中",
+    cleanup_failed: "清理失败",
     connected: "已连接",
     expired: "已过期",
     rejected: "已拒绝",
@@ -30,9 +32,25 @@ export function bindStatusLabel(status: string, fallback = "") {
 
 export function bindStatusTagType(status: string) {
   if (status === "connected") return "success";
-  if (status === "failed" || status === "rejected" || status === "expired" || status === "revoked") return "danger";
-  if (status === "waiting_scan" || status === "scanned" || status === "initializing" || status === "starting") return "warning";
+  if (status === "failed" || status === "cleanup_failed" || status === "rejected" || status === "expired" || status === "revoked") return "danger";
+  if (status === "waiting_scan" || status === "scanned" || status === "initializing" || status === "cleaning" || status === "starting") return "warning";
   return "info";
+}
+
+export function cleanupStageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    validated: "身份已校验",
+    channels_stopped: "消息通道已停止",
+    miniapp_deleted: "小程序身份已清理",
+    identity_replaced: "Agent 身份已替换",
+    routing_replaced: "消息路由已替换",
+    local_files_deleted: "旧 Agent 文件已清理",
+    wechat_account_migrated: "微信账号已迁移",
+    openviking_key_rotated: "OpenViking Key 已轮换",
+    gateway_restarted: "Gateway 已重启",
+    completed: "清理迁移已完成"
+  };
+  return labels[stage] || stage || "-";
 }
 
 export function isLinkExpired(expiresAt?: string | null) {
@@ -44,7 +62,7 @@ export function isLinkExpired(expiresAt?: string | null) {
 }
 
 export function canRevokeBindLink(status: string) {
-  return !["connected", "rejected", "expired", "revoked"].includes(status);
+  return !["cleaning", "cleanup_failed", "connected", "rejected", "expired", "revoked"].includes(status);
 }
 
 export async function copyText(value: string, label = "内容") {

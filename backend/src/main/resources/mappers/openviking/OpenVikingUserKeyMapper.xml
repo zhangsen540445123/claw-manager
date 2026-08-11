@@ -26,4 +26,8 @@
       user_key = VALUES(user_key),
       updated_at = VALUES(updated_at)
   </insert>
+  <delete id="delete">
+    DELETE FROM openviking_user_keys
+    WHERE account_id = #{accountId} AND openviking_user_id = #{openvikingUserId}
+  </delete>
 </mapper>

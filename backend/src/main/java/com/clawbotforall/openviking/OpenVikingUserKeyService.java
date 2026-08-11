@@ -60,6 +60,34 @@ public class OpenVikingUserKeyService {
     }
   }
 
+  @Transactional
+  public OpenVikingResolvedUserKey rotateUserKey(String openvikingUserId) {
+    OpenVikingEffectiveSettings settings = settingsService.effectiveSettings();
+    requireText(settings.baseUrl(), "OpenViking Base URL 不能为空。");
+    requireText(settings.accountId(), "OpenViking Account ID 不能为空。");
+    requireText(settings.rootApiKey(), "OpenViking Root API Key 未配置。");
+    String normalizedUserId = trim(openvikingUserId);
+    if (!OPENVIKING_USER_ID_PATTERN.matcher(normalizedUserId).matches()) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, "OpenViking user identity 格式无效。");
+    }
+    String lockKey = settings.accountId() + ":" + normalizedUserId;
+    Object lock = locks.computeIfAbsent(lockKey, ignored -> new Object());
+    synchronized (lock) {
+      userKeyMapper.delete(settings.accountId(), normalizedUserId);
+      String userKey = adminClient.regenerateUserKey(
+          settings.baseUrl(), settings.rootApiKey(), settings.accountId(), normalizedUserId);
+      OpenVikingUserKeyEntity entity = new OpenVikingUserKeyEntity();
+      String now = Instant.now().toString();
+      entity.setAccountId(settings.accountId());
+      entity.setOpenvikingUserId(normalizedUserId);
+      entity.setUserKey(userKey);
+      entity.setCreatedAt(now);
+      entity.setUpdatedAt(now);
+      userKeyMapper.upsert(entity);
+      return new OpenVikingResolvedUserKey(settings.accountId(), normalizedUserId, userKey, true);
+    }
+  }
+
   private String registerOrRegenerate(OpenVikingEffectiveSettings settings, String openvikingUserId) {
     try {
       return adminClient.registerUser(settings.baseUrl(), settings.rootApiKey(), settings.accountId(), openvikingUserId);

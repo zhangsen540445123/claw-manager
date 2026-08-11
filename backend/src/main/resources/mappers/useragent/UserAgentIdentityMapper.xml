@@ -30,4 +30,7 @@
     VALUES
       (#{agentId}, #{wechatUserId}, #{openvikingUserId}, #{createdAt}, #{updatedAt})
   </insert>
+  <delete id="deleteByAgentId">
+    DELETE FROM user_agent_identities WHERE agent_id = #{agentId}
+  </delete>
 </mapper>
