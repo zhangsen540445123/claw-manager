@@ -14,6 +14,8 @@ public interface MiniappUserBindingMapper {
 
   int countByInstanceId(@Param("instanceId") String instanceId);
 
+  List<MiniappUserBindingEntity> listByInstanceId(@Param("instanceId") String instanceId);
+
   List<MiniappUserBindingEntity> listByAgentId(@Param("agentId") String agentId);
 
   int deleteByAgentId(@Param("agentId") String agentId);

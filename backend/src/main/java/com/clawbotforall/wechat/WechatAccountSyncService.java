@@ -24,11 +24,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 同步和维护已绑定微信账号的实例状态文件与数据库映射。
@@ -44,6 +47,7 @@ public class WechatAccountSyncService {
   private final InstanceFileService fileService;
   private final WechatAccountReader accountReader;
   private final WechatBindLinkMapper bindLinkMapper;
+  private final ObjectProvider<WechatUserCleanupService> cleanupServiceProvider;
   private final ObjectMapper objectMapper;
 
   public WechatAccountSyncService(
@@ -52,6 +56,7 @@ public class WechatAccountSyncService {
       InstanceFileService fileService,
       WechatAccountReader accountReader,
       WechatBindLinkMapper bindLinkMapper,
+      ObjectProvider<WechatUserCleanupService> cleanupServiceProvider,
       ObjectMapper objectMapper
   ) {
     this.aggregateMapper = aggregateMapper;
@@ -59,6 +64,7 @@ public class WechatAccountSyncService {
     this.fileService = fileService;
     this.accountReader = accountReader;
     this.bindLinkMapper = bindLinkMapper;
+    this.cleanupServiceProvider = cleanupServiceProvider;
     this.objectMapper = objectMapper;
   }
 
@@ -77,14 +83,13 @@ public class WechatAccountSyncService {
 
     List<WechatPairedAccountEntity> rawAccounts = readRawAccounts(instance, remarks);
     Set<String> protectedAccountIds = new LinkedHashSet<>(bindLinkMapper.listProtectedAccountIds(instance.getId()));
+    List<WechatPairedAccountEntity> ghostAccounts = new ArrayList<>();
     String now = Instant.now().toString();
     for (WechatPairedAccountEntity raw : rawAccounts) {
       WechatPairedAccountEntity existingAccount = existingByAccountId.get(raw.getAccountId());
       if (existingAccount == null) {
         if (!protectedAccountIds.contains(raw.getAccountId())) {
-          removeAccountStateFiles(fileService.paths(instance.getId()), raw.getAccountId());
-          log.warn("清理未落库微信账号：instanceId={}, accountHash={}", instance.getId(),
-              WechatLogSanitizer.identityHashPreview(raw.getAccountId()));
+          ghostAccounts.add(raw);
         }
         continue;
       }
@@ -98,6 +103,7 @@ public class WechatAccountSyncService {
       existingAccount.setUpdatedAt(now);
       mutationMapper.updateWechatAccountMetadata(existingAccount);
     }
+    scheduleGhostAccountCleanupAfterCommit(instance, ghostAccounts);
 
     List<WechatPairedAccountEntity> latest = aggregateMapper.listWechatAccountsByInstanceIds(List.of(instance.getId()));
     ensureAccountChannels(latest, now);
@@ -209,24 +215,77 @@ public class WechatAccountSyncService {
     return hadAccounts;
   }
 
+  private void scheduleGhostAccountCleanupAfterCommit(
+      InstanceEntity instance,
+      List<WechatPairedAccountEntity> ghostAccounts
+  ) {
+    if (ghostAccounts.isEmpty()) {
+      return;
+    }
+    List<WechatPairedAccountEntity> pendingAccounts = List.copyOf(ghostAccounts);
+    Runnable cleanup = () -> pendingAccounts.forEach(raw -> scheduleGhostAccountCleanup(instance, raw));
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          cleanup.run();
+        }
+      });
+      return;
+    }
+    cleanup.run();
+  }
+
+  private void scheduleGhostAccountCleanup(InstanceEntity instance, WechatPairedAccountEntity raw) {
+    WechatUserCleanupService cleanupService = cleanupServiceProvider.getIfAvailable();
+    String accountHash = WechatLogSanitizer.identityHashPreview(raw.getAccountId());
+    if (cleanupService == null) {
+      log.warn("未落库微信账号等待清理服务就绪：instanceId={}, accountHash={}", instance.getId(), accountHash);
+      return;
+    }
+    try {
+      WechatUserCleanupOperationEntity operation = cleanupService.startResidue(
+          instance,
+          new WechatUserResidueEvidence(
+              raw.getAccountId(), raw.getWechatUserId(), null, null,
+              List.of(), List.of(), List.of(), List.of("wechat_account_state")
+          ),
+          "account_sync"
+      );
+      log.warn("未落库微信账号已进入清理任务：instanceId={}, accountHash={}, operationHash={}, status={}",
+          instance.getId(), accountHash,
+          WechatLogSanitizer.identityHashPreview(operation == null ? null : operation.getOperationId()),
+          operation == null ? "unknown" : defaultString(operation.getStatus()));
+    } catch (RuntimeException error) {
+      log.warn("未落库微信账号创建清理任务失败：instanceId={}, accountHash={}, errorType={}",
+          instance.getId(), accountHash, error.getClass().getSimpleName());
+      log.debug("未落库微信账号创建清理任务异常详情：instanceId={}, accountHash={}",
+          instance.getId(), accountHash, error);
+    }
+  }
+
   /**
    * 删除实例状态目录里的单个微信账号文件，并从 accounts.json 中移除索引。
    */
   public void removeAccountStateFiles(InstancePaths paths, String accountId) {
-    Path stateDir = weixinStateDir(paths);
-    Path accountsDir = stateDir.resolve("accounts");
-    for (String suffix : List.of(".json", ".sync.json", ".context-tokens.json")) {
-      try {
-        Path candidate = accountsDir.resolve(accountId + suffix).toAbsolutePath().normalize();
-        Path normalizedAccountsDir = accountsDir.toAbsolutePath().normalize();
-        if (candidate.startsWith(normalizedAccountsDir) && !candidate.equals(normalizedAccountsDir)) {
-          Files.deleteIfExists(candidate);
-        }
-      } catch (IOException ignored) {
-        // 尽力处理；下次同步会反映剩余状态。
-      }
+    String normalizedAccountId = defaultString(accountId).trim();
+    if (normalizedAccountId.isBlank()) {
+      throw new IllegalArgumentException("微信 accountId 不能为空。");
     }
-    rewriteAccountIndex(stateDir.resolve("accounts.json"), accountId);
+    Path stateDir = weixinStateDir(paths);
+    Path accountsDir = stateDir.resolve("accounts").toAbsolutePath().normalize();
+    try {
+      for (String suffix : List.of(".json", ".sync.json", ".context-tokens.json")) {
+        Path candidate = accountsDir.resolve(normalizedAccountId + suffix).toAbsolutePath().normalize();
+        if (!candidate.startsWith(accountsDir) || candidate.equals(accountsDir)) {
+          throw new IllegalArgumentException("微信 accountId 路径无效。");
+        }
+        Files.deleteIfExists(candidate);
+      }
+      rewriteAccountIndex(stateDir.resolve("accounts.json"), normalizedAccountId);
+    } catch (IOException error) {
+      throw new IllegalStateException("删除微信账号状态失败。", error);
+    }
   }
 
   public boolean refreshAccountCredentialsFromRejectedLogin(
@@ -334,23 +393,19 @@ public class WechatAccountSyncService {
     writeAccountIndexAtomically(indexPath, accountIds);
   }
 
-  private void rewriteAccountIndex(Path indexPath, String removedAccountId) {
+  private void rewriteAccountIndex(Path indexPath, String removedAccountId) throws IOException {
     if (!Files.exists(indexPath)) {
       return;
     }
-    try {
-      List<Object> raw = objectMapper.readValue(indexPath.toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
-      LinkedHashSet<String> accountIds = new LinkedHashSet<>();
-      for (Object item : raw) {
-        String value = defaultString(item == null ? null : String.valueOf(item)).trim();
-        if (!value.isBlank() && !value.equals(removedAccountId)) {
-          accountIds.add(value);
-        }
+    List<Object> raw = objectMapper.readValue(indexPath.toFile(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+    LinkedHashSet<String> accountIds = new LinkedHashSet<>();
+    for (Object item : raw) {
+      String value = defaultString(item == null ? null : String.valueOf(item)).trim();
+      if (!value.isBlank() && !value.equals(removedAccountId)) {
+        accountIds.add(value);
       }
-      writeAccountIndexAtomically(indexPath, accountIds);
-    } catch (IOException ignored) {
-      // 尽力处理。
     }
+    writeAccountIndexAtomically(indexPath, accountIds);
   }
 
   void writeAccountIndexAtomically(Path indexPath, Collection<String> accountIds) throws IOException {

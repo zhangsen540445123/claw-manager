@@ -89,12 +89,48 @@
   </select>
 
   <select id="listProtectedAccountIds" resultType="string">
-    SELECT DISTINCT target_account_id
+    SELECT DISTINCT account_id
+    FROM (
+      SELECT target_account_id COLLATE utf8mb4_unicode_ci AS account_id
+      FROM wechat_bind_links
+      WHERE instance_id = #{instanceId}
+        AND status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')
+      UNION ALL
+      SELECT old_account_id COLLATE utf8mb4_unicode_ci AS account_id
+      FROM wechat_rebind_operations
+      WHERE old_instance_id = #{instanceId}
+        AND status IN ('pending', 'cleaning', 'provisioning', 'cleanup_failed')
+      UNION ALL
+      SELECT new_account_id COLLATE utf8mb4_unicode_ci AS account_id
+      FROM wechat_rebind_operations
+      WHERE new_instance_id = #{instanceId}
+        AND status IN ('pending', 'cleaning', 'provisioning', 'cleanup_failed')
+      UNION ALL
+      SELECT account_id COLLATE utf8mb4_unicode_ci AS account_id
+      FROM wechat_user_cleanup_operations
+      WHERE instance_id = #{instanceId}
+        AND status IN ('pending', 'cleaning', 'cleanup_failed')
+    ) protected_accounts
+    WHERE account_id IS NOT NULL
+      AND account_id != ''
+  </select>
+
+  <select id="findActiveForUserForUpdate" resultMap="WechatBindLinkMap">
+    SELECT *
     FROM wechat_bind_links
     WHERE instance_id = #{instanceId}
       AND status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')
-      AND target_account_id IS NOT NULL
-      AND target_account_id != ''
+      AND (
+        (#{phone} IS NOT NULL AND #{phone} != ''
+          AND phone COLLATE utf8mb4_unicode_ci = #{phone} COLLATE utf8mb4_unicode_ci)
+        OR (#{accountId} IS NOT NULL AND #{accountId} != ''
+          AND target_account_id COLLATE utf8mb4_unicode_ci = #{accountId} COLLATE utf8mb4_unicode_ci)
+        OR (#{wechatUserId} IS NOT NULL AND #{wechatUserId} != ''
+          AND scanned_wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId} COLLATE utf8mb4_unicode_ci)
+      )
+    ORDER BY created_at DESC
+    LIMIT 1
+    FOR UPDATE
   </select>
 
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatBindLinkEntity">

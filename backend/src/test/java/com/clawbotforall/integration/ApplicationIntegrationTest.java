@@ -93,13 +93,24 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
-        .isEqualTo(2);
+        .isEqualTo(3);
     assertThat(jdbcTemplate.queryForObject(
         """
             SELECT COUNT(*)
             FROM information_schema.tables
             WHERE table_schema = DATABASE()
               AND table_name = 'wechat_rebind_operations'
+              AND table_collation = 'utf8mb4_unicode_ci'
+            """,
+        Long.class
+    ))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'wechat_user_cleanup_operations'
               AND table_collation = 'utf8mb4_unicode_ci'
             """,
         Long.class
@@ -505,7 +516,9 @@ class ApplicationIntegrationTest {
         .andExpect(status().isNotFound());
 
     mockMvc.perform(post("/api/admin/instances/" + instanceId + "/wechat-unbind").cookie(adminCookie))
-        .andExpect(status().isOk())
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.operations").isArray())
+        .andExpect(jsonPath("$.residueWarnings").isArray())
         .andExpect(jsonPath("$.instance.wechatBinding.status").value("idle"));
 
     forceInstanceBindable(instanceId);

@@ -30,4 +30,8 @@
     DELETE FROM openviking_user_keys
     WHERE account_id = #{accountId} AND openviking_user_id = #{openvikingUserId}
   </delete>
+  <delete id="deleteByOpenvikingUserId">
+    DELETE FROM openviking_user_keys
+    WHERE openviking_user_id = #{openvikingUserId}
+  </delete>
 </mapper>

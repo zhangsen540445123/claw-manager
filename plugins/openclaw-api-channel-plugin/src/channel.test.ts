@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   buildApiInboundContext,
   dispatchApiMessage,
+  deleteApiUserAgent,
   ensureApiUserAgentBinding,
   replaceApiUserAgent,
   handleApiAssistantAgentEvent,
@@ -1559,5 +1560,243 @@ describe("buildApiInboundContext", () => {
 
     expect(chunks.join("")).toBe("已把计划整理好。\n查看链接：https://example.test/view\n可以继续调整。");
     expect(result.text).toBe("已把计划整理好。\n查看链接：https://example.test/view\n可以继续调整。");
+  });
+});
+
+
+describe("deleteApiUserAgent", () => {
+  it("keeps the current valid binding while deleting an old duplicate binding for the same peer", async () => {
+    const oldAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const currentAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const currentBinding = {
+      agentId: currentAgentId,
+      match: { channel: "openclaw-weixin", accountId: "current-account", peer: { kind: "direct", id: "wechat-peer" } },
+    };
+    let currentCfg: any = {
+      agents: { list: [{ id: oldAgentId }, { id: currentAgentId }] },
+      bindings: [
+        { agentId: oldAgentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+        currentBinding,
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId: oldAgentId,
+      wechatAccountIds: ["old-account"],
+      wechatPeerIds: ["wechat-peer"],
+      protectedAgentIds: [currentAgentId],
+    });
+
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true, conflictingBindings: [] });
+    expect(currentCfg.agents.list).toEqual([{ id: currentAgentId }]);
+    expect(currentCfg.bindings).toEqual([currentBinding]);
+  });
+
+  it("still deletes the target Agent when it is mistakenly included in protectedAgentIds", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let currentCfg: any = {
+      agents: { list: [{ id: agentId }] },
+      bindings: [
+        { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["old-account"],
+      wechatPeerIds: ["wechat-peer"],
+      protectedAgentIds: [agentId],
+    });
+
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true });
+    expect(currentCfg.agents.list).toEqual([]);
+    expect(currentCfg.bindings).toEqual([]);
+  });
+
+  it("ignores invalid protected Agent IDs", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const historicalOwner = "legacy-agent";
+    let currentCfg: any = {
+      agents: { list: [{ id: agentId }] },
+      bindings: [
+        { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+        { agentId: historicalOwner, match: { channel: "openclaw-weixin", accountId: "older-account", peer: { kind: "direct", id: "wechat-peer" } } },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["old-account"],
+      wechatPeerIds: ["wechat-peer"],
+      protectedAgentIds: [historicalOwner, "", "user_not-hex"],
+    });
+
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true });
+    expect(currentCfg.agents.list).toEqual([]);
+    expect(currentCfg.bindings).toEqual([]);
+    expect(result.removedBindings).toHaveLength(2);
+  });
+
+  it("removes every historical binding for the requested peer when no Agent is protected", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const oldDuplicateAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let currentCfg: any = {
+      agents: { list: [{ id: agentId }, { id: oldDuplicateAgentId }] },
+      bindings: [
+        { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+        { agentId: oldDuplicateAgentId, match: { channel: "openclaw-weixin", accountId: "older-account", peer: { kind: "direct", id: "wechat-peer" } } },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const result = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["old-account"],
+      wechatPeerIds: ["wechat-peer"],
+    });
+
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true });
+    expect(currentCfg.agents.list).toEqual([{ id: oldDuplicateAgentId }]);
+    expect(currentCfg.bindings).toEqual([]);
+    expect(result.removedBindings).toHaveLength(2);
+  });
+
+  it("removes only the requested user bindings and agent", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const otherAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let currentCfg: any = {
+      agents: { list: [{ id: agentId }, { id: otherAgentId }] },
+      bindings: [
+        { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+        { agentId, match: { channel: "claw-manager-api", accountId: "global", peer: { kind: "direct", id: "api:openid" } } },
+        { agentId: otherAgentId, match: { channel: "openclaw-weixin", accountId: "other", peer: { kind: "direct", id: "other-peer" } } },
+      ],
+    };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+    const result = await deleteApiUserAgent({ cfg: currentCfg, configRuntime: { current: () => currentCfg, mutateConfigFile }, agentId, wechatAccountIds: ["old-account"], wechatPeerIds: ["wechat-peer"], apiPeerIds: ["api:openid"] });
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true, conflictingBindings: [] });
+    expect(currentCfg.agents.list).toEqual([{ id: otherAgentId }]);
+    expect(currentCfg.bindings).toHaveLength(1);
+  });
+
+  it("removes exact bindings when the persisted draft order changes", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const otherAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const targetWechat = { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } };
+    const targetApi = { agentId, match: { channel: "claw-manager-api", accountId: "global", peer: { kind: "direct", id: "api:openid" } } };
+    const unrelated = { agentId: otherAgentId, match: { channel: "openclaw-weixin", accountId: "other", peer: { kind: "direct", id: "other-peer" } } };
+    const initialCfg: any = { agents: { list: [{ id: agentId }, { id: otherAgentId }] }, bindings: [targetWechat, targetApi, unrelated] };
+    let appliedCfg = structuredClone(initialCfg);
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(initialCfg);
+      draft.bindings = [structuredClone(unrelated), structuredClone(targetApi), structuredClone(targetWechat)];
+      const result = await mutate(draft);
+      appliedCfg = draft;
+      return { result, nextConfig: appliedCfg };
+    });
+
+    const result = await deleteApiUserAgent({
+      cfg: initialCfg,
+      configRuntime: { current: () => appliedCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["old-account"],
+      wechatPeerIds: ["wechat-peer"],
+      apiPeerIds: ["api:openid"],
+    });
+
+    expect(result).toMatchObject({ persisted: true, runtimeApplied: true, agentRemoved: true });
+    expect(appliedCfg.bindings).toEqual([unrelated]);
+    expect(appliedCfg.agents.list).toEqual([{ id: otherAgentId }]);
+  });
+
+  it("returns success when the requested agent and bindings are already absent", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const otherAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const unrelated = { agentId: otherAgentId, match: { channel: "openclaw-weixin", accountId: "other", peer: { kind: "direct", id: "other-peer" } } };
+    let currentCfg: any = { agents: { list: [{ id: otherAgentId }] }, bindings: [unrelated] };
+    const mutateConfigFile = vi.fn(async ({ mutate }) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    });
+
+    const first = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["missing-account"],
+      wechatPeerIds: ["missing-peer"],
+      apiPeerIds: ["api:missing"],
+    });
+    const second = await deleteApiUserAgent({
+      cfg: currentCfg,
+      configRuntime: { current: () => currentCfg, mutateConfigFile },
+      agentId,
+      wechatAccountIds: ["missing-account"],
+      wechatPeerIds: ["missing-peer"],
+      apiPeerIds: ["api:missing"],
+    });
+
+    expect(first).toEqual({
+      persisted: true,
+      runtimeApplied: true,
+      agentRemoved: true,
+      removedBindings: [],
+      conflictingBindings: [],
+    });
+    expect(second).toEqual(first);
+    expect(currentCfg).toEqual({ agents: { list: [{ id: otherAgentId }] }, bindings: [unrelated] });
+  });
+
+  it("does not mutate config when the agent still owns an unrelated binding", async () => {
+    const agentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let currentCfg: any = { agents: { list: [{ id: agentId }] }, bindings: [
+      { agentId, match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } } },
+      { agentId, match: { channel: "openclaw-weixin", accountId: "another", peer: { kind: "direct", id: "another-peer" } } },
+    ] };
+    const before = structuredClone(currentCfg);
+    const mutateConfigFile = vi.fn();
+    const result = await deleteApiUserAgent({ cfg: currentCfg, configRuntime: { current: () => currentCfg, mutateConfigFile }, agentId, wechatAccountIds: ["old-account"], wechatPeerIds: ["wechat-peer"] });
+    expect(result.persisted).toBe(false);
+    expect(result.conflictingBindings).toEqual([expect.objectContaining({ peerId: "another-peer" })]);
+    expect(mutateConfigFile).not.toHaveBeenCalled();
+    expect(currentCfg).toEqual(before);
   });
 });

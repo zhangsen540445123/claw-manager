@@ -113,6 +113,30 @@ public class OpenClawGatewayRpcService {
     );
   }
 
+  public DeleteUserAgentResult deleteUserAgent(
+      InstanceEntity instance,
+      String agentId,
+      List<String> wechatAccountIds,
+      List<String> wechatPeerIds,
+      List<String> apiPeerIds,
+      List<String> protectedAgentIds
+  ) {
+    Map<String, Object> params = new java.util.LinkedHashMap<>();
+    params.put("agentId", agentId);
+    params.put("wechatAccountIds", wechatAccountIds == null ? List.of() : wechatAccountIds);
+    params.put("wechatPeerIds", wechatPeerIds == null ? List.of() : wechatPeerIds);
+    params.put("apiPeerIds", apiPeerIds == null ? List.of() : apiPeerIds);
+    params.put("protectedAgentIds", protectedAgentIds == null ? List.of() : protectedAgentIds);
+    JsonNode result = runGatewayJsonMethodRaw(instance, "claw-manager-api.delete-user-agent", params);
+    return new DeleteUserAgentResult(
+        result.path("persisted").asBoolean(false),
+        result.path("runtimeApplied").asBoolean(false),
+        result.path("agentRemoved").asBoolean(false),
+        objectMapper.convertValue(result.path("removedBindings"), new TypeReference<List<Map<String, Object>>>() {}),
+        objectMapper.convertValue(result.path("conflictingBindings"), new TypeReference<List<Map<String, Object>>>() {})
+    );
+  }
+
   public void stopWechatChannel(InstanceEntity instance, List<String> accountIds) {
     Set<String> normalizedAccountIds = normalizeAccountIds(accountIds);
     if (normalizedAccountIds.isEmpty()) {
@@ -347,6 +371,23 @@ public class OpenClawGatewayRpcService {
       throw new IllegalStateException("OpenClaw API Channel 启动重试被中断。", error);
     }
   }
+  public record DeleteUserAgentResult(
+      boolean persisted,
+      boolean runtimeApplied,
+      boolean agentRemoved,
+      List<Map<String, Object>> removedBindings,
+      List<Map<String, Object>> conflictingBindings
+  ) {
+    public DeleteUserAgentResult {
+      removedBindings = removedBindings == null ? List.of() : List.copyOf(removedBindings);
+      conflictingBindings = conflictingBindings == null ? List.of() : List.copyOf(conflictingBindings);
+    }
+
+    public boolean success() {
+      return persisted && runtimeApplied && agentRemoved && conflictingBindings.isEmpty();
+    }
+  }
+
   public record ReplaceUserAgentResult(
       boolean persisted,
       boolean runtimeApplied,

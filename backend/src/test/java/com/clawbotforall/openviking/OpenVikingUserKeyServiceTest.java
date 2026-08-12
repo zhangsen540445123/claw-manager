@@ -157,6 +157,13 @@ class OpenVikingUserKeyServiceTest {
     public int delete(String accountId, String openvikingUserId) {
       return rows.remove(accountId + ":" + openvikingUserId) == null ? 0 : 1;
     }
+
+    @Override
+    public int deleteByOpenvikingUserId(String openvikingUserId) {
+      int before = rows.size();
+      rows.entrySet().removeIf(entry -> entry.getValue().getOpenvikingUserId().equals(openvikingUserId));
+      return before - rows.size();
+    }
   }
 
   private static class FakeAdminClient implements OpenVikingAdminClient {
@@ -206,4 +213,3 @@ class OpenVikingUserKeyServiceTest {
     }
   }
 }
-
