@@ -213,6 +213,7 @@ export interface PublicWechatBinding {
   qrLink: string;
   outputSnippet: string;
   pairedAccounts: PublicWechatPairedAccount[];
+  miniappBindingCount: number;
   runtimeReady: boolean;
   runtimeStatus: string;
   runtimeMessage: string;

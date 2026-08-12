@@ -137,6 +137,7 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.modelChain()).hasSize(1);
     assertThat(publicInstance.plugins().get("allow")).asList().isEmpty();
     assertThat(publicInstance.wechatBinding().pairedAccounts()).hasSize(1);
+    assertThat(publicInstance.wechatBinding().miniappBindingCount()).isEqualTo(1);
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().remark()).isEqualTo("战神");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().openVikingUserId()).startsWith("wx_");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappOpenid()).isEqualTo("miniapp-openid-001");
@@ -146,6 +147,32 @@ class PublicInstanceFactoryTest {
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().miniappLastUsedAt()).isEqualTo("2026-07-04T10:00:00Z");
     assertThat(publicInstance.wechatBinding().pairedAccounts().getFirst().channelStatus()).isEqualTo("ready");
     assertThat(publicInstance.wechatBinding().status()).isEqualTo("ready");
+  }
+
+  @Test
+  void exposesMiniappBindingCountEvenWhenNoWechatAccountIsBound() {
+    PublicInstance publicInstance = factory.from(
+        baseInstance(),
+        List.of(),
+        null,
+        null,
+        List.of(),
+        List.of(),
+        List.of(new MiniappWechatBindingSummary(
+            "inst_1",
+            "",
+            "wx_orphan_openviking_user",
+            "miniapp-openid-002",
+            "connected",
+            "cm_user_abcd...wxyz",
+            true,
+            "2026-07-04T10:00:00Z"
+        )),
+        new MockHttpServletRequest()
+    );
+
+    assertThat(publicInstance.wechatBinding().pairedAccounts()).isEmpty();
+    assertThat(publicInstance.wechatBinding().miniappBindingCount()).isEqualTo(1);
   }
 
   @Test

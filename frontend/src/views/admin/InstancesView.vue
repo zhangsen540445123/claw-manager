@@ -4,8 +4,9 @@ import { Clipboard, ExternalLink, Play, RefreshCw, Square, Trash2 } from "lucide
 import { ElMessage, ElMessageBox } from "element-plus";
 import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
+import { ApiError } from "../../api/http";
+import type { PublicInstance, PublicInstanceDeleteOperation } from "../../api/types";
 import { useAdminStore } from "../../stores/admin";
-import type { PublicInstance } from "../../api/types";
 import { copyText } from "../../utils/adminUi";
 import { resolveControlUiUrl } from "../../utils/controlUi";
 
@@ -63,17 +64,70 @@ function handleInstanceSelectionChange(selection: PublicInstance[]) {
 }
 
 
+function extractDeleteOperation(payload: unknown): PublicInstanceDeleteOperation | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const operation = (payload as { operation?: unknown }).operation;
+  if (!operation || typeof operation !== "object") {
+    return null;
+  }
+  return operation as PublicInstanceDeleteOperation;
+}
+
+function formatStrongDeleteMessage(wechatCount: number, miniappCount: number) {
+  const details: string[] = [];
+  if (wechatCount > 0) {
+    details.push(`${wechatCount} 个微信账号`);
+  }
+  if (miniappCount > 0) {
+    details.push(`${miniappCount} 个小程序绑定`);
+  }
+  const detailText = details.length > 0 ? details.join("、") : "关联数据";
+  return `该实例已存在 ${detailText}。继续删除会先清理该实例下所有微信账号、小程序绑定、本地 Agent、会话、trajectory、workspace、OpenClaw 配置、微信状态文件和数据库身份数据，然后删除容器和实例目录。该操作不可恢复。OpenViking 服务端记忆不会删除。确认继续？`;
+}
+
+function formatDeleteConflictMessage(operation: PublicInstanceDeleteOperation | null) {
+  return formatStrongDeleteMessage(operation?.wechatAccountCount ?? 0, operation?.miniappBindingCount ?? 0);
+}
+
+async function submitInstanceDelete(instanceId: string, force: boolean) {
+  await admin.deleteInstance(instanceId, force);
+  ElMessage.success("实例删除任务已提交。");
+  await admin.loadInstances();
+}
+
 async function deleteInstance(instance: PublicInstance) {
   const wechatCount = instance.wechatBinding?.pairedAccounts?.length || 0;
-  const hasWechat = wechatCount > 0;
-  const title = hasWechat ? "强确认删除实例" : "删除实例";
-  const message = hasWechat
-    ? `该实例已绑定 ${wechatCount} 个微信账号。继续删除会先清理该实例下所有微信账号、小程序绑定、本地 Agent、会话、trajectory、workspace、OpenClaw 配置、微信状态文件和数据库身份数据，然后删除容器和实例目录。该操作不可恢复。OpenViking 服务端记忆不会删除。确认继续？`
+  const miniappCount = instance.wechatBinding?.miniappBindingCount || 0;
+  const needsStrongConfirm = wechatCount > 0 || miniappCount > 0;
+  const title = needsStrongConfirm ? "强确认删除实例" : "删除实例";
+  const message = needsStrongConfirm
+    ? formatStrongDeleteMessage(wechatCount, miniappCount)
     : "删除后会停止并移除 OpenClaw 容器，物理删除该实例本地目录，并删除数据库中的实例记录。该操作不可恢复。OpenViking 服务端记忆不会删除。确认删除？";
   await confirmThenRun(`delete:${instance.id}`, title, message, async () => {
-    await admin.deleteInstance(instance.id, hasWechat);
-    ElMessage.success("实例删除任务已提交。");
-    await admin.loadInstances();
+    if (needsStrongConfirm) {
+      await submitInstanceDelete(instance.id, true);
+      return;
+    }
+    try {
+      await submitInstanceDelete(instance.id, false);
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.status !== 409) {
+        throw cause;
+      }
+      const operation = extractDeleteOperation(cause.payload);
+      try {
+        await ElMessageBox.confirm(formatDeleteConflictMessage(operation), "强确认删除实例", {
+          type: "warning",
+          confirmButtonText: "确认",
+          cancelButtonText: "取消"
+        });
+      } catch {
+        return;
+      }
+      await submitInstanceDelete(instance.id, true);
+    }
   });
 }
 
@@ -178,8 +232,10 @@ async function batchRestartGateway() {
             {{ row.model?.providerId || "-" }}/{{ row.model?.modelId || "-" }}
           </template>
         </el-table-column>
-        <el-table-column label="微信账号" width="110">
-          <template #default="{ row }">{{ row.wechatBinding?.pairedAccounts?.length || 0 }}</template>
+        <el-table-column label="微信/小程序" width="130">
+          <template #default="{ row }">
+            {{ row.wechatBinding?.pairedAccounts?.length || 0 }} / {{ row.wechatBinding?.miniappBindingCount || 0 }}
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="190" align="right">
           <template #default="{ row }">

@@ -204,6 +204,7 @@ public class PublicInstanceFactory {
         "",
         summary.message(),
         accounts,
+        miniappBindings.size(),
         summary.runtimeReady(),
         summary.runtimeStatus(),
         summary.message(),

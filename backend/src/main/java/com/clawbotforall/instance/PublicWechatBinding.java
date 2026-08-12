@@ -15,6 +15,7 @@ public record PublicWechatBinding(
     String qrLink,
     String outputSnippet,
     List<PublicWechatPairedAccount> pairedAccounts,
+    int miniappBindingCount,
     boolean runtimeReady,
     String runtimeStatus,
     String runtimeMessage,
