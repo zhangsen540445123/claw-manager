@@ -680,6 +680,14 @@ export type ReplaceUserAgentResult = {
   conflictingBindings: ReplaceUserAgentConflict[];
 };
 
+export type DeleteUserAgentResult = {
+  persisted: boolean;
+  runtimeApplied: boolean;
+  agentRemoved: boolean;
+  removedBindings: ReplaceUserAgentConflict[];
+  conflictingBindings: ReplaceUserAgentConflict[];
+};
+
 /** Atomically replace one user's WeChat route and remove only the explicitly displaced Agent. */
 export async function replaceApiUserAgent(params: {
   cfg: OpenClawConfig;
@@ -789,10 +797,118 @@ export async function replaceApiUserAgent(params: {
   };
 }
 
+/** Remove one user Agent and only bindings whose ownership is explicitly proven by the caller. */
+export async function deleteApiUserAgent(params: {
+  cfg: OpenClawConfig;
+  configRuntime?: ApiConfigRuntime;
+  agentId: string;
+  wechatAccountIds?: string[];
+  wechatPeerIds?: string[];
+  apiPeerIds?: string[];
+  protectedAgentIds?: string[];
+}): Promise<DeleteUserAgentResult> {
+  const agentId = requireUserAgentId(params.agentId);
+  const runtime = params.configRuntime;
+  if (!runtime?.current || !runtime.mutateConfigFile) throw new Error("CONFIG_RUNTIME_UNAVAILABLE");
+
+  const wechatAccountIds = new Set((params.wechatAccountIds ?? []).map(trim).filter(Boolean));
+  const wechatPeerIds = new Set((params.wechatPeerIds ?? []).map(trim).filter(Boolean));
+  const apiPeerIds = new Set((params.apiPeerIds ?? []).map(trim).filter(Boolean));
+  const protectedAgentIds = new Set(
+    (params.protectedAgentIds ?? [])
+      .map(trim)
+      .filter((value) => value !== agentId && USER_AGENT_ID_PATTERN.test(value)),
+  );
+  const current = runtime.current();
+  const bindings = Array.isArray(current.bindings) ? current.bindings : [];
+  const removableBindingKeys = new Set<string>();
+  const removedBindings: ReplaceUserAgentConflict[] = [];
+  const conflictingBindings: ReplaceUserAgentConflict[] = [];
+
+  bindings.forEach((entry) => {
+    if (!isRecord(entry) || !isRecord(entry.match)) return;
+    const owner = typeof entry.agentId === "string" ? trim(entry.agentId) : "";
+    const match = entry.match;
+    const channel = trim(match.channel);
+    const accountId = trim(match.accountId);
+    const peerId = isRecord(match.peer) ? trim(match.peer.id) : "";
+    const isRequestedWechat = channel === "openclaw-weixin" &&
+      (wechatAccountIds.has(accountId) || wechatPeerIds.has(peerId));
+    const isRequestedApi = channel === API_CHANNEL_ID && accountId === API_ACCOUNT_ID && apiPeerIds.has(peerId);
+    const explicitlyOwned = isRequestedWechat || isRequestedApi;
+
+    // A current, verified Agent may share this peer while an old duplicate route is being removed.
+    if (protectedAgentIds.has(owner)) {
+      return;
+    }
+    // A historical duplicate WeChat route for the same peer is part of this user's residue even if it points at an old Agent.
+    if (isRequestedWechat && wechatPeerIds.has(peerId)) {
+      removableBindingKeys.add(bindingIdentity(entry));
+      removedBindings.push(bindingConflict(owner, match));
+      return;
+    }
+    if (owner === agentId && explicitlyOwned) {
+      removableBindingKeys.add(bindingIdentity(entry));
+      removedBindings.push(bindingConflict(owner, match));
+      return;
+    }
+    if (owner === agentId) conflictingBindings.push(bindingConflict(owner, match));
+  });
+
+  if (conflictingBindings.length > 0) {
+    return { persisted: false, runtimeApplied: false, agentRemoved: false, removedBindings: [], conflictingBindings };
+  }
+
+  await serializeApiDynamicAgentBindingMutation(() => runtime.mutateConfigFile!({
+    base: "runtime",
+    afterWrite: { mode: "auto" },
+    mutate: (draft: Record<string, unknown>) => {
+      const draftAgents = isRecord(draft.agents) ? draft.agents : {};
+      const list = Array.isArray(draftAgents.list) ? draftAgents.list : [];
+      draft.agents = {
+        ...draftAgents,
+        list: list.filter((entry) => !isRecord(entry) || entry.id !== agentId),
+      };
+      const draftBindings = Array.isArray(draft.bindings) ? draft.bindings : [];
+      draft.bindings = draftBindings.filter((entry) => !removableBindingKeys.has(bindingIdentity(entry)));
+      return { agentRemoved: true, removedBindings };
+    },
+  }));
+
+  const applied = runtime.current();
+  const appliedAgents = isRecord(applied.agents) && Array.isArray(applied.agents.list) ? applied.agents.list : [];
+  const appliedBindings = Array.isArray(applied.bindings) ? applied.bindings : [];
+  const agentRemoved = !appliedAgents.some((entry) => isRecord(entry) && entry.id === agentId);
+  const requestedBindingsRemoved = !appliedBindings.some((entry) => {
+    if (!isRecord(entry) || !isRecord(entry.match)) return false;
+    const owner = typeof entry.agentId === "string" ? trim(entry.agentId) : "";
+    if (protectedAgentIds.has(owner)) return false;
+    const channel = trim(entry.match.channel);
+    const accountId = trim(entry.match.accountId);
+    const peerId = isRecord(entry.match.peer) ? trim(entry.match.peer.id) : "";
+    return (channel === "openclaw-weixin" && (wechatAccountIds.has(accountId) || wechatPeerIds.has(peerId))) ||
+      (channel === API_CHANNEL_ID && accountId === API_ACCOUNT_ID && apiPeerIds.has(peerId));
+  });
+  const runtimeApplied = agentRemoved && requestedBindingsRemoved;
+  return { persisted: runtimeApplied, runtimeApplied, agentRemoved, removedBindings, conflictingBindings: [] };
+}
+
 function isApiPeerBinding(match: Record<string, unknown>, apiPeerIds: Set<string>): boolean {
   return apiPeerIds.size > 0 && match.channel === API_CHANNEL_ID && match.accountId === API_ACCOUNT_ID &&
     isRecord(match.peer) && match.peer.kind === "direct" && typeof match.peer.id === "string" &&
     apiPeerIds.has(trim(match.peer.id));
+}
+
+function bindingIdentity(entry: unknown): string {
+  if (!isRecord(entry) || !isRecord(entry.match)) return "";
+  const match = entry.match;
+  return JSON.stringify([
+    trim(entry.agentId),
+    trim(match.channel),
+    trim(match.accountId),
+    isRecord(match.peer) ? trim(match.peer.kind) : "",
+    isRecord(match.peer) ? trim(match.peer.id) : "",
+  ]);
 }
 
 function bindingConflict(agentId: string, match: Record<string, unknown>): ReplaceUserAgentConflict {

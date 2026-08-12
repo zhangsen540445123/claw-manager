@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.wechat.WechatUserCleanupOperationMapper">
+  <resultMap id="OperationMap" type="com.clawbotforall.wechat.WechatUserCleanupOperationEntity">
+    <id property="operationId" column="operation_id"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="source" column="source"/>
+    <result property="subjectHash" column="subject_hash"/>
+    <result property="phone" column="phone"/>
+    <result property="wechatUserId" column="wechat_user_id"/>
+    <result property="accountId" column="account_id"/>
+    <result property="agentId" column="agent_id"/>
+    <result property="openvikingUserId" column="openviking_user_id"/>
+    <result property="apiPeerIdsJson" column="api_peer_ids_json"/>
+    <result property="oldSessionIdsJson" column="old_session_ids_json"/>
+    <result property="protectedAgentIdsJson" column="protected_agent_ids_json"/>
+    <result property="snapshotJson" column="snapshot_json"/>
+    <result property="status" column="status"/>
+    <result property="stage" column="stage"/>
+    <result property="attemptCount" column="attempt_count"/>
+    <result property="lastError" column="last_error"/>
+    <result property="deletedBindings" column="deleted_bindings"/>
+    <result property="deletedFiles" column="deleted_files"/>
+    <result property="deletedDatabaseRows" column="deleted_database_rows"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <result property="completedAt" column="completed_at"/>
+  </resultMap>
+  <select id="findById" resultMap="OperationMap">SELECT * FROM wechat_user_cleanup_operations WHERE operation_id=#{operationId} LIMIT 1</select>
+  <select id="findByIdForUpdate" resultMap="OperationMap">SELECT * FROM wechat_user_cleanup_operations WHERE operation_id=#{operationId} LIMIT 1 FOR UPDATE</select>
+  <select id="findActiveBySubjectForUpdate" resultMap="OperationMap">
+    SELECT * FROM wechat_user_cleanup_operations
+    WHERE instance_id=#{instanceId} AND subject_hash=#{subjectHash}
+      AND status IN ('pending','cleaning','cleanup_failed')
+    ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+  </select>
+  <select id="findActiveByIdentityForUpdate" resultMap="OperationMap">
+    SELECT * FROM wechat_user_cleanup_operations
+    WHERE instance_id COLLATE utf8mb4_unicode_ci = #{instanceId} COLLATE utf8mb4_unicode_ci
+      AND status IN ('pending','cleaning','cleanup_failed')
+      AND (
+        (#{phone} IS NOT NULL AND #{phone} != ''
+          AND phone COLLATE utf8mb4_unicode_ci = #{phone} COLLATE utf8mb4_unicode_ci)
+        OR (#{wechatUserId} IS NOT NULL AND #{wechatUserId} != ''
+          AND wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId} COLLATE utf8mb4_unicode_ci)
+        OR (#{accountId} IS NOT NULL AND #{accountId} != ''
+          AND account_id COLLATE utf8mb4_unicode_ci = #{accountId} COLLATE utf8mb4_unicode_ci)
+        OR (#{agentId} IS NOT NULL AND #{agentId} != ''
+          AND agent_id COLLATE utf8mb4_unicode_ci = #{agentId} COLLATE utf8mb4_unicode_ci)
+      )
+    ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+  </select>
+  <select id="listByInstance" resultMap="OperationMap">
+    SELECT * FROM wechat_user_cleanup_operations WHERE instance_id=#{instanceId} ORDER BY created_at DESC
+  </select>
+  <select id="listActive" resultMap="OperationMap">
+    SELECT * FROM wechat_user_cleanup_operations WHERE status IN ('pending','cleaning','cleanup_failed') ORDER BY created_at ASC
+  </select>
+  <insert id="insert" parameterType="com.clawbotforall.wechat.WechatUserCleanupOperationEntity">
+    INSERT INTO wechat_user_cleanup_operations
+      (operation_id,instance_id,source,subject_hash,phone,wechat_user_id,account_id,agent_id,openviking_user_id,
+       api_peer_ids_json,old_session_ids_json,protected_agent_ids_json,snapshot_json,status,stage,attempt_count,last_error,deleted_bindings,
+       deleted_files,deleted_database_rows,created_at,updated_at,completed_at)
+    VALUES
+      (#{operationId},#{instanceId},#{source},#{subjectHash},#{phone},#{wechatUserId},#{accountId},#{agentId},#{openvikingUserId},
+       #{apiPeerIdsJson},#{oldSessionIdsJson},#{protectedAgentIdsJson},#{snapshotJson},#{status},#{stage},#{attemptCount},#{lastError},#{deletedBindings},
+       #{deletedFiles},#{deletedDatabaseRows},#{createdAt},#{updatedAt},#{completedAt})
+  </insert>
+  <update id="update" parameterType="com.clawbotforall.wechat.WechatUserCleanupOperationEntity">
+    UPDATE wechat_user_cleanup_operations SET
+      instance_id=#{instanceId},source=#{source},subject_hash=#{subjectHash},phone=#{phone},wechat_user_id=#{wechatUserId},
+      account_id=#{accountId},agent_id=#{agentId},openviking_user_id=#{openvikingUserId},api_peer_ids_json=#{apiPeerIdsJson},
+      old_session_ids_json=#{oldSessionIdsJson},protected_agent_ids_json=#{protectedAgentIdsJson},snapshot_json=#{snapshotJson},status=#{status},stage=#{stage},
+      attempt_count=#{attemptCount},last_error=#{lastError},deleted_bindings=#{deletedBindings},deleted_files=#{deletedFiles},
+      deleted_database_rows=#{deletedDatabaseRows},updated_at=#{updatedAt},completed_at=#{completedAt}
+    WHERE operation_id=#{operationId}
+  </update>
+</mapper>

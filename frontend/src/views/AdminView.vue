@@ -159,16 +159,20 @@ async function saveRemark(instance: PublicInstance, accountId: string, remark: s
 async function deleteWechatAccount(instance: PublicInstance, accountId: string) {
   try {
     await ElMessageBox.confirm(
-      "删除后该微信账号将从当前 OpenClaw 实例解绑，运行中的 Gateway 会自动重启以使变更生效。",
-      "删除微信账号",
-      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
+      [
+        "将删除该用户在当前系统中的微信凭证、Agent 配置、会话、trajectory、workspace、小程序绑定与 Key、本地 OpenViking Key 和数据库身份数据。",
+        "",
+        "OpenViking 服务端记忆不会删除；用户以后重新绑定时可以继续使用原远端记忆。"
+      ].join("\n"),
+      "彻底解绑微信用户",
+      { type: "warning", confirmButtonText: "确认彻底解绑", cancelButtonText: "取消" }
     );
   } catch {
     return;
   }
   await runAction(`delete-account:${accountId}`, async () => {
-    const response = await admin.deleteWechatAccount(instance.id, accountId);
-    ElMessage.success(response.gatewayRestarted ? "已删除，Gateway 正在重启以使变更生效。" : "已删除微信账号。");
+    await admin.deleteWechatAccount(instance.id, accountId);
+    ElMessage.success("已提交用户全量清理任务，可在用户中心查看进度或重试失败任务。");
   });
 }
 

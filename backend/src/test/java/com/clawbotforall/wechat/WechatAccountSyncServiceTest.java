@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
 class WechatAccountSyncServiceTest {
@@ -48,6 +52,12 @@ class WechatAccountSyncServiceTest {
   @Mock
   WechatBindLinkMapper bindLinkMapper;
 
+  @Mock
+  ObjectProvider<WechatUserCleanupService> cleanupServiceProvider;
+
+  @Mock
+  WechatUserCleanupService cleanupService;
+
   WechatAccountSyncService service;
 
   @BeforeEach
@@ -58,8 +68,16 @@ class WechatAccountSyncServiceTest {
         fileService,
         new WechatAccountReader(new ObjectMapper()),
         bindLinkMapper,
+        cleanupServiceProvider,
         new ObjectMapper()
     );
+  }
+
+  @AfterEach
+  void clearTransactionSynchronization() {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.clearSynchronization();
+    }
   }
 
   @Test
@@ -79,6 +97,22 @@ class WechatAccountSyncServiceTest {
   }
 
   @Test
+  void removeAccountStateFilesFailsWhenWechatStateCannotBeDeleted() throws Exception {
+    Path homeDir = tempDir.resolve("broken-home");
+    Path stateDir = homeDir.resolve(".openclaw").resolve("openclaw-weixin");
+    Path blockedCredential = stateDir.resolve("accounts").resolve("wx_1.json");
+    Files.createDirectories(blockedCredential);
+    Files.writeString(blockedCredential.resolve("child"), "cannot-delete-non-empty-directory");
+    InstancePaths paths = new InstancePaths(
+        tempDir.resolve("base"), homeDir, tempDir.resolve("workspace"), tempDir.resolve("logs")
+    );
+
+    assertThatThrownBy(() -> service.removeAccountStateFiles(paths, "wx_1"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("删除微信账号状态失败");
+  }
+
+  @Test
   void keepsProtectedRuntimeInitializingAccountWhenRawAccountHasNoPersistedBinding() throws Exception {
     InstanceEntity instance = instanceWithStateAccount();
 
@@ -92,18 +126,55 @@ class WechatAccountSyncServiceTest {
   }
 
   @Test
-  void removesUnprotectedGhostAccountFilesAndIndexEntry() throws Exception {
+  void schedulesUnprotectedGhostAccountThroughPersistentCleanupService() throws Exception {
     InstanceEntity instance = instanceWithStateAccount();
     Path stateDir = tempDir.resolve("home").resolve(".openclaw").resolve("openclaw-weixin");
     Files.writeString(stateDir.resolve("accounts").resolve("wx_1.sync.json"), "{}");
     when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
     when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of());
+    when(cleanupServiceProvider.getIfAvailable()).thenReturn(cleanupService);
+    WechatUserCleanupOperationEntity completed = new WechatUserCleanupOperationEntity();
+    completed.setOperationId("cleanup-account-only");
+    completed.setStatus("completed");
+    when(cleanupService.startResidue(eq(instance), any(), eq("account_sync"))).thenReturn(completed);
 
     service.syncInstanceAccounts(instance);
 
-    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.json"))).isFalse();
-    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.sync.json"))).isFalse();
-    assertThat(Files.readString(stateDir.resolve("accounts.json"))).doesNotContain("wx_1");
+    ArgumentCaptor<WechatUserResidueEvidence> evidence = ArgumentCaptor.forClass(WechatUserResidueEvidence.class);
+    verify(cleanupService).startResidue(eq(instance), evidence.capture(), eq("account_sync"));
+    assertThat(evidence.getValue().accountId()).isEqualTo("wx_1");
+    assertThat(evidence.getValue().agentId()).isNull();
+    assertThat(evidence.getValue().evidenceTypes()).containsExactly("wechat_account_state");
+    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.json"))).isTrue();
+    assertThat(Files.exists(stateDir.resolve("accounts").resolve("wx_1.sync.json"))).isTrue();
+    assertThat(Files.readString(stateDir.resolve("accounts.json"))).contains("wx_1");
+  }
+
+  @Test
+  void defersAllGhostCleanupUntilTransactionCommitUsingSingleSynchronization() throws Exception {
+    InstanceEntity instance = instanceWithStateAccounts("wx_1", "wx_2");
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
+    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of());
+    when(cleanupServiceProvider.getIfAvailable()).thenReturn(cleanupService);
+    WechatUserCleanupOperationEntity completed = new WechatUserCleanupOperationEntity();
+    completed.setOperationId("cleanup-account-only");
+    completed.setStatus("completed");
+    when(cleanupService.startResidue(eq(instance), any(), eq("account_sync"))).thenReturn(completed);
+    TransactionSynchronizationManager.initSynchronization();
+
+    service.syncInstanceAccounts(instance);
+
+    verify(cleanupService, never()).startResidue(any(), any(), anyString());
+    List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+    assertThat(synchronizations).hasSize(1);
+
+    synchronizations.getFirst().afterCommit();
+
+    ArgumentCaptor<WechatUserResidueEvidence> evidence = ArgumentCaptor.forClass(WechatUserResidueEvidence.class);
+    verify(cleanupService, org.mockito.Mockito.times(2))
+        .startResidue(eq(instance), evidence.capture(), eq("account_sync"));
+    assertThat(evidence.getAllValues()).extracting(WechatUserResidueEvidence::accountId)
+        .containsExactly("wx_1", "wx_2");
   }
 
   @Test
@@ -302,12 +373,21 @@ class WechatAccountSyncServiceTest {
   }
 
   private InstanceEntity instanceWithStateAccount() throws Exception {
+    return instanceWithStateAccounts("wx_1");
+  }
+
+  private InstanceEntity instanceWithStateAccounts(String... accountIds) throws Exception {
     Path homeDir = tempDir.resolve("home");
     Path stateDir = homeDir.resolve(".openclaw").resolve("openclaw-weixin");
     Path accountsDir = stateDir.resolve("accounts");
     Files.createDirectories(accountsDir);
-    Files.writeString(stateDir.resolve("accounts.json"), "[\"wx_1\"]");
-    Files.writeString(accountsDir.resolve("wx_1.json"), "{\"userId\":\"user-a\"}");
+    new ObjectMapper().writeValue(stateDir.resolve("accounts.json").toFile(), accountIds);
+    for (int index = 0; index < accountIds.length; index++) {
+      Files.writeString(
+          accountsDir.resolve(accountIds[index] + ".json"),
+          "{\"userId\":\"user-" + (char) ('a' + index) + "\"}"
+      );
+    }
 
     InstanceEntity instance = new InstanceEntity();
     instance.setId("inst_1");

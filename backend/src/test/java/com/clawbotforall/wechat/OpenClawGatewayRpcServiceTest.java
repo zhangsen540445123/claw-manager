@@ -92,6 +92,21 @@ class OpenClawGatewayRpcServiceTest {
   }
 
   @Test
+  void deleteUserAgentForwardsProtectedAgentIdsToPluginRpc() {
+    completeExecWith("{\"persisted\":true,\"runtimeApplied\":true,\"agentRemoved\":true,\"removedBindings\":[],\"conflictingBindings\":[]}");
+    String oldAgent = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    String currentAgent = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    service.deleteUserAgent(instance(), oldAgent, List.of("old-account"),
+        List.of("wechat-peer"), List.of(), List.of(currentAgent));
+
+    String script = capturedCommand.get().get(3);
+    assertThat(script).contains("claw-manager-api.delete-user-agent");
+    assertThat(script).contains("protectedAgentIds");
+    assertThat(script).contains(currentAgent);
+  }
+
+  @Test
   void replaceUserAgentReturnsDisplacedAgentsAndRejectsConflicts() {
     completeExecWith("{\"persisted\":true,\"runtimeApplied\":true,\"bindingCreated\":true,\"displacedAgentIds\":[\"user_old\"],\"conflictingBindings\":[]}");
 

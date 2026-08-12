@@ -48,6 +48,13 @@
     </foreach>
   </select>
 
+  <select id="listByInstanceId" resultMap="MiniappUserBindingMap">
+    SELECT *
+    FROM miniapp_user_bindings
+    WHERE instance_id = #{instanceId}
+    ORDER BY created_at ASC, openid_hash ASC
+  </select>
+
   <select id="countByInstanceId" resultType="int">
     SELECT COUNT(*)
     FROM miniapp_user_bindings

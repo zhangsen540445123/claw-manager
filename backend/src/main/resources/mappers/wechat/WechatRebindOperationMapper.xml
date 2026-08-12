@@ -35,6 +35,13 @@
       AND status IN ('pending', 'cleaning', 'provisioning', 'cleanup_failed')
     ORDER BY created_at DESC LIMIT 1 FOR UPDATE
   </select>
+  <select id="listByInstance" resultMap="OperationMap">
+    SELECT *
+    FROM wechat_rebind_operations
+    WHERE old_instance_id = #{instanceId} OR new_instance_id = #{instanceId}
+    ORDER BY created_at ASC
+  </select>
+
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatRebindOperationEntity">
     INSERT INTO wechat_rebind_operations
       (bind_token, phone, wechat_user_id, old_instance_id, old_account_id, new_instance_id, new_account_id,
@@ -53,5 +60,26 @@
       account_snapshot_json=#{accountSnapshotJson}, status=#{status}, stage=#{stage}, attempt_count=#{attemptCount}, last_error=#{lastError},
       updated_at=#{updatedAt}, completed_at=#{completedAt}
     WHERE bind_token=#{bindToken}
+  </update>
+  <update id="redactForCleanup">
+    UPDATE wechat_rebind_operations
+    SET phone = NULL,
+        wechat_user_id = NULL,
+        old_account_id = NULL,
+        new_account_id = NULL,
+        old_agent_id = NULL,
+        new_agent_id = NULL,
+        openviking_user_id = NULL,
+        api_peer_ids_json = NULL,
+        old_session_ids_json = NULL,
+        account_snapshot_json = NULL,
+        last_error = NULL,
+        updated_at = #{updatedAt}
+    <where>
+      <if test="phone != null and phone != ''">phone = #{phone}</if>
+      <if test="wechatUserId != null and wechatUserId != ''">OR wechat_user_id = #{wechatUserId}</if>
+      <if test="accountId != null and accountId != ''">OR old_account_id = #{accountId} OR new_account_id = #{accountId}</if>
+      <if test="agentId != null and agentId != ''">OR old_agent_id = #{agentId} OR new_agent_id = #{agentId}</if>
+    </where>
   </update>
 </mapper>

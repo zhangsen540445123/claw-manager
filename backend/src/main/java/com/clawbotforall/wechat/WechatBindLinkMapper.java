@@ -32,6 +32,13 @@ public interface WechatBindLinkMapper {
 
   List<String> listProtectedAccountIds(@Param("instanceId") String instanceId);
 
+  WechatBindLinkEntity findActiveForUserForUpdate(
+      @Param("instanceId") String instanceId,
+      @Param("phone") String phone,
+      @Param("accountId") String accountId,
+      @Param("wechatUserId") String wechatUserId
+  );
+
   int insert(WechatBindLinkEntity link);
 
   int update(WechatBindLinkEntity link);

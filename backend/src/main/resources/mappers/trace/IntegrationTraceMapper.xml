@@ -38,4 +38,25 @@
     SELECT * FROM integration_trace_events WHERE trace_id=#{traceId} ORDER BY created_at ASC
   </select>
   <delete id="deleteBefore">DELETE FROM integration_trace_events WHERE created_at &lt; #{cutoff}</delete>
+  <delete id="deleteByIdentityEvidence">
+    DELETE FROM integration_trace_events
+    WHERE instance_id = #{instanceId}
+      AND (
+        <choose>
+          <when test="senderHashes != null and !senderHashes.isEmpty()">
+            sender_hash IN
+            <foreach collection="senderHashes" item="value" open="(" separator="," close=")">#{value}</foreach>
+          </when>
+          <otherwise>1 = 0</otherwise>
+        </choose>
+        OR
+        <choose>
+          <when test="sessionKeyHashes != null and !sessionKeyHashes.isEmpty()">
+            session_key_hash IN
+            <foreach collection="sessionKeyHashes" item="value" open="(" separator="," close=")">#{value}</foreach>
+          </when>
+          <otherwise>1 = 0</otherwise>
+        </choose>
+      )
+  </delete>
 </mapper>

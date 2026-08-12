@@ -6,6 +6,7 @@ import path from "node:path";
 import plugin, {
   API_ENSURE_API_BINDING_RPC,
   API_ENSURE_USER_AGENT_RPC,
+  API_DELETE_USER_AGENT_RPC,
   API_CHANNEL_START_RPC,
   installOpenClawInternalAgentEventBridge,
   resetApiGatewayStartForTest,
@@ -47,6 +48,7 @@ describe("claw-manager-api plugin entry", () => {
     expect(gatewayMethods.map((method) => method.name)).toContain(API_CHANNEL_START_RPC);
     expect(gatewayMethods.map((method) => method.name)).toContain(API_ENSURE_USER_AGENT_RPC);
     expect(gatewayMethods.map((method) => method.name)).toContain(API_ENSURE_API_BINDING_RPC);
+    expect(gatewayMethods.map((method) => method.name)).toContain(API_DELETE_USER_AGENT_RPC);
     expect(subscriptions).toHaveLength(0);
     expect(logs.some((line) => line.includes("claw-manager-api: register channel mode=full"))).toBe(true);
     expect(logs.some((line) => line.includes("hasGatewayMethod=true"))).toBe(true);
@@ -124,6 +126,82 @@ describe("claw-manager-api plugin entry", () => {
     ]);
     expect(currentCfg.agents.list).toHaveLength(1);
     expect(currentCfg.bindings).toHaveLength(2);
+  });
+
+  it("deletes a user Agent through the strict gateway RPC", async () => {
+    const gatewayMethods = new Map<string, (input: any) => Promise<void> | void>();
+    const agentId = "user_0123456789abcdef0123456789abcdef";
+    let currentCfg: any = {
+      agents: { list: [{ id: agentId }] },
+      bindings: [{ agentId, match: { channel: "openclaw-weixin", accountId: "bot-a", peer: { kind: "direct", id: "peer-a" } } }],
+    };
+    const mutateConfigFile = async ({ mutate }: any) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    };
+    const api = {
+      registrationMode: "full", logger: { info: () => {}, warn: () => {}, error: () => {} },
+      config: currentCfg, runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
+      registerGatewayMethod: (name: string, handler: (input: any) => Promise<void> | void) => gatewayMethods.set(name, handler),
+      registerChannel: () => {},
+    };
+    plugin.register(api as never);
+    const responses: unknown[] = [];
+    await gatewayMethods.get(API_DELETE_USER_AGENT_RPC)?.({
+      params: { agentId, wechatAccountIds: ["bot-a"], wechatPeerIds: ["peer-a"] },
+      respond: (success: boolean, data: unknown) => responses.push({ success, data }),
+    });
+    expect(responses).toEqual([{ success: true, data: expect.objectContaining({ persisted: true, agentRemoved: true }) }]);
+    expect(currentCfg.agents.list).toEqual([]);
+    expect(currentCfg.bindings).toEqual([]);
+  });
+
+  it("keeps the protected current Agent when deleting an old duplicate route through RPC", async () => {
+    const gatewayMethods = new Map<string, (input: any) => Promise<void> | void>();
+    const currentAgentId = "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const oldAgentId = "user_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const currentBinding = {
+      agentId: currentAgentId,
+      match: { channel: "openclaw-weixin", accountId: "current-account", peer: { kind: "direct", id: "wechat-peer" } },
+    };
+    const oldBinding = {
+      agentId: oldAgentId,
+      match: { channel: "openclaw-weixin", accountId: "old-account", peer: { kind: "direct", id: "wechat-peer" } },
+    };
+    let currentCfg: any = {
+      agents: { list: [{ id: currentAgentId }, { id: oldAgentId }] },
+      bindings: [currentBinding, oldBinding],
+    };
+    const mutateConfigFile = async ({ mutate }: any) => {
+      const draft = structuredClone(currentCfg);
+      const result = await mutate(draft);
+      currentCfg = draft;
+      return { result, nextConfig: currentCfg };
+    };
+    const api = {
+      registrationMode: "full", logger: { info: () => {}, warn: () => {}, error: () => {} },
+      config: currentCfg, runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
+      registerGatewayMethod: (name: string, handler: (input: any) => Promise<void> | void) => gatewayMethods.set(name, handler),
+      registerChannel: () => {},
+    };
+    plugin.register(api as never);
+    const responses: unknown[] = [];
+
+    await gatewayMethods.get(API_DELETE_USER_AGENT_RPC)?.({
+      params: {
+        agentId: oldAgentId,
+        wechatAccountIds: ["old-account"],
+        wechatPeerIds: ["wechat-peer"],
+        protectedAgentIds: [currentAgentId],
+      },
+      respond: (success: boolean, data: unknown) => responses.push({ success, data }),
+    });
+
+    expect(responses).toEqual([{ success: true, data: expect.objectContaining({ persisted: true, agentRemoved: true }) }]);
+    expect(currentCfg.agents.list).toEqual([{ id: currentAgentId }]);
+    expect(currentCfg.bindings).toEqual([currentBinding]);
   });
 
   it("verifies persisted Agent paths relative to OPENCLAW_HOME", async () => {

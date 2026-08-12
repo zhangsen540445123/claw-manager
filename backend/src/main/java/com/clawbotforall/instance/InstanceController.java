@@ -5,7 +5,11 @@ import com.clawbotforall.runtime.InstanceStats;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
+import com.clawbotforall.wechat.PublicWechatUserCleanupOperation;
 import com.clawbotforall.wechat.WechatAccountSyncService;
+import com.clawbotforall.wechat.WechatUserCleanupOperationEntity;
+import com.clawbotforall.wechat.WechatUserCleanupService;
+import com.clawbotforall.wechat.WechatUserResidueScanner;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,6 +41,8 @@ public class InstanceController {
   private final InstanceEventPublisher eventPublisher;
   private final OpenClawRuntime openClawRuntime;
   private final WechatAccountSyncService wechatAccountSyncService;
+  private final WechatUserCleanupService wechatUserCleanupService;
+  private final WechatUserResidueScanner wechatUserResidueScanner;
   private final ModelAuthService modelAuthService;
   private final InstanceModelService instanceModelService;
 
@@ -47,6 +53,8 @@ public class InstanceController {
       InstanceEventPublisher eventPublisher,
       OpenClawRuntime openClawRuntime,
       WechatAccountSyncService wechatAccountSyncService,
+      WechatUserCleanupService wechatUserCleanupService,
+      WechatUserResidueScanner wechatUserResidueScanner,
       ModelAuthService modelAuthService,
       InstanceModelService instanceModelService
   ) {
@@ -56,6 +64,8 @@ public class InstanceController {
     this.eventPublisher = eventPublisher;
     this.openClawRuntime = openClawRuntime;
     this.wechatAccountSyncService = wechatAccountSyncService;
+    this.wechatUserCleanupService = wechatUserCleanupService;
+    this.wechatUserResidueScanner = wechatUserResidueScanner;
     this.modelAuthService = modelAuthService;
     this.instanceModelService = instanceModelService;
   }
@@ -306,9 +316,10 @@ public class InstanceController {
   }
 
   /**
-   * 删除一个已绑定微信账号。
+   * 启动一个微信用户的可恢复全量清理任务。
    */
   @DeleteMapping("/{instanceId}/wechat-accounts/{accountId}")
+  @ResponseStatus(HttpStatus.ACCEPTED)
   public Map<String, Object> deleteWechatAccount(
       @PathVariable String instanceId,
       @PathVariable String accountId,
@@ -317,17 +328,20 @@ public class InstanceController {
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = instanceCommandService.requireInstance(instanceId);
-    wechatAccountSyncService.deleteAccount(instance, accountId);
-    boolean gatewayRestarted = restartGatewayIfRunning(instance);
+    var operation = wechatUserCleanupService.start(instance, accountId, "user_center");
     PublicInstance publicInstance = publicInstance(instanceId, request);
     eventPublisher.publishInstanceUpdated(publicInstance);
-    return Map.of("instance", publicInstance, "gatewayRestarted", gatewayRestarted);
+    return Map.of(
+        "operation", PublicWechatUserCleanupOperation.from(operation),
+        "instance", publicInstance
+    );
   }
 
   /**
-   * 删除实例下全部已绑定微信账号。
+   * 为实例下每个已绑定微信用户启动相互独立的全量清理任务。
    */
   @PostMapping("/{instanceId}/wechat-unbind")
+  @ResponseStatus(HttpStatus.ACCEPTED)
   public Map<String, Object> deleteAllWechatAccounts(
       @PathVariable String instanceId,
       Authentication authentication,
@@ -335,11 +349,26 @@ public class InstanceController {
   ) {
     requireAdmin(authentication);
     InstanceEntity instance = instanceCommandService.requireInstance(instanceId);
-    boolean deletedAccounts = wechatAccountSyncService.deleteAllAccounts(instance);
-    boolean gatewayRestarted = deletedAccounts && restartGatewayIfRunning(instance);
+    Map<String, WechatUserCleanupOperationEntity> operationsById = new LinkedHashMap<>();
+    for (WechatUserCleanupOperationEntity operation : wechatUserCleanupService.startAll(instance)) {
+      operationsById.put(operation.getOperationId(), operation);
+    }
+    WechatUserResidueScanner.ScanResult residueScan = wechatUserResidueScanner.scanInstance(instance);
+    for (String operationId : residueScan.operationIds()) {
+      if (!operationsById.containsKey(operationId)) {
+        operationsById.put(operationId, wechatUserCleanupService.find(operationId));
+      }
+    }
+    List<PublicWechatUserCleanupOperation> operations = operationsById.values().stream()
+        .map(PublicWechatUserCleanupOperation::from)
+        .toList();
     PublicInstance publicInstance = publicInstance(instanceId, request);
     eventPublisher.publishInstanceUpdated(publicInstance);
-    return Map.of("instance", publicInstance, "gatewayRestarted", gatewayRestarted);
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("operations", operations);
+    response.put("residueWarnings", residueScan.warnings());
+    response.put("instance", publicInstance);
+    return response;
   }
 
   /**

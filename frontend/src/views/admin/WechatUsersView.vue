@@ -1,49 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { RefreshCw, Search, Trash2 } from "lucide-vue-next";
+import { RefreshCw, RotateCcw, Search, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
-import type { PublicInstance, PublicWechatPairedAccount } from "../../api/types";
+import type { PublicWechatUser } from "../../api/types";
 import { formatDateTime } from "../../utils/adminUi";
-
-interface WechatUserRow {
-  key: string;
-  instanceId: string;
-  instanceName: string;
-  instanceStatus: string;
-  accountId: string;
-  phone: string;
-  wechatUserId: string;
-  openVikingUserId: string;
-  remark: string;
-  baseUrl: string;
-  boundAt?: string | null;
-  updatedAt?: string | null;
-  channelStatus: string;
-  channelMessage: string;
-  channelUpdatedAt?: string | null;
-  lastStartedAt?: string | null;
-  lastErrorAt?: string | null;
-  miniappOpenid: string;
-  miniappBindStatus: string;
-  miniappKeyPreview: string;
-  miniappKeyEnabled: boolean;
-  miniappLastUsedAt?: string | null;
-}
 
 const admin = useAdminStore();
 const tableLoading = ref(false);
 const actionLoading = ref("");
 const error = ref("");
-const selectedUsers = ref<WechatUserRow[]>([]);
+const selectedUsers = ref<PublicWechatUser[]>([]);
 const remarkDrafts = ref<Record<string, string>>({});
 const phoneDrafts = ref<Record<string, string>>({});
 const filters = reactive({
   keyword: "",
   instanceId: "",
-  channelStatus: ""
+  channelStatus: "",
+  recordState: ""
 });
 
 const channelStatusOptions = [
@@ -54,19 +30,18 @@ const channelStatusOptions = [
   { label: "未知", value: "unknown" }
 ];
 
+const recordStateOptions = [
+  { label: "全部清理状态", value: "" },
+  { label: "正常", value: "active" },
+  { label: "清理中", value: "cleaning" },
+  { label: "清理失败", value: "cleanup_failed" }
+];
+
 const instanceOptions = computed(() => {
-  return admin.instances.map((instance) => ({
-    label: instance.name,
-    value: instance.id
-  }));
+  return admin.instances.map((instance) => ({ label: instance.name, value: instance.id }));
 });
 
-const users = computed(() => {
-  return admin.instances.flatMap((instance) => {
-    return (instance.wechatBinding?.pairedAccounts || []).map((account) => toUserRow(instance, account));
-  });
-});
-
+const users = computed(() => admin.wechatUsers);
 const filteredUsers = computed(() => {
   const keyword = filters.keyword.trim().toLowerCase();
   return users.value.filter((user) => {
@@ -76,6 +51,9 @@ const filteredUsers = computed(() => {
     if (filters.channelStatus && user.channelStatus !== filters.channelStatus) {
       return false;
     }
+    if (filters.recordState && user.recordState !== filters.recordState) {
+      return false;
+    }
     if (!keyword) {
       return true;
     }
@@ -83,22 +61,24 @@ const filteredUsers = computed(() => {
       user.phone,
       user.accountId,
       user.wechatUserId,
+      user.agentId,
       user.openVikingUserId,
       user.remark,
       user.instanceName,
       user.miniappOpenid,
       user.miniappBindStatus,
-      user.miniappKeyPreview
-    ].some((value) => value.toLowerCase().includes(keyword));
+      user.miniappKeyPreview,
+      user.cleanupOperationId,
+      user.cleanupStage,
+      ...(user.residueTypes || [])
+    ].some((value) => String(value || "").toLowerCase().includes(keyword));
   });
 });
 
-const selectedRestartableUsers = computed(() => {
-  return selectedUsers.value.filter(canRestartWechatChannel);
-});
-const readyUsers = computed(() => users.value.filter((user) => user.channelStatus === "ready").length);
-const miniappBoundUsers = computed(() => users.value.filter((user) => user.miniappBindStatus === "connected").length);
-const enabledKeys = computed(() => users.value.filter((user) => user.miniappKeyEnabled).length);
+const selectedRestartableUsers = computed(() => selectedUsers.value.filter(canRestartWechatChannel));
+const activeUsers = computed(() => users.value.filter((user) => user.recordState === "active").length);
+const cleaningUsers = computed(() => users.value.filter((user) => user.recordState === "cleaning").length);
+const failedUsers = computed(() => users.value.filter((user) => user.recordState === "cleanup_failed").length);
 
 onMounted(() => {
   void loadUsers();
@@ -108,7 +88,7 @@ async function loadUsers() {
   tableLoading.value = true;
   error.value = "";
   try {
-    await admin.loadInstances();
+    await Promise.all([admin.loadInstances(), admin.loadWechatUsers()]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "微信用户读取失败";
     ElMessage.error(error.value);
@@ -117,126 +97,124 @@ async function loadUsers() {
   }
 }
 
-function toUserRow(instance: PublicInstance, account: PublicWechatPairedAccount): WechatUserRow {
-  return {
-    key: `${instance.id}:${account.accountId}`,
-    instanceId: instance.id,
-    instanceName: instance.name,
-    instanceStatus: instance.status,
-    accountId: account.accountId,
-    phone: account.phone,
-    wechatUserId: account.wechatUserId,
-    openVikingUserId: account.openVikingUserId,
-    remark: account.remark,
-    baseUrl: account.baseUrl,
-    boundAt: account.boundAt,
-    updatedAt: account.updatedAt,
-    channelStatus: account.channelStatus || "unknown",
-    channelMessage: account.channelMessage,
-    channelUpdatedAt: account.channelUpdatedAt,
-    lastStartedAt: account.lastStartedAt,
-    lastErrorAt: account.lastErrorAt,
-    miniappOpenid: account.miniappOpenid || "",
-    miniappBindStatus: account.miniappBindStatus || "",
-    miniappKeyPreview: account.miniappKeyPreview || "",
-    miniappKeyEnabled: Boolean(account.miniappKeyEnabled),
-    miniappLastUsedAt: account.miniappLastUsedAt
-  };
+function userKey(user: PublicWechatUser) {
+  return user.cleanupOperationId || `${user.instanceId}:${user.accountId || user.agentId || user.wechatUserId}`;
 }
 
 function resetFilters() {
   filters.keyword = "";
   filters.instanceId = "";
   filters.channelStatus = "";
+  filters.recordState = "";
 }
 
-function handleSelectionChange(selection: WechatUserRow[]) {
+function handleSelectionChange(selection: PublicWechatUser[]) {
   selectedUsers.value = selection;
 }
 
-function canRestartWechatChannel(user: WechatUserRow) {
-  return user.instanceStatus === "running";
+function isActive(user: PublicWechatUser) {
+  return user.recordState === "active";
+}
+
+function canEdit(user: PublicWechatUser) {
+  return isActive(user) && Boolean(user.accountId);
+}
+
+function canRestartWechatChannel(user: PublicWechatUser) {
+  return canEdit(user) && user.instanceStatus === "running";
+}
+
+function canUnbind(user: PublicWechatUser) {
+  return canEdit(user);
 }
 
 function channelStatusLabel(status: string) {
   switch (status) {
-    case "ready":
-      return "已就绪";
-    case "starting":
-      return "启动中";
-    case "error":
-      return "异常";
-    case "unknown":
-      return "未知";
-    default:
-      return status || "未知";
+    case "ready": return "已就绪";
+    case "starting": return "启动中";
+    case "error": return "异常";
+    case "unknown": return "未知";
+    default: return status || "未知";
   }
 }
 
 function channelStatusType(status: string): "success" | "warning" | "danger" | "info" {
   switch (status) {
-    case "ready":
-      return "success";
-    case "starting":
-      return "warning";
-    case "error":
-      return "danger";
-    default:
-      return "info";
+    case "ready": return "success";
+    case "starting": return "warning";
+    case "error": return "danger";
+    default: return "info";
   }
 }
 
-function draftRemark(user: WechatUserRow) {
-  return remarkDrafts.value[user.key] ?? user.remark;
+function recordStateLabel(state: string) {
+  switch (state) {
+    case "active": return "正常";
+    case "cleaning": return "清理中";
+    case "cleanup_failed": return "清理失败";
+    default: return state || "未知";
+  }
 }
 
-function draftPhone(user: WechatUserRow) {
-  return phoneDrafts.value[user.key] ?? user.phone;
+function recordStateType(state: string): "success" | "warning" | "danger" | "info" {
+  switch (state) {
+    case "active": return "success";
+    case "cleaning": return "warning";
+    case "cleanup_failed": return "danger";
+    default: return "info";
+  }
 }
 
-function setDraftRemark(user: WechatUserRow, value: string) {
-  remarkDrafts.value = {
-    ...remarkDrafts.value,
-    [user.key]: value
+function cleanupStageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    validated: "身份已校验",
+    channels_stopped: "消息入口已停止",
+    routing_deleted: "路由已删除",
+    local_agent_data_deleted: "Agent 本地数据已删除",
+    wechat_files_deleted: "微信凭证已删除",
+    database_identity_deleted: "数据库身份已删除",
+    history_redacted: "历史记录已脱敏",
+    gateway_restarted: "Gateway 已恢复",
+    completed: "清理完成"
   };
+  return labels[stage] || stage || "等待开始";
 }
 
-function setDraftPhone(user: WechatUserRow, value: string) {
-  phoneDrafts.value = {
-    ...phoneDrafts.value,
-    [user.key]: value
-  };
+function draftRemark(user: PublicWechatUser) {
+  return remarkDrafts.value[userKey(user)] ?? user.remark;
+}
+
+function draftPhone(user: PublicWechatUser) {
+  return phoneDrafts.value[userKey(user)] ?? user.phone;
+}
+
+function setDraftRemark(user: PublicWechatUser, value: string) {
+  remarkDrafts.value = { ...remarkDrafts.value, [userKey(user)]: value };
+}
+
+function setDraftPhone(user: PublicWechatUser, value: string) {
+  phoneDrafts.value = { ...phoneDrafts.value, [userKey(user)]: value };
 }
 
 function miniappStatusLabel(status: string) {
   switch (status) {
-    case "connected":
-      return "已绑定";
-    case "waiting_scan":
-      return "待扫码";
-    case "scanned":
-      return "已扫码";
-    case "initializing":
-      return "初始化中";
-    case "rejected":
-      return "已拒绝";
-    default:
-      return status || "未接入";
+    case "connected": return "已绑定";
+    case "waiting_scan": return "待扫码";
+    case "scanned": return "已扫码";
+    case "initializing": return "初始化中";
+    case "rejected": return "已拒绝";
+    default: return status || "未接入";
   }
 }
 
 function miniappStatusType(status: string): "success" | "warning" | "danger" | "info" {
   switch (status) {
-    case "connected":
-      return "success";
+    case "connected": return "success";
     case "waiting_scan":
     case "scanned":
-    case "initializing":
-      return "warning";
-    case "rejected":
-      return "danger";
-    default:
-      return "info";
+    case "initializing": return "warning";
+    case "rejected": return "danger";
+    default: return "info";
   }
 }
 
@@ -253,8 +231,9 @@ async function runAction(name: string, action: () => Promise<unknown>) {
   }
 }
 
-async function restartWechatChannel(user: WechatUserRow) {
-  await runAction(`wechat-channel:${user.key}`, async () => {
+async function restartWechatChannel(user: PublicWechatUser) {
+  if (!canRestartWechatChannel(user)) return;
+  await runAction(`wechat-channel:${userKey(user)}`, async () => {
     const result = await admin.restartWechatAccountChannel(user.instanceId, user.accountId);
     ElMessage.success(result.message || "微信通道已重启。");
   });
@@ -262,7 +241,7 @@ async function restartWechatChannel(user: WechatUserRow) {
 
 async function batchRestartWechatChannels() {
   if (selectedRestartableUsers.value.length === 0) {
-    ElMessage.warning("请先选择运行中实例下的微信用户。");
+    ElMessage.warning("请先选择运行中实例下的正常微信用户。");
     return;
   }
   try {
@@ -287,42 +266,61 @@ async function batchRestartWechatChannels() {
   });
 }
 
-async function saveProfile(user: WechatUserRow) {
-  await runAction(`profile:${user.key}`, async () => {
+async function saveProfile(user: PublicWechatUser) {
+  if (!canEdit(user)) return;
+  await runAction(`profile:${userKey(user)}`, async () => {
     await admin.saveWechatProfile(user.instanceId, user.accountId, {
       phone: draftPhone(user),
       remark: draftRemark(user)
     });
-    const next = { ...remarkDrafts.value };
-    delete next[user.key];
-    remarkDrafts.value = next;
-    const nextPhones = { ...phoneDrafts.value };
-    delete nextPhones[user.key];
-    phoneDrafts.value = nextPhones;
+    const remarks = { ...remarkDrafts.value };
+    delete remarks[userKey(user)];
+    remarkDrafts.value = remarks;
+    const phones = { ...phoneDrafts.value };
+    delete phones[userKey(user)];
+    phoneDrafts.value = phones;
     ElMessage.success("用户资料已保存");
   });
 }
 
-async function deleteWechatAccount(user: WechatUserRow) {
+async function deleteWechatAccount(user: PublicWechatUser) {
+  if (!canUnbind(user)) return;
   try {
     await ElMessageBox.confirm(
-      `将解绑手机号 ${user.phone || "-"} 对应的微信用户，并删除当前 OpenClaw 账号状态文件。运行中的 Gateway 会自动重启以使变更生效。`,
-      "解绑微信用户",
-      { type: "warning", confirmButtonText: "解绑", cancelButtonText: "取消" }
+      [
+        `将彻底解绑手机号 ${user.phone || "-"} 对应的当前系统用户，并删除：`,
+        "• 微信账号状态和凭证",
+        "• Agent 配置、会话、trajectory 和 workspace",
+        "• 小程序绑定和 Key",
+        "• 本地 OpenViking Key 和运行状态",
+        "• 当前系统数据库身份数据",
+        "",
+        "OpenViking 服务端记忆不会删除；用户以后重新绑定时可以继续使用原远端记忆。"
+      ].join("\n"),
+      "彻底解绑微信用户",
+      { type: "warning", confirmButtonText: "确认彻底解绑", cancelButtonText: "取消", dangerouslyUseHTMLString: false }
     );
   } catch {
     return;
   }
-  await runAction(`delete-account:${user.key}`, async () => {
+  await runAction(`delete-account:${userKey(user)}`, async () => {
     const response = await admin.deleteWechatAccount(user.instanceId, user.accountId);
-    ElMessage.success(response.gatewayRestarted ? "已解绑，Gateway 正在重启以使变更生效。" : "已解绑微信用户。");
+    ElMessage.success(`已提交用户全量清理任务（阶段：${cleanupStageLabel(response.operation.stage)}）。`);
+  });
+}
+
+async function retryCleanup(user: PublicWechatUser) {
+  if (!user.cleanupOperationId || !user.retryable) return;
+  await runAction(`retry-cleanup:${user.cleanupOperationId}`, async () => {
+    const operation = await admin.retryWechatUserCleanup(user.cleanupOperationId);
+    ElMessage.success(`清理任务已重试（阶段：${cleanupStageLabel(operation.stage)}）。`);
   });
 }
 </script>
 
 <template>
   <section class="workspace wechat-users-page">
-    <PageHeader title="用户中心" description="查看全系统微信用户、小程序绑定与 API Key 状态。">
+    <PageHeader title="用户中心" description="统一查看有效用户、清理进度和可确认归属的历史残留。">
       <template #actions>
         <el-button :icon="RefreshCw" :loading="tableLoading" @click="loadUsers">刷新</el-button>
       </template>
@@ -331,16 +329,16 @@ async function deleteWechatAccount(user: WechatUserRow) {
     <el-alert v-if="error || admin.error" :title="error || admin.error" type="error" show-icon />
 
     <section class="metric-grid">
-      <MetricCard label="微信用户" :value="users.length" />
-      <MetricCard label="通道就绪" :value="readyUsers" tone="success" />
-      <MetricCard label="小程序已绑定" :value="miniappBoundUsers" tone="success" />
-      <MetricCard label="用户 Key 已启用" :value="enabledKeys" />
+      <MetricCard label="用户记录" :value="users.length" />
+      <MetricCard label="正常用户" :value="activeUsers" tone="success" />
+      <MetricCard label="清理中" :value="cleaningUsers" />
+      <MetricCard label="清理失败" :value="failedUsers" tone="warning" />
     </section>
 
     <el-card shadow="never">
       <template #header>
         <div class="card-title with-action">
-          <span>微信用户</span>
+          <span>微信用户与清理任务</span>
           <el-button
             :icon="RefreshCw"
             :disabled="selectedRestartableUsers.length === 0"
@@ -354,7 +352,7 @@ async function deleteWechatAccount(user: WechatUserRow) {
 
       <el-form class="management-form history-filter-form" label-position="top" @submit.prevent>
         <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="手机号 / 微信插件账号ID / 微信 userId / OpenViking 用户ID / 小程序 openid / 备注" clearable />
+          <el-input v-model="filters.keyword" placeholder="手机号 / accountId / 微信 userId / Agent / OpenViking / 残留类型" clearable />
         </el-form-item>
         <el-form-item label="实例">
           <el-select v-model="filters.instanceId" clearable placeholder="全部实例">
@@ -366,58 +364,77 @@ async function deleteWechatAccount(user: WechatUserRow) {
             <el-option v-for="item in channelStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label=" ">
-          <div class="button-row">
-            <el-button :icon="Search" type="primary">筛选</el-button>
-            <el-button @click="resetFilters">重置</el-button>
-          </div>
+        <el-form-item label="清理状态">
+          <el-select v-model="filters.recordState">
+            <el-option v-for="item in recordStateOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
+        <div class="inline-actions">
+          <el-button :icon="Search" @click="loadUsers">查询</el-button>
+          <el-button @click="resetFilters">重置</el-button>
+        </div>
       </el-form>
 
       <el-table
-        :data="filteredUsers"
         v-loading="tableLoading"
-        row-key="key"
+        :data="filteredUsers"
+        :row-key="userKey"
+        empty-text="暂无微信用户或清理记录"
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="48" :selectable="canRestartWechatChannel" />
+        <el-table-column label="清理状态" min-width="240">
+          <template #default="{ row }">
+            <div class="model-stack">
+              <span>
+                <el-tag size="small" :type="recordStateType(row.recordState)">{{ recordStateLabel(row.recordState) }}</el-tag>
+              </span>
+              <span v-if="row.recordState !== 'active'">{{ cleanupStageLabel(row.cleanupStage) }}</span>
+              <span v-if="row.cleanupError" class="danger-text">{{ row.cleanupError }}</span>
+              <span v-if="row.residueTypes?.length" class="muted-text">残留：{{ row.residueTypes.join("、") }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="手机号" min-width="210">
           <template #default="{ row }">
             <el-input
+              v-if="canEdit(row)"
               :model-value="draftPhone(row)"
               placeholder="可为空"
               clearable
               @update:model-value="(value: string) => setDraftPhone(row, value)"
             />
+            <span v-else>{{ row.phone || "-" }}</span>
           </template>
         </el-table-column>
         <el-table-column label="绑定实例名称" min-width="170">
           <template #default="{ row }">
             <div class="model-stack">
-              <strong>{{ row.instanceName }}</strong>
-              <span>{{ row.instanceStatus }}</span>
+              <strong>{{ row.instanceName || row.instanceId || "-" }}</strong>
+              <span>{{ row.instanceStatus || "unknown" }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="accountId" label="微信插件账号ID" min-width="230" />
-        <el-table-column min-width="180">
-          <template #header>
-            <span>微信 userId</span>
-            <el-tooltip content="微信插件登录完成后返回的真实微信用户标识。">
-              <span class="help-dot">?</span>
-            </el-tooltip>
-          </template>
+        <el-table-column label="微信插件账号ID" min-width="230">
+          <template #default="{ row }">{{ row.accountId || "-" }}</template>
+        </el-table-column>
+        <el-table-column label="微信 userId" min-width="180">
           <template #default="{ row }">{{ row.wechatUserId || "-" }}</template>
         </el-table-column>
-        <el-table-column prop="openVikingUserId" label="OpenViking 用户ID" min-width="230" />
+        <el-table-column label="Agent / OpenViking" min-width="260">
+          <template #default="{ row }">
+            <div class="model-stack">
+              <strong>{{ row.agentId || "-" }}</strong>
+              <span>{{ row.openVikingUserId || "-" }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="小程序/API" min-width="260">
           <template #default="{ row }">
             <div class="model-stack">
               <strong>{{ row.miniappOpenid || "-" }}</strong>
               <span>
-                <el-tag size="small" :type="miniappStatusType(row.miniappBindStatus)">
-                  {{ miniappStatusLabel(row.miniappBindStatus) }}
-                </el-tag>
+                <el-tag size="small" :type="miniappStatusType(row.miniappBindStatus)">{{ miniappStatusLabel(row.miniappBindStatus) }}</el-tag>
                 <el-tag v-if="row.miniappKeyPreview" size="small" :type="row.miniappKeyEnabled ? 'success' : 'info'" effect="plain">
                   {{ row.miniappKeyEnabled ? "Key启用" : "Key停用" }}
                 </el-tag>
@@ -430,24 +447,18 @@ async function deleteWechatAccount(user: WechatUserRow) {
         <el-table-column label="通道状态" min-width="190">
           <template #default="{ row }">
             <div class="channel-status-cell">
-              <el-tag size="small" :type="channelStatusType(row.channelStatus)">
-                {{ channelStatusLabel(row.channelStatus) }}
-              </el-tag>
+              <el-tag size="small" :type="channelStatusType(row.channelStatus)">{{ channelStatusLabel(row.channelStatus) }}</el-tag>
               <span v-if="row.channelMessage" class="muted-text">{{ row.channelMessage }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column label="备注" min-width="240">
           <template #default="{ row }">
-            <div class="remark-row">
+            <div v-if="canEdit(row)" class="remark-row">
               <el-input :model-value="draftRemark(row)" @update:model-value="(value: string) => setDraftRemark(row, value)" />
-              <el-button
-                :loading="actionLoading === `profile:${row.key}`"
-                @click="saveProfile(row)"
-              >
-                保存
-              </el-button>
+              <el-button :loading="actionLoading === `profile:${userKey(row)}`" @click="saveProfile(row)">保存</el-button>
             </div>
+            <span v-else>{{ row.remark || "-" }}</span>
           </template>
         </el-table-column>
         <el-table-column label="绑定时间" min-width="170">
@@ -459,26 +470,38 @@ async function deleteWechatAccount(user: WechatUserRow) {
         <el-table-column label="最近错误" min-width="170">
           <template #default="{ row }">{{ formatDateTime(row.lastErrorAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="right" fixed="right">
+        <el-table-column label="操作" width="170" align="right" fixed="right">
           <template #default="{ row }">
             <div class="instance-actions">
-              <el-tooltip content="重启微信通道">
+              <el-tooltip v-if="row.recordState === 'cleanup_failed'" content="重试清理">
+                <span>
+                  <el-button
+                    circle
+                    :icon="RotateCcw"
+                    :disabled="!row.retryable || !row.cleanupOperationId"
+                    :loading="actionLoading === `retry-cleanup:${row.cleanupOperationId}`"
+                    @click="retryCleanup(row)"
+                  />
+                </span>
+              </el-tooltip>
+              <el-tooltip v-else content="重启微信通道">
                 <span>
                   <el-button
                     circle
                     :icon="RefreshCw"
                     :disabled="!canRestartWechatChannel(row)"
-                    :loading="actionLoading === `wechat-channel:${row.key}`"
+                    :loading="actionLoading === `wechat-channel:${userKey(row)}`"
                     @click="restartWechatChannel(row)"
                   />
                 </span>
               </el-tooltip>
-              <el-tooltip content="解绑微信用户">
+              <el-tooltip content="彻底解绑微信用户">
                 <span>
                   <el-button
                     circle
                     :icon="Trash2"
-                    :loading="actionLoading === `delete-account:${row.key}`"
+                    :disabled="!canUnbind(row)"
+                    :loading="actionLoading === `delete-account:${userKey(row)}`"
                     @click="deleteWechatAccount(row)"
                   />
                 </span>

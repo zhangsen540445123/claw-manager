@@ -138,6 +138,54 @@ export interface PublicWechatPairedAccount {
   miniappLastUsedAt?: string | null;
 }
 
+export interface PublicWechatUser {
+  instanceId: string;
+  instanceName: string;
+  instanceStatus: string;
+  accountId: string;
+  phone: string;
+  wechatUserId: string;
+  agentId: string;
+  openVikingUserId: string;
+  remark: string;
+  baseUrl: string;
+  boundAt?: string | null;
+  updatedAt?: string | null;
+  channelStatus: string;
+  channelMessage: string;
+  channelUpdatedAt?: string | null;
+  lastStartedAt?: string | null;
+  lastErrorAt?: string | null;
+  miniappOpenid: string;
+  miniappBindStatus: string;
+  miniappKeyPreview: string;
+  miniappKeyEnabled: boolean;
+  miniappLastUsedAt?: string | null;
+  recordState: "active" | "cleaning" | "cleanup_failed" | string;
+  cleanupOperationId: string;
+  cleanupStage: string;
+  retryable: boolean;
+  cleanupError: string;
+  residueTypes: string[];
+}
+
+export interface PublicWechatUserCleanupOperation {
+  operationId: string;
+  instanceId: string;
+  source: string;
+  status: string;
+  stage: string;
+  attemptCount: number;
+  error: string;
+  deletedBindings: number;
+  deletedFiles: number;
+  deletedDatabaseRows: number;
+  retryable: boolean;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+}
+
 export interface PublicWechatBinding {
   status: string;
   updatedAt?: string | null;

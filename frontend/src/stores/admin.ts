@@ -22,6 +22,8 @@ import type {
   PublicWechatBinding,
   PublicWechatPluginStatus,
   PublicWechatPluginVersions,
+  PublicWechatUser,
+  PublicWechatUserCleanupOperation,
   PublicSkillDefinition,
   PublicSkillInstanceSync,
   PublicSkillRepository,
@@ -42,6 +44,16 @@ interface RunnerImageStatus {
 interface InstanceResponse {
   instance: PublicInstance;
   gatewayRestarted?: boolean;
+}
+
+interface WechatUserCleanupResponse {
+  operation: PublicWechatUserCleanupOperation;
+  instance: PublicInstance;
+}
+
+interface WechatUserCleanupBatchResponse {
+  operations: PublicWechatUserCleanupOperation[];
+  instance: PublicInstance;
 }
 
 interface BatchInstanceOperationItem {
@@ -86,6 +98,7 @@ interface MiniappBridgePluginBatchItem {
 export const useAdminStore = defineStore("admin", {
   state: () => ({
     instances: [] as PublicInstance[],
+    wechatUsers: [] as PublicWechatUser[],
     presets: [] as PublicModelPreset[],
     imageGenerationSettings: null as PublicImageGenerationSettings | null,
     agentWorkspacePreset: null as PublicAgentWorkspacePreset | null,
@@ -148,6 +161,11 @@ export const useAdminStore = defineStore("admin", {
       const response = await api<{ instances: PublicInstance[] }>("/api/admin/instances");
       this.instances = response.instances;
     },
+    async loadWechatUsers() {
+      const response = await api<{ users: PublicWechatUser[] }>("/api/admin/wechat-users");
+      this.wechatUsers = response.users;
+      return response.users;
+    },
     async loadRunnerImage() {
       const response = await api<{ image: RunnerImageStatus }>("/api/admin/runner-image");
       this.runnerImage = response.image;
@@ -192,8 +210,9 @@ export const useAdminStore = defineStore("admin", {
       return response.instances;
     },
     async unbindWechat(instanceId: string) {
-      const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/wechat-unbind`, { method: "POST" });
+      const response = await api<WechatUserCleanupBatchResponse>(`/api/admin/instances/${instanceId}/wechat-unbind`, { method: "POST" });
       this.upsert(response.instance);
+      await this.loadWechatUsers();
       return response;
     },
     async saveWechatRemark(instanceId: string, accountId: string, remark: string) {
@@ -205,20 +224,30 @@ export const useAdminStore = defineStore("admin", {
         ...jsonBody(payload)
       });
       this.upsert(response.instance);
+      await this.loadWechatUsers();
     },
     async deleteWechatAccount(instanceId: string, accountId: string) {
-      const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/wechat-accounts/${encodeURIComponent(accountId)}`, {
+      const response = await api<WechatUserCleanupResponse>(`/api/admin/instances/${instanceId}/wechat-accounts/${encodeURIComponent(accountId)}`, {
         method: "DELETE"
       });
       this.upsert(response.instance);
+      await this.loadWechatUsers();
       return response;
+    },
+    async retryWechatUserCleanup(operationId: string) {
+      const response = await api<{ operation: PublicWechatUserCleanupOperation }>(
+        `/api/admin/wechat-user-cleanups/${encodeURIComponent(operationId)}/retry`,
+        { method: "POST" }
+      );
+      await Promise.all([this.loadWechatUsers(), this.loadInstances()]);
+      return response.operation;
     },
     async restartWechatAccountChannel(instanceId: string, accountId: string) {
       const response = await api<{ account: WechatChannelRestartItem }>(
         `/api/admin/instances/${instanceId}/wechat-accounts/${encodeURIComponent(accountId)}/restart-channel`,
         { method: "POST" }
       );
-      await this.loadInstances();
+      await Promise.all([this.loadInstances(), this.loadWechatUsers()]);
       return response.account;
     },
     async batchRestartWechatAccountChannels(accounts: Array<{ instanceId: string; accountId: string }>) {
@@ -226,7 +255,7 @@ export const useAdminStore = defineStore("admin", {
         method: "POST",
         ...jsonBody({ accounts })
       });
-      await this.loadInstances();
+      await Promise.all([this.loadInstances(), this.loadWechatUsers()]);
       return response.accounts;
     },
     async createBindLink(mode: "new" | "existing", phone = "") {
@@ -854,9 +883,10 @@ export const useAdminStore = defineStore("admin", {
     applyEvent(event: AppEvent) {
       if (event.type === "instance.updated") {
         this.upsert((event.payload as { instance: PublicInstance }).instance);
+        void this.loadWechatUsers();
       }
       if (event.type === "admin.instances.updated") {
-        void this.loadInstances();
+        void Promise.all([this.loadInstances(), this.loadWechatUsers()]);
       }
       if (event.type === "instance.provisioning.updated") {
         const payload = event.payload as { instanceId: string; provisioning: PublicInstanceProvisioning };
@@ -869,6 +899,7 @@ export const useAdminStore = defineStore("admin", {
       if (event.type === "wechat.binding.updated") {
         const payload = event.payload as { instanceId: string; binding: PublicWechatBinding };
         this.patchInstance(payload.instanceId, { wechatBinding: payload.binding });
+        void this.loadWechatUsers();
       }
       if (event.type === "wechat.plugin.updated") {
         const payload = event.payload as { instanceId: string; plugin: PublicWechatPluginStatus };

@@ -9,6 +9,7 @@ import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/channel-config
 
 import {
   apiChannelPlugin,
+  deleteApiUserAgent,
   ensureApiUserAgentBinding,
   handleApiAssistantAgentEvent,
   monitorApiQueue,
@@ -48,6 +49,7 @@ export const API_CHANNEL_START_RPC = "claw-manager-api.start";
 export const API_ENSURE_USER_AGENT_RPC = "claw-manager-api.ensure-user-agent";
 export const API_ENSURE_API_BINDING_RPC = "claw-manager-api.ensure-api-binding";
 export const API_REPLACE_USER_AGENT_RPC = "claw-manager-api.replace-user-agent";
+export const API_DELETE_USER_AGENT_RPC = "claw-manager-api.delete-user-agent";
 
 export function resetOpenClawInternalAgentEventBridgeForTest(): void {
   internalAgentEventBridgeStop?.();
@@ -100,6 +102,30 @@ export function registerApiProvisioningMethods(api: GatewayMethodApi): void {
         wechatAccountId: String(input.wechatAccountId ?? "").trim(),
         wechatPeerId: String(input.wechatPeerId ?? "").trim(),
         apiPeerIds: Array.isArray(input.apiPeerIds) ? input.apiPeerIds.map((value) => String(value).trim()).filter(Boolean) : [],
+      });
+      respond(true, result);
+    } catch (error) {
+      respond(false, { code: errorMessage(error), message: errorMessage(error) });
+    }
+  });
+  api.registerGatewayMethod(API_DELETE_USER_AGENT_RPC, async ({ params, respond }) => {
+    if (!configRuntime?.current || !configRuntime?.mutateConfigFile) {
+      respond(false, { code: "CONFIG_RUNTIME_UNAVAILABLE", message: "OpenClaw config runtime is unavailable" });
+      return;
+    }
+    const input = params && typeof params === "object" ? params as Record<string, unknown> : {};
+    try {
+      const stringList = (value: unknown): string[] => Array.isArray(value)
+        ? value.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      const result = await deleteApiUserAgent({
+        cfg: configRuntime.current(),
+        configRuntime,
+        agentId: String(input.agentId ?? "").trim(),
+        wechatAccountIds: stringList(input.wechatAccountIds),
+        wechatPeerIds: stringList(input.wechatPeerIds),
+        apiPeerIds: stringList(input.apiPeerIds),
+        protectedAgentIds: stringList(input.protectedAgentIds),
       });
       respond(true, result);
     } catch (error) {

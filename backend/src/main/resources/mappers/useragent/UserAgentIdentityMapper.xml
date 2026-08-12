@@ -9,6 +9,12 @@
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
+  <select id="listAll" resultMap="UserAgentIdentityMap">
+    SELECT agent_id, wechat_user_id, openviking_user_id, created_at, updated_at
+    FROM user_agent_identities
+    ORDER BY created_at ASC, agent_id ASC
+  </select>
+
   <select id="findByWechatUserId" resultMap="UserAgentIdentityMap">
     SELECT agent_id, wechat_user_id, openviking_user_id, created_at, updated_at
     FROM user_agent_identities
