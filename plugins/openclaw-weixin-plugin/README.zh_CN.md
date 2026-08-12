@@ -107,6 +107,25 @@ openclaw config set session.dmScope per-account-channel-peer
 已注册的 agent 共享同一个 `botAgent` 声明；如有需要按 agent 单独标识的场景，
 可在后续版本扩展配置。
 
+
+## 微信文件与办公文档解析
+
+当用户在微信私聊中发送文件时，插件会先下载临时文件，然后在消息路由确定后归档到对应 Agent 的独立工作区：
+
+```text
+<agent workspace>/.openclaw-inbox/weixin/<yyyyMMdd>/<messageId>/
+├── original/  # 原始微信文件
+└── parsed/    # 提取文字、metadata.json、Office 内嵌图片
+```
+
+这意味着每个微信用户对应的 Agent workspace 是隔离的；A 用户的 Agent 不会把文件保存到 B 用户的 workspace。
+
+支持解析：文本、Markdown/JSON/XML/YAML/log、CSV、Excel（`.xlsx` / `.xls`）、Word（`.docx`）、PowerPoint（`.pptx`）和 PDF 文本。Word/PPT 内嵌图片会提取出来；如果当前模型声明支持 `image` 输入，图片会作为视觉输入传给模型，否则会在提示中明确说明“当前模型不支持图片理解，已仅使用文字内容”。
+
+默认限制：文件 20MB、提取文字 80,000 字、Office 图片 10 张、PDF 文本 10 页。文件超限、文字截断、图片截断、PDF 页数截断、格式不支持或解析失败都会写入发给 Agent 的“文件处理提示”，避免静默丢内容。
+
+注意：PDF 当前主要做文本提取，扫描版 PDF 或页面图片 OCR 仍会以限制提示告知用户。
+
 ## 后端 API 协议
 
 本插件通过 HTTP JSON API 与后端网关通信。二次开发者若需对接自有后端，需实现以下接口。

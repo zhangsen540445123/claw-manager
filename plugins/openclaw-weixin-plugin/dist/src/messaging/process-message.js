@@ -10,6 +10,7 @@ import { readFrameworkAllowFromList } from "../auth/pairing.js";
 import { downloadRemoteImageToTemp } from "../cdn/upload.js";
 import { resolveReplyProgressMessagesEnabled } from "../config/reply-progress.js";
 import { downloadMediaFromItem } from "../media/media-download.js";
+import { archiveAndParseWeixinDocument, findAgentWorkspaceFromConfig, formatParsedDocumentForInboundBody, } from "../document/agent-document-archive.js";
 import { logger } from "../util/logger.js";
 import { redactBody, redactIdentity, redactToken } from "../util/redact.js";
 import { isDebugMode } from "./debug-mode.js";
@@ -25,6 +26,13 @@ import { clearWechatOpenVikingTurn, registerWechatOpenVikingTurn, runWithWechatO
 import { resolveUserAgentIdentity } from "./user-agent-identity.js";
 import { ensureWeixinDynamicAgentRoute, } from "./dynamic-agent.js";
 const MEDIA_OUTBOUND_TEMP_DIR = path.join(resolvePreferredOpenClawTmpDir(), "weixin/media/outbound-temp");
+const DOCUMENT_PARSE_LIMITS = {
+    maxFileBytes: 20 * 1024 * 1024,
+    maxTextChars: 80_000,
+    maxImages: 10,
+    maxPdfPages: 10,
+    maxImageEdgePixels: 1600,
+};
 /** Extract text body from item_list (for slash command detection). */
 function extractTextBody(itemList) {
     if (!itemList?.length)
@@ -35,6 +43,66 @@ function extractTextBody(itemList) {
         }
     }
     return "";
+}
+function fileNameFromMediaItem(item) {
+    if (!item || typeof item !== "object")
+        return undefined;
+    if (item.type === MessageItemType.FILE)
+        return item.file_item?.file_name;
+    return undefined;
+}
+export function modelSupportsImagesFromConfig(cfg) {
+    const primary = cfg.agents?.defaults?.model?.primary ?? cfg.model?.primary;
+    if (typeof primary !== "string" || !primary.includes("/"))
+        return true;
+    const [providerId, modelId] = primary.split("/", 2);
+    const models = cfg.models?.providers?.[providerId]?.models;
+    if (!Array.isArray(models))
+        return true;
+    const model = models.find((entry) => Boolean(entry) && typeof entry === "object" && entry.id === modelId);
+    return Array.isArray(model?.input) ? model.input.includes("image") : true;
+}
+export async function attachParsedWeixinDocumentToContext(input) {
+    const workspace = findAgentWorkspaceFromConfig(input.routedConfig, input.agentId);
+    if (!workspace) {
+        input.errLog?.(`document archive skipped: workspace unavailable agentId=${input.agentId ?? "(none)"}`);
+        input.ctx.Body = [
+            input.ctx.Body?.trim() ? `【用户消息】\n${input.ctx.Body.trim()}` : undefined,
+            "【收到微信文件】",
+            `文件名：${input.filename ?? path.basename(input.downloadedFilePath)}`,
+            "文件已下载，但当前 Agent 工作区不可用，未能归档和解析。",
+        ].filter(Boolean).join("\n\n");
+        delete input.ctx.MediaPath;
+        delete input.ctx.MediaType;
+        delete input.ctx.MediaPaths;
+        delete input.ctx.MediaTypes;
+        return;
+    }
+    const archived = await archiveAndParseWeixinDocument({
+        workspace,
+        downloadedFilePath: input.downloadedFilePath,
+        filename: input.filename ?? path.basename(input.downloadedFilePath),
+        mime: input.mime,
+        accountId: input.accountId,
+        peerId: input.peerId,
+        messageSid: input.messageSid,
+        limits: input.limits ?? DOCUMENT_PARSE_LIMITS,
+        modelSupportsImages: modelSupportsImagesFromConfig(input.routedConfig),
+    });
+    input.ctx.Body = formatParsedDocumentForInboundBody(input.ctx.Body ?? "", archived);
+    if (archived.mediaPaths.length > 0) {
+        input.ctx.MediaPaths = archived.mediaPaths;
+        input.ctx.MediaTypes = archived.mediaTypes;
+        input.ctx.MediaPath = archived.mediaPaths[0];
+        input.ctx.MediaType = archived.mediaTypes[0];
+    }
+    else {
+        delete input.ctx.MediaPath;
+        delete input.ctx.MediaType;
+        delete input.ctx.MediaPaths;
+        delete input.ctx.MediaTypes;
+    }
+    input.log?.(`[weixin] document archived path=${archived.originalRelativePath} textChars=${archived.parsed.textChars} images=${archived.parsed.images.length}`);
 }
 export function attachSenderRuntimeIdentity(ctx, senderId) {
     return Object.assign(ctx, {
@@ -162,6 +230,7 @@ export async function processOneMessage(full, deps) {
         : undefined;
     const mediaDownloadStart = Date.now();
     const mediaItem = mainMediaItem ?? refMediaItem;
+    const inboundFileName = fileNameFromMediaItem(mediaItem);
     if (mediaItem) {
         const label = refMediaItem ? "ref" : "inbound";
         const downloaded = await downloadMediaFromItem(mediaItem, {
@@ -238,6 +307,22 @@ export async function processOneMessage(full, deps) {
         logger.error(`resolveAgentRoute: no agentId resolved for peer=${senderForLog} accountId=${redactIdentity(deps.accountId)} — message will not be dispatched`);
     }
     await reportWechatTrace({ traceId: cmTraceId, stage: "wechat.route.resolved", status: route.agentId ? "completed" : "failed", requestId: runId });
+    if (mediaOpts.decryptedFilePath) {
+        await attachParsedWeixinDocumentToContext({
+            ctx,
+            routedConfig: routedConfig,
+            agentId: route.agentId,
+            downloadedFilePath: mediaOpts.decryptedFilePath,
+            filename: inboundFileName ?? path.basename(mediaOpts.decryptedFilePath),
+            mime: mediaOpts.fileMediaType,
+            accountId: deps.accountId,
+            peerId: ctx.To,
+            messageSid: String(full.message_id ?? ctx.MessageSid),
+            limits: DOCUMENT_PARSE_LIMITS,
+            log: deps.log,
+            errLog: deps.errLog,
+        });
+    }
     if (debug) {
         debugTrace.push(`│ route: agent=${route.agentId ?? "none"} session=${route.sessionKey ? "present" : "none"}`);
         debugTs.preDispatch = Date.now();
@@ -258,9 +343,9 @@ export async function processOneMessage(full, deps) {
         cmTraceId,
         runId,
     });
-    logger.info(`inbound: sender=${senderForLog} bodyLen=${(finalized.Body ?? "").length} hasMedia=${Boolean(finalized.MediaPath ?? finalized.MediaUrl)}`);
+    logger.info(`inbound: sender=${senderForLog} bodyLen=${(finalized.Body ?? "").length} hasMedia=${Boolean(finalized.MediaPath ?? finalized.MediaUrl ?? finalized.MediaPaths?.length)}`);
     logger.debug(`inbound context: bodyLen=${(finalized.Body ?? "").length} sender=${senderForLog} ` +
-        `media=${finalized.MediaPath || finalized.MediaUrl ? "present" : "none"}`);
+        `media=${(finalized.MediaPath || finalized.MediaUrl || finalized.MediaPaths?.length) ? "present" : "none"}`);
     await deps.channelRuntime.session.recordInboundSession({
         storePath,
         sessionKey: route.sessionKey,

@@ -1,6 +1,6 @@
 {
   "name": "@claw-manager/openclaw-weixin",
-  "version": "2026.6.31",
+  "version": "2026.8.1",
   "description": "OpenClaw Weixin channel",
   "license": "MIT",
   "author": "Tencent",
@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "qrcode-terminal": "0.12.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@claw-manager/document-parser": "2026.8.1"
   },
   "peerDependencies": {
     "openclaw": ">=2026.5.12"

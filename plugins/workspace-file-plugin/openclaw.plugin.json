@@ -1,6 +1,6 @@
 {
   "id": "workspace-file",
-  "version": "2026.7.2",
+  "version": "2026.8.1",
   "contracts": {
     "tools": [
       "workspace_file"

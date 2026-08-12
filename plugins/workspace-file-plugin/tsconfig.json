@@ -8,5 +8,12 @@
     "outDir": "dist",
     "skipLibCheck": true
   },
-  "include": ["index.ts", "index.test.ts"]
+  "include": [
+    "index.ts"
+  ],
+  "exclude": [
+    "index.test.ts",
+    "dist",
+    "node_modules"
+  ]
 }

@@ -160,6 +160,8 @@ export type WeixinMsgContext = {
   MediaUrl?: string;
   MediaPath?: string;
   MediaType?: string;
+  MediaPaths?: string[];
+  MediaTypes?: string[];
   /** Raw message body for framework command authorization. */
   CommandBody?: string;
   /** Whether the sender is authorized to execute slash commands. */

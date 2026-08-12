@@ -349,3 +349,20 @@ Ensure `plugins.entries.openclaw-weixin.enabled` is `true` in `~/.openclaw/openc
 openclaw config set plugins.entries.openclaw-weixin.enabled true
 openclaw gateway restart
 ```
+
+
+## WeChat files and Office/PDF parsing
+
+Inbound WeChat files are archived after routing resolves the target Agent. The canonical location is the routed Agent workspace:
+
+```text
+<agent workspace>/.openclaw-inbox/weixin/<yyyyMMdd>/<messageId>/
+├── original/
+└── parsed/
+```
+
+Supported parsing includes text/Markdown/JSON/XML/YAML/log files, CSV, Excel (`.xlsx` / `.xls`), Word (`.docx`), PowerPoint (`.pptx`) and PDF text extraction. Embedded Word/PPT images are extracted; image-capable models receive them as visual inputs, while text-only models get an explicit warning and only the extracted text.
+
+Default limits: 20 MB files, 80,000 extracted characters, 10 Office images and 10 PDF text pages. Oversized files, truncated text/images/pages, unsupported formats and parse failures are surfaced in the prompt sent to the Agent.
+
+PDF support currently focuses on text extraction. Scanned PDF/OCR gaps are reported as warnings rather than being silently ignored.

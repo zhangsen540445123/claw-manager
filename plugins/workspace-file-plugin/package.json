@@ -1,6 +1,6 @@
 {
   "name": "@claw-manager/workspace-file-plugin",
-  "version": "2026.7.2",
+  "version": "2026.8.1",
   "description": "Workspace-scoped file operations for OpenClaw agents",
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,8 @@
     "openclaw": ">=2026.5.12"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.33"
+    "@sinclair/typebox": "^0.34.33",
+    "@claw-manager/document-parser": "2026.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

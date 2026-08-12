@@ -1,10 +1,11 @@
 import { Type } from "@sinclair/typebox";
 import { createHash, randomUUID } from "node:crypto";
+import { parseDocument } from "@claw-manager/document-parser";
 import { mkdir, open, readFile, readdir, realpath, rename, rm, lstat } from "node:fs/promises";
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import path from "node:path";
 
-export type WorkspaceFileAction = "list" | "read" | "write" | "mkdir" | "delete";
+export type WorkspaceFileAction = "list" | "read" | "read_document" | "write" | "mkdir" | "delete";
 
 export type WorkspaceFileInput = {
   action: WorkspaceFileAction;
@@ -12,6 +13,10 @@ export type WorkspaceFileInput = {
   content?: string;
   expectedSha256?: string;
   recursive?: boolean;
+  maxTextChars?: number;
+  maxImages?: number;
+  maxPdfPages?: number;
+  includeImages?: boolean;
 };
 
 type WorkspaceFileResult = {
@@ -209,8 +214,51 @@ async function executeList(resolved: Awaited<ReturnType<typeof resolveWorkspaceP
   };
 }
 
+async function executeReadDocument(
+  resolved: Awaited<ReturnType<typeof resolveWorkspacePath>>,
+  input: WorkspaceFileInput,
+): Promise<WorkspaceFileResult> {
+  const fileSha = await currentSha256(resolved.absolute) ?? createHash("sha256").update(resolved.relative).digest("hex");
+  const cacheDir = path.join(resolved.root, ".openclaw-document-cache", fileSha);
+  const parsed = await parseDocument({
+    filePath: resolved.absolute,
+    filename: path.basename(resolved.relative),
+    outputDir: cacheDir,
+    limits: {
+      ...(typeof input.maxTextChars === "number" ? { maxTextChars: input.maxTextChars } : {}),
+      ...(typeof input.maxImages === "number" ? { maxImages: input.maxImages } : {}),
+      ...(typeof input.maxPdfPages === "number" ? { maxPdfPages: input.maxPdfPages } : {}),
+      ...(input.includeImages === false ? { maxImages: 0 } : {}),
+    },
+  });
+  const imagePaths = parsed.images.map((image) => path.relative(resolved.root, image.path).split(path.sep).join("/"));
+  const summaryLines = [
+    `文件名：${parsed.filename}`,
+    `状态：${parsed.kind === "unsupported" ? "失败" : parsed.warnings.length ? "部分成功" : "成功"}`,
+    `已提取文字：${parsed.textChars} 字`,
+    `已提取图片：${parsed.images.length} 张`,
+    ...parsed.warnings,
+  ];
+  return {
+    action: "read_document",
+    path: resolved.relative,
+    filename: parsed.filename,
+    mime: parsed.mime,
+    sizeBytes: parsed.sizeBytes,
+    kind: parsed.kind,
+    text: parsed.text,
+    textChars: parsed.textChars,
+    textTruncated: parsed.textTruncated,
+    imageCount: parsed.images.length,
+    imagePaths,
+    warnings: parsed.warnings,
+    summary: summaryLines.join("\n"),
+    cachePath: path.relative(resolved.root, cacheDir).split(path.sep).join("/"),
+  };
+}
+
 async function executeWorkspaceFileInternal(workspaceDir: string, input: WorkspaceFileInput): Promise<WorkspaceFileResult> {
-  if (!input || !["list", "read", "write", "mkdir", "delete"].includes(input.action)) {
+  if (!input || !["list", "read", "read_document", "write", "mkdir", "delete"].includes(input.action)) {
     return fail("workspace file action is invalid");
   }
 
@@ -227,6 +275,8 @@ async function executeWorkspaceFileInternal(workspaceDir: string, input: Workspa
       sha256: createHash("sha256").update(content, "utf8").digest("hex"),
     };
   }
+
+  if (input.action === "read_document") return executeReadDocument(resolved, input);
 
   if (input.action === "write") {
     if (typeof input.content !== "string") return fail("workspace file content is required");
@@ -274,6 +324,7 @@ const workspaceFileSchema = Type.Object({
   action: Type.Union([
     Type.Literal("list"),
     Type.Literal("read"),
+    Type.Literal("read_document"),
     Type.Literal("write"),
     Type.Literal("mkdir"),
     Type.Literal("delete"),
@@ -282,6 +333,10 @@ const workspaceFileSchema = Type.Object({
   content: Type.Optional(Type.String()),
   expectedSha256: Type.Optional(Type.String()),
   recursive: Type.Optional(Type.Boolean()),
+  maxTextChars: Type.Optional(Type.Number()),
+  maxImages: Type.Optional(Type.Number()),
+  maxPdfPages: Type.Optional(Type.Number()),
+  includeImages: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
 
 const plugin = {
@@ -299,7 +354,7 @@ const plugin = {
       return {
         name: "workspace_file",
         label: "Workspace File",
-        description: "List, read, write, create directories, or delete files inside the current agent workspace.",
+        description: "List, read text, read office documents, write, create directories, or delete files inside the current agent workspace.",
         parameters: workspaceFileSchema,
         execute: async (_toolCallId: string, input: WorkspaceFileInput) => {
           const details = await executeWorkspaceFile(ctx.workspaceDir!, input);
@@ -311,3 +366,4 @@ const plugin = {
 };
 
 export default plugin;
+

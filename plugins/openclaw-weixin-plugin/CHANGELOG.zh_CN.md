@@ -4,6 +4,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 格式。
 
+
+## [2026.8.1] - 2026-08-13
+
+### 新增
+
+- 微信文件会按路由后的 Agent workspace 隔离归档到 `.openclaw-inbox/weixin/<日期>/<消息ID>/`。
+- 接入 `@claw-manager/document-parser`，支持文本、CSV、Excel、Word、PowerPoint 和 PDF 文本解析。
+- Word/PPT 内嵌图片会提取为视觉输入；模型不支持图片时会明确提示并仅使用文字。
+- 文件超限、文字截断、图片截断、PDF 页数限制、格式不支持和解析失败都会进入 Agent 可见提示。
+
 ## [2026.6.28] - 2026-07-19
 
 ### 新增

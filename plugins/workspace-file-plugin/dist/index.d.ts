@@ -1,11 +1,15 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-export type WorkspaceFileAction = "list" | "read" | "write" | "mkdir" | "delete";
+export type WorkspaceFileAction = "list" | "read" | "read_document" | "write" | "mkdir" | "delete";
 export type WorkspaceFileInput = {
     action: WorkspaceFileAction;
     path: string;
     content?: string;
     expectedSha256?: string;
     recursive?: boolean;
+    maxTextChars?: number;
+    maxImages?: number;
+    maxPdfPages?: number;
+    includeImages?: boolean;
 };
 type WorkspaceFileResult = {
     action: WorkspaceFileAction;
