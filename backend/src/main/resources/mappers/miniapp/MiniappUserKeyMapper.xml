@@ -55,4 +55,9 @@
     INNER JOIN miniapp_user_bindings b ON b.openid_hash = k.openid_hash
     WHERE b.agent_id = #{agentId}
   </delete>
+  <delete id="deleteByInstanceId">
+    DELETE k FROM miniapp_user_keys k
+    INNER JOIN miniapp_user_bindings b ON b.openid_hash = k.openid_hash
+    WHERE b.instance_id = #{instanceId}
+  </delete>
 </mapper>

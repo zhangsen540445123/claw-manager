@@ -45,6 +45,7 @@ public class InstanceController {
   private final WechatUserResidueScanner wechatUserResidueScanner;
   private final ModelAuthService modelAuthService;
   private final InstanceModelService instanceModelService;
+  private final InstanceDeletionService instanceDeletionService;
 
   public InstanceController(
       InstanceQueryService instanceQueryService,
@@ -56,7 +57,8 @@ public class InstanceController {
       WechatUserCleanupService wechatUserCleanupService,
       WechatUserResidueScanner wechatUserResidueScanner,
       ModelAuthService modelAuthService,
-      InstanceModelService instanceModelService
+      InstanceModelService instanceModelService,
+      InstanceDeletionService instanceDeletionService
   ) {
     this.instanceQueryService = instanceQueryService;
     this.instanceCommandService = instanceCommandService;
@@ -68,6 +70,7 @@ public class InstanceController {
     this.wechatUserResidueScanner = wechatUserResidueScanner;
     this.modelAuthService = modelAuthService;
     this.instanceModelService = instanceModelService;
+    this.instanceDeletionService = instanceDeletionService;
   }
 
   /**
@@ -77,6 +80,21 @@ public class InstanceController {
   public Map<String, Object> listInstances(Authentication authentication, HttpServletRequest request) {
     requireAdmin(authentication);
     return Map.of("instances", instanceQueryService.listAllInstances(request));
+  }
+
+  /**
+   * 启动不可逆实例删除任务。force=false 时，如果实例下存在微信或小程序用户，会返回风险冲突。
+   */
+  @DeleteMapping("/{instanceId}")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public Map<String, Object> deleteInstance(
+      @PathVariable String instanceId,
+      @RequestParam(defaultValue = "false") boolean force,
+      Authentication authentication
+  ) {
+    requireAdmin(authentication);
+    InstanceDeleteOperationEntity operation = instanceDeletionService.start(instanceId, force);
+    return Map.of("operation", PublicInstanceDeleteOperation.from(operation));
   }
 
   /**

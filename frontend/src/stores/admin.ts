@@ -14,6 +14,7 @@ import type {
   PublicOpenVikingPluginVersions,
   PublicOpenVikingSettings,
   PublicInstance,
+  PublicInstanceDeleteOperation,
   PublicImageGenerationSettings,
   PublicInstanceModelAuth,
   PublicInstanceProvisioning,
@@ -49,6 +50,10 @@ interface InstanceResponse {
 interface WechatUserCleanupResponse {
   operation: PublicWechatUserCleanupOperation;
   instance: PublicInstance;
+}
+
+interface InstanceDeleteResponse {
+  operation: PublicInstanceDeleteOperation;
 }
 
 interface WechatUserCleanupBatchResponse {
@@ -196,6 +201,28 @@ export const useAdminStore = defineStore("admin", {
     async restartGateway(instanceId: string) {
       const response = await api<InstanceResponse>(`/api/admin/instances/${instanceId}/restart-gateway`, { method: "POST" });
       this.upsert(response.instance);
+    },
+    async deleteInstance(instanceId: string, force = false) {
+      const response = await api<InstanceDeleteResponse>(
+        `/api/admin/instances/${instanceId}?force=${force ? "true" : "false"}`,
+        { method: "DELETE" }
+      );
+      this.instances = this.instances.map((instance) =>
+        instance.id === instanceId ? { ...instance, status: "deleting" } : instance
+      );
+      return response.operation;
+    },
+    async loadInstanceDeleteOperation(operationId: string) {
+      const response = await api<InstanceDeleteResponse>(`/api/admin/instance-delete-operations/${encodeURIComponent(operationId)}`);
+      return response.operation;
+    },
+    async retryInstanceDelete(operationId: string) {
+      const response = await api<InstanceDeleteResponse>(
+        `/api/admin/instance-delete-operations/${encodeURIComponent(operationId)}/retry`,
+        { method: "POST" }
+      );
+      await this.loadInstances();
+      return response.operation;
     },
     async batchRestartGateway(instanceIds: string[]) {
       const response = await api<{ instances: BatchInstanceOperationItem[] }>("/api/admin/instances/batch/restart-gateway", {

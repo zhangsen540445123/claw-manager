@@ -43,6 +43,24 @@ class DockerJavaOpenClawRuntimeOpenVikingTest {
   }
 
   @Test
+  void runnerEnvIncludesNodeHeapLimitWhenConfigured() {
+    OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
+        "",
+        true,
+        "claw-manager",
+        "shared-secret",
+        "",
+        "root-key-never-in-runner",
+        "broker-token",
+        "http://claw-manager-api:8080"
+    );
+
+    List<String> env = DockerJavaOpenClawRuntime.runnerEnv(settings, "inst_1", 1536);
+
+    assertThat(env).contains("NODE_OPTIONS=--max-old-space-size=1536");
+  }
+
+  @Test
   void runnerEnvOmitsOptionalBlankOpenVikingPackageAndBaseUrl() {
     OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
         "",

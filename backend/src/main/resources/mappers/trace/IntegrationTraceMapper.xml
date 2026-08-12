@@ -38,6 +38,7 @@
     SELECT * FROM integration_trace_events WHERE trace_id=#{traceId} ORDER BY created_at ASC
   </select>
   <delete id="deleteBefore">DELETE FROM integration_trace_events WHERE created_at &lt; #{cutoff}</delete>
+  <delete id="deleteByInstanceId">DELETE FROM integration_trace_events WHERE instance_id = #{instanceId}</delete>
   <delete id="deleteByIdentityEvidence">
     DELETE FROM integration_trace_events
     WHERE instance_id = #{instanceId}

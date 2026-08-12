@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.instance.InstanceDeleteOperationMapper">
+  <resultMap id="OperationMap" type="com.clawbotforall.instance.InstanceDeleteOperationEntity">
+    <id property="operationId" column="operation_id"/>
+    <result property="instanceId" column="instance_id"/>
+    <result property="instanceName" column="instance_name"/>
+    <result property="containerName" column="container_name"/>
+    <result property="force" column="force_delete"/>
+    <result property="status" column="status"/>
+    <result property="stage" column="stage"/>
+    <result property="wechatAccountCount" column="wechat_account_count"/>
+    <result property="miniappBindingCount" column="miniapp_binding_count"/>
+    <result property="cleanupOperationIdsJson" column="cleanup_operation_ids_json"/>
+    <result property="lastError" column="last_error"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <result property="completedAt" column="completed_at"/>
+  </resultMap>
+  <select id="findById" resultMap="OperationMap">
+    SELECT * FROM instance_delete_operations WHERE operation_id = #{operationId} LIMIT 1
+  </select>
+  <select id="findByIdForUpdate" resultMap="OperationMap">
+    SELECT * FROM instance_delete_operations WHERE operation_id = #{operationId} LIMIT 1 FOR UPDATE
+  </select>
+  <select id="findActiveByInstanceForUpdate" resultMap="OperationMap">
+    SELECT * FROM instance_delete_operations
+    WHERE instance_id = #{instanceId} AND status IN ('pending','deleting','delete_failed')
+    ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+  </select>
+  <select id="listActive" resultMap="OperationMap">
+    SELECT * FROM instance_delete_operations WHERE status IN ('pending','deleting','delete_failed') ORDER BY created_at ASC
+  </select>
+  <insert id="insert" parameterType="com.clawbotforall.instance.InstanceDeleteOperationEntity">
+    INSERT INTO instance_delete_operations
+      (operation_id, instance_id, instance_name, container_name, force_delete, status, stage,
+       wechat_account_count, miniapp_binding_count, cleanup_operation_ids_json, last_error,
+       created_at, updated_at, completed_at)
+    VALUES
+      (#{operationId}, #{instanceId}, #{instanceName}, #{containerName}, #{force}, #{status}, #{stage},
+       #{wechatAccountCount}, #{miniappBindingCount}, #{cleanupOperationIdsJson}, #{lastError},
+       #{createdAt}, #{updatedAt}, #{completedAt})
+  </insert>
+  <update id="update" parameterType="com.clawbotforall.instance.InstanceDeleteOperationEntity">
+    UPDATE instance_delete_operations SET
+      instance_id = #{instanceId}, instance_name = #{instanceName}, container_name = #{containerName},
+      force_delete = #{force}, status = #{status}, stage = #{stage}, wechat_account_count = #{wechatAccountCount},
+      miniapp_binding_count = #{miniappBindingCount}, cleanup_operation_ids_json = #{cleanupOperationIdsJson},
+      last_error = #{lastError}, updated_at = #{updatedAt}, completed_at = #{completedAt}
+    WHERE operation_id = #{operationId}
+  </update>
+</mapper>

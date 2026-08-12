@@ -20,6 +20,8 @@ public interface MiniappUserBindingMapper {
 
   int deleteByAgentId(@Param("agentId") String agentId);
 
+  int deleteByInstanceId(@Param("instanceId") String instanceId);
+
   int insert(MiniappUserBindingEntity binding);
 
   int updateBindToken(

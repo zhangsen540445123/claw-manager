@@ -186,6 +186,23 @@ export interface PublicWechatUserCleanupOperation {
   completedAt?: string | null;
 }
 
+export interface PublicInstanceDeleteOperation {
+  operationId: string;
+  instanceId: string;
+  instanceName: string;
+  containerName: string;
+  force: boolean;
+  status: string;
+  stage: string;
+  wechatAccountCount: number;
+  miniappBindingCount: number;
+  error: string;
+  retryable: boolean;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+}
+
 export interface PublicWechatBinding {
   status: string;
   updatedAt?: string | null;

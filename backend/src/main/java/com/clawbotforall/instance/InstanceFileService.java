@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -100,6 +101,41 @@ public class InstanceFileService {
         baseDir.resolve("workspace"),
         baseDir.resolve("logs")
     );
+  }
+
+  /**
+   * 安全删除实例本地目录。仅允许删除 data-dir/instances/{instanceId}，目录不存在视为成功。
+   */
+  public void deleteInstanceDirectory(String instanceId) {
+    if (instanceId == null || instanceId.isBlank()) {
+      throw new IllegalArgumentException("实例 ID 不能为空。");
+    }
+    Path instancesRoot = Path.of(properties.paths().dataDir(), "instances").toAbsolutePath().normalize();
+    Path target = instancesRoot.resolve(instanceId).toAbsolutePath().normalize();
+    if (!target.startsWith(instancesRoot) || target.equals(instancesRoot)) {
+      throw new IllegalStateException("实例目录安全校验失败，拒绝删除。Target=" + target);
+    }
+    if (!Files.exists(target)) {
+      return;
+    }
+    try {
+      Files.walk(target)
+          .sorted(Comparator.reverseOrder())
+          .forEach(path -> {
+            try {
+              Files.deleteIfExists(path);
+            } catch (IOException error) {
+              throw new RuntimeException(error);
+            }
+          });
+    } catch (IOException error) {
+      throw new IllegalStateException("删除实例目录失败。", error);
+    } catch (RuntimeException error) {
+      if (error.getCause() instanceof IOException io) {
+        throw new IllegalStateException("删除实例目录失败。", io);
+      }
+      throw error;
+    }
   }
 
   private void ensureLayout(InstancePaths paths) throws IOException {

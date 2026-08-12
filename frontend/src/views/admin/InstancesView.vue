@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Clipboard, ExternalLink, Play, RefreshCw, Square } from "lucide-vue-next";
+import { Clipboard, ExternalLink, Play, RefreshCw, Square, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import MetricCard from "../../components/MetricCard.vue";
 import PageHeader from "../../components/PageHeader.vue";
@@ -45,8 +45,12 @@ function canOpenControlUi(instance: PublicInstance) {
   return instance.status === "running" && instance.provisioning?.status === "ready" && Boolean(instance.dashboardUrl);
 }
 
+function isDeleting(instance: PublicInstance) {
+  return instance.status === "deleting";
+}
+
 function canRestartGateway(instance: PublicInstance) {
-  return instance.status === "running" && instance.provisioning?.status !== "running";
+  return instance.status === "running" && instance.provisioning?.status !== "running" && !isDeleting(instance);
 }
 
 function openControlUi(instance: PublicInstance) {
@@ -56,6 +60,21 @@ function openControlUi(instance: PublicInstance) {
 
 function handleInstanceSelectionChange(selection: PublicInstance[]) {
   selectedInstances.value = selection;
+}
+
+
+async function deleteInstance(instance: PublicInstance) {
+  const wechatCount = instance.wechatBinding?.pairedAccounts?.length || 0;
+  const hasWechat = wechatCount > 0;
+  const title = hasWechat ? "强确认删除实例" : "删除实例";
+  const message = hasWechat
+    ? `该实例已绑定 ${wechatCount} 个微信账号。继续删除会先清理该实例下所有微信账号、小程序绑定、本地 Agent、会话、trajectory、workspace、OpenClaw 配置、微信状态文件和数据库身份数据，然后删除容器和实例目录。该操作不可恢复。OpenViking 服务端记忆不会删除。确认继续？`
+    : "删除后会停止并移除 OpenClaw 容器，物理删除该实例本地目录，并删除数据库中的实例记录。该操作不可恢复。OpenViking 服务端记忆不会删除。确认删除？";
+  await confirmThenRun(`delete:${instance.id}`, title, message, async () => {
+    await admin.deleteInstance(instance.id, hasWechat);
+    ElMessage.success("实例删除任务已提交。");
+    await admin.loadInstances();
+  });
 }
 
 async function batchRestartGateway() {
@@ -162,7 +181,7 @@ async function batchRestartGateway() {
         <el-table-column label="微信账号" width="110">
           <template #default="{ row }">{{ row.wechatBinding?.pairedAccounts?.length || 0 }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="right">
+        <el-table-column label="操作" width="190" align="right">
           <template #default="{ row }">
             <div class="instance-actions">
               <el-tooltip content="启动实例">
@@ -170,7 +189,7 @@ async function batchRestartGateway() {
                   <el-button
                     circle
                     :icon="Play"
-                    :disabled="row.status === 'running' || row.provisioning?.status === 'running'"
+                    :disabled="row.status === 'running' || row.provisioning?.status === 'running' || isDeleting(row)"
                     :loading="actionLoading === `start:${row.id}`"
                     @click="confirmThenRun(`start:${row.id}`, '启动实例', '确认启动该 OpenClaw 容器？', () => admin.startInstance(row.id))"
                   />
@@ -181,7 +200,7 @@ async function batchRestartGateway() {
                   <el-button
                     circle
                     :icon="Square"
-                    :disabled="row.status !== 'running'"
+                    :disabled="row.status !== 'running' || isDeleting(row)"
                     :loading="actionLoading === `stop:${row.id}`"
                     @click="confirmThenRun(`stop:${row.id}`, '停止实例', '停止后 Control UI 和微信通道会暂时不可用，确认继续？', () => admin.stopInstance(row.id))"
                   />
@@ -195,6 +214,19 @@ async function batchRestartGateway() {
                     :disabled="!canRestartGateway(row)"
                     :loading="actionLoading === `gateway:${row.id}`"
                     @click="confirmThenRun(`gateway:${row.id}`, '重启 Gateway', '重启期间 Control UI 和微信通道可能短暂不可用，确认继续？', () => admin.restartGateway(row.id))"
+                  />
+                </span>
+              </el-tooltip>
+              <el-tooltip :content="isDeleting(row) ? '实例正在删除' : '删除实例'">
+                <span>
+                  <el-button
+                    circle
+                    type="danger"
+                    plain
+                    :icon="Trash2"
+                    :disabled="isDeleting(row)"
+                    :loading="actionLoading === `delete:${row.id}`"
+                    @click="deleteInstance(row)"
                   />
                 </span>
               </el-tooltip>

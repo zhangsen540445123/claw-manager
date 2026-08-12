@@ -126,7 +126,11 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
     var createCommand = dockerClient.createContainerCmd(properties.runtime().runnerImage())
         .withName(instance.getContainerName())
         .withExposedPorts(gatewayPort)
-        .withEnv(runnerEnv(openVikingSettingsService.effectiveSettings(), instance.getId()))
+        .withEnv(runnerEnv(
+            openVikingSettingsService.effectiveSettings(),
+            instance.getId(),
+            properties.runtime().runnerNodeMaxOldSpaceMb()
+        ))
         .withHostConfig(hostConfig);
 
     String sharedNetwork = resolveSharedDockerNetwork();
@@ -592,6 +596,10 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
   }
 
   static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId) {
+    return runnerEnv(settings, instanceId, 0);
+  }
+
+  static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId, int nodeMaxOldSpaceMb) {
     List<String> env = new ArrayList<>(List.of(
         "HOME=/var/lib/openclaw",
         "OPENCLAW_HOME=/var/lib/openclaw",
@@ -605,6 +613,9 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         "OPENVIKING_BROKER_TOKEN=" + settings.brokerToken(),
         "OPENVIKING_OPENCLAW_INSTANCE_ID=" + instanceId
     ));
+    if (nodeMaxOldSpaceMb > 0) {
+      env.add("NODE_OPTIONS=--max-old-space-size=" + nodeMaxOldSpaceMb);
+    }
     if (hasText(settings.baseUrl())) {
       env.add("OPENVIKING_BASE_URL=" + settings.baseUrl());
     }
@@ -798,6 +809,10 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
     Long memoryBytes = parseMemoryBytes(properties.runtime().runnerMemory());
     if (memoryBytes != null) {
       hostConfig.withMemory(memoryBytes);
+    }
+    Long memorySwapBytes = parseMemoryBytes(properties.runtime().runnerMemorySwap());
+    if (memorySwapBytes != null) {
+      hostConfig.withMemorySwap(memorySwapBytes);
     }
   }
 

@@ -29,8 +29,10 @@ public record ClawbotProperties(
       runtime = new Runtime(
           "ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest",
           600_000,
-          "1.0",
-          "1g",
+          "1",
+          "2g",
+          "4g",
+          1536,
           600_000,
           120_000,
           1_800_000,
@@ -57,6 +59,8 @@ public record ClawbotProperties(
       long runnerPullTimeoutMs,
       String runnerCpus,
       String runnerMemory,
+      String runnerMemorySwap,
+      int runnerNodeMaxOldSpaceMb,
       long wechatBindTimeoutMs,
       long wechatQrTtlMs,
       long gatewayReadyTimeoutMs,
@@ -64,7 +68,29 @@ public record ClawbotProperties(
       long gatewayReadyProbeTimeoutMs,
       List<String> controlUiAllowedOrigins
   ) {
+    public Runtime(
+        String runnerImage,
+        long runnerPullTimeoutMs,
+        String runnerCpus,
+        String runnerMemory,
+        long wechatBindTimeoutMs,
+        long wechatQrTtlMs,
+        long gatewayReadyTimeoutMs,
+        long gatewayReadyCheckIntervalMs,
+        long gatewayReadyProbeTimeoutMs,
+        List<String> controlUiAllowedOrigins
+    ) {
+      this(
+          runnerImage, runnerPullTimeoutMs, runnerCpus, runnerMemory, "", 0,
+          wechatBindTimeoutMs, wechatQrTtlMs, gatewayReadyTimeoutMs,
+          gatewayReadyCheckIntervalMs, gatewayReadyProbeTimeoutMs, controlUiAllowedOrigins
+      );
+    }
+
     public Runtime {
+      if (runnerMemorySwap == null) {
+        runnerMemorySwap = "";
+      }
       if (controlUiAllowedOrigins == null) {
         controlUiAllowedOrigins = List.of();
       }

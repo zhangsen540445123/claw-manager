@@ -60,8 +60,10 @@ clawbot:
   runtime:
     runner-image: ${OPENCLAW_RUNNER_IMAGE:ghcr.io/zhangsen540445123/claw-manager-openclaw-runner:latest}
     runner-pull-timeout-ms: ${OPENCLAW_RUNNER_PULL_TIMEOUT_MS:600000}
-    runner-cpus: ${OPENCLAW_RUNNER_CPUS:1.0}
-    runner-memory: ${OPENCLAW_RUNNER_MEMORY:1g}
+    runner-cpus: ${OPENCLAW_RUNNER_CPUS:1}
+    runner-memory: ${OPENCLAW_RUNNER_MEMORY:2g}
+    runner-memory-swap: ${OPENCLAW_RUNNER_MEMORY_SWAP:4g}
+    runner-node-max-old-space-mb: ${OPENCLAW_RUNNER_NODE_MAX_OLD_SPACE_MB:1536}
     wechat-bind-timeout-ms: ${OPENCLAW_WECHAT_BIND_TIMEOUT_MS:600000}
     wechat-qr-ttl-ms: ${OPENCLAW_WECHAT_QR_TTL_MS:120000}
     gateway-ready-timeout-ms: ${OPENCLAW_GATEWAY_READY_TIMEOUT_MS:1800000}

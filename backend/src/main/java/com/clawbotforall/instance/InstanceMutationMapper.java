@@ -28,6 +28,8 @@ public interface InstanceMutationMapper {
 
   int deleteWechatAccountsForInstance(@Param("instanceId") String instanceId);
 
+  int deleteInstance(@Param("instanceId") String instanceId);
+
   int insertWechatAccount(WechatPairedAccountEntity account);
 
   int ensureWechatAccountChannel(WechatAccountChannelEntity channel);

@@ -20,4 +20,5 @@ public interface WechatUserCleanupOperationMapper {
   List<WechatUserCleanupOperationEntity> listActive();
   int insert(WechatUserCleanupOperationEntity operation);
   int update(WechatUserCleanupOperationEntity operation);
+  int redactByInstanceId(@Param("instanceId") String instanceId, @Param("updatedAt") String updatedAt);
 }

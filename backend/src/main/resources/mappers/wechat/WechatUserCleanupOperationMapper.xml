@@ -75,4 +75,19 @@
       deleted_database_rows=#{deletedDatabaseRows},updated_at=#{updatedAt},completed_at=#{completedAt}
     WHERE operation_id=#{operationId}
   </update>
+  <update id="redactByInstanceId">
+    UPDATE wechat_user_cleanup_operations
+    SET phone = NULL,
+        wechat_user_id = NULL,
+        account_id = NULL,
+        agent_id = NULL,
+        openviking_user_id = NULL,
+        api_peer_ids_json = NULL,
+        old_session_ids_json = NULL,
+        protected_agent_ids_json = NULL,
+        snapshot_json = NULL,
+        last_error = NULL,
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+  </update>
 </mapper>

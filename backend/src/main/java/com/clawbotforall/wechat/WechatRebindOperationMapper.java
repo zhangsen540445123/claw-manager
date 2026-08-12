@@ -12,6 +12,8 @@ public interface WechatRebindOperationMapper {
   List<WechatRebindOperationEntity> listByInstance(@Param("instanceId") String instanceId);
   int insert(WechatRebindOperationEntity operation);
   int update(WechatRebindOperationEntity operation);
+  int redactByInstanceId(@Param("instanceId") String instanceId, @Param("updatedAt") String updatedAt);
+
   int redactForCleanup(
       @Param("phone") String phone,
       @Param("wechatUserId") String wechatUserId,

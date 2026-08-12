@@ -66,6 +66,12 @@
     WHERE instance_id = #{instanceId}
   </delete>
 
+
+  <delete id="deleteInstance">
+    DELETE FROM instances
+    WHERE id = #{instanceId}
+  </delete>
+
   <insert id="insertWechatAccount" parameterType="com.clawbotforall.instance.WechatPairedAccountEntity">
     INSERT INTO wechat_paired_accounts
       (account_id, phone, instance_id, wechat_user_id, remark, base_url, saved_at, bound_at, updated_at)

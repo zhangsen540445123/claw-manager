@@ -12,6 +12,7 @@ public interface IntegrationTraceMapper {
       @Param("to") String to, @Param("limit") int limit, @Param("offset") int offset);
   List<IntegrationTraceEvent> findByTraceId(String traceId);
   int deleteBefore(String cutoff);
+  int deleteByInstanceId(@Param("instanceId") String instanceId);
   int deleteByIdentityEvidence(
       @Param("instanceId") String instanceId,
       @Param("senderHashes") List<String> senderHashes,

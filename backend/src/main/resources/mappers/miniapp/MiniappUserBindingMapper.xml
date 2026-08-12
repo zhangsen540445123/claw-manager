@@ -101,4 +101,7 @@
   <delete id="deleteByAgentId">
     DELETE FROM miniapp_user_bindings WHERE agent_id = #{agentId}
   </delete>
+  <delete id="deleteByInstanceId">
+    DELETE FROM miniapp_user_bindings WHERE instance_id = #{instanceId}
+  </delete>
 </mapper>
