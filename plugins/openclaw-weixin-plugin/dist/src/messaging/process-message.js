@@ -72,6 +72,7 @@ export async function attachParsedWeixinDocumentToContext(input) {
             `文件名：${input.filename ?? path.basename(input.downloadedFilePath)}`,
             "文件已下载，但当前 Agent 工作区不可用，未能归档和解析。",
         ].filter(Boolean).join("\n\n");
+        input.ctx.BodyForAgent = input.ctx.Body;
         delete input.ctx.MediaPath;
         delete input.ctx.MediaType;
         delete input.ctx.MediaPaths;
@@ -90,6 +91,7 @@ export async function attachParsedWeixinDocumentToContext(input) {
         modelSupportsImages: modelSupportsImagesFromConfig(input.routedConfig),
     });
     input.ctx.Body = formatParsedDocumentForInboundBody(input.ctx.Body ?? "", archived);
+    input.ctx.BodyForAgent = input.ctx.Body;
     if (archived.mediaPaths.length > 0) {
         input.ctx.MediaPaths = archived.mediaPaths;
         input.ctx.MediaTypes = archived.mediaTypes;
@@ -102,7 +104,7 @@ export async function attachParsedWeixinDocumentToContext(input) {
         delete input.ctx.MediaPaths;
         delete input.ctx.MediaTypes;
     }
-    input.log?.(`[weixin] document archived path=${archived.originalRelativePath} textChars=${archived.parsed.textChars} images=${archived.parsed.images.length}`);
+    input.log?.(`[weixin] document archived path=${archived.originalRelativePath} textChars=${archived.parsed.textChars} images=${archived.parsed.images.length} bodyLen=${input.ctx.Body.length} bodyForAgentLen=${input.ctx.BodyForAgent.length} commandBodyLen=${input.ctx.CommandBody?.length ?? 0}`);
 }
 export function attachSenderRuntimeIdentity(ctx, senderId) {
     return Object.assign(ctx, {

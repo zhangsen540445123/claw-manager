@@ -12,6 +12,7 @@ import {
   requestsImageGeneration,
   resolveRequiredUserAgentIdentity,
 } from "./process-message.js";
+import type { WeixinMsgContext } from "./inbound.js";
 
 
 const tempDirs: string[] = [];
@@ -148,6 +149,42 @@ describe("Weixin document context attachment", () => {
     await expect(readFile(path.join(workspace, ".openclaw-inbox/weixin", new Date().toISOString().slice(0, 10).replaceAll("-", ""), "msg-001", "original", "report.txt"), "utf8")).resolves.toBe("这是一份微信文档内容");
   });
 
+  it("sends parsed document text to the agent for a file-only message without caption", async () => {
+    const root = await tempDir();
+    const workspace = path.join(root, "workspace-user_agent");
+    const downloaded = path.join(root, "downloaded.docx");
+    await writeMinimalDocx(downloaded, "这是文档正文");
+    const ctx: WeixinMsgContext = {
+      Body: "",
+      CommandBody: "",
+      To: "wechat-user-secret",
+      MediaPath: downloaded,
+      MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    } as WeixinMsgContext;
+
+    await attachParsedWeixinDocumentToContext({
+      ctx,
+      routedConfig: { agents: { list: [{ id: "user_abc", workspace }] } },
+      agentId: "user_abc",
+      downloadedFilePath: downloaded,
+      filename: "empty-caption.docx",
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      accountId: "account-secret",
+      peerId: "wechat-user-secret",
+      messageSid: "msg-empty-caption",
+      limits: { maxFileBytes: 1024 * 1024, maxTextChars: 80_000, maxImages: 10, maxPdfPages: 10, maxImageEdgePixels: 1600 },
+    });
+
+    expect(ctx.Body).toContain("【收到微信文件】");
+    expect(ctx.Body).toContain("【文档文字】");
+    expect(ctx.Body).toContain("这是文档正文");
+    expect(ctx.BodyForAgent).toBe(ctx.Body);
+    expect(ctx.CommandBody).toBe("");
+    expect(ctx.MediaPath).toBeUndefined();
+    expect(ctx.MediaType).toBeUndefined();
+  });
+
+
   it("passes embedded Office images to image-capable models", async () => {
     const root = await tempDir();
     const workspace = path.join(root, "workspace-user_agent");
@@ -225,6 +262,7 @@ describe("Weixin document context attachment", () => {
 
     expect(ctx.Body).toContain("当前 Agent 工作区不可用");
     expect(ctx.Body).toContain("missing.txt");
+    expect(ctx.BodyForAgent).toBe(ctx.Body);
     expect(ctx.MediaPath).toBeUndefined();
   });
 

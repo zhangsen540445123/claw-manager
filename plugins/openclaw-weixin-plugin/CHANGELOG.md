@@ -4,6 +4,13 @@
 
 This project follows the [Keep a Changelog](https://keepachangelog.com/) format.
 
+## [2026.8.2] - 2026-08-13
+### Fixed
+
+- Pass parsed document text through `BodyForAgent` for file-only Weixin messages without captions, preventing OpenClaw from treating successfully parsed DOCX/PDF/Office files as empty messages.
+- Preserve the original `CommandBody` while logging parsed body lengths for safer production diagnosis.
+
+
 ## [2026.6.28] - 2026-07-19
 
 ### Added

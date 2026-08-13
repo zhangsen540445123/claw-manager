@@ -4,6 +4,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 格式。
 
+## [2026.8.2] - 2026-08-13
+### 修复
+
+- 微信纯文件消息没有文字说明时，将已解析的 DOCX/PDF/Office 文档正文同步写入 `BodyForAgent`，避免 OpenClaw 将解析成功的文件误判为空消息。
+- 保留原始 `CommandBody` 用于命令鉴权，同时增加解析后正文长度日志，便于生产排查且不打印敏感内容。
+
+
 
 ## [2026.8.1] - 2026-08-13
 

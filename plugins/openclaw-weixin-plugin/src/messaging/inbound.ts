@@ -164,6 +164,8 @@ export type WeixinMsgContext = {
   MediaTypes?: string[];
   /** Raw message body for framework command authorization. */
   CommandBody?: string;
+  /** Effective body sent to the OpenClaw agent after channel-side enrichment. */
+  BodyForAgent?: string;
   /** Whether the sender is authorized to execute slash commands. */
   CommandAuthorized?: boolean;
 };
