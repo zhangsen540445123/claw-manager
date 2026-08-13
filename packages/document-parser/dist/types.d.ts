@@ -1,4 +1,5 @@
 export type DocumentKind = "text" | "text_with_images" | "visual_only" | "unsupported";
+export type DocumentParseStatus = "success" | "partial" | "failed" | "timeout" | "worker_oom" | "unsupported";
 export type ParsedDocumentImage = {
     path: string;
     mime: string;
@@ -11,9 +12,23 @@ export type DocumentParseLimits = {
     maxImages: number;
     maxPdfPages: number;
     maxImageEdgePixels: number;
+    maxZipEntries: number;
+    maxZipEntryCompressedBytes: number;
+    maxZipEntryUncompressedBytes: number;
+    maxZipTotalUncompressedBytes: number;
+    maxOfficeMediaFiles: number;
+    maxOfficeMediaCompressedBytes: number;
+    maxOfficeMediaUncompressedBytes: number;
+    maxOfficeXmlBytes: number;
+    maxWorkbookSheets: number;
+    maxWorkbookRowsPerSheet: number;
+    maxWorkbookCells: number;
+    maxPlainTextBytes: number;
+    maxCsvBytes: number;
 };
 export type ParsedDocument = {
     kind: DocumentKind;
+    status: DocumentParseStatus;
     filename: string;
     mime: string;
     sizeBytes: number;
@@ -22,6 +37,9 @@ export type ParsedDocument = {
     textTruncated: boolean;
     images: ParsedDocumentImage[];
     warnings: string[];
+    limitsHit: string[];
+    durationMs?: number;
+    workerExitCode?: number | null;
     limits: {
         fileSizeExceeded: boolean;
         textTruncated: boolean;
@@ -41,7 +59,13 @@ export type ParserResult = {
     text?: string;
     images?: ParsedDocumentImage[];
     warnings?: string[];
+    limitsHit?: string[];
     unsupportedImages?: boolean;
     imageCountExceeded?: boolean;
     pdfPageLimitExceeded?: boolean;
+    unsupported?: boolean;
+};
+export type WorkerParseDocumentOptions = {
+    timeoutMs?: number;
+    maxOldSpaceMb?: number;
 };

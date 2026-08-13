@@ -1,19 +1,24 @@
 {
   "name": "@claw-manager/document-parser",
-  "version": "2026.8.1",
+  "version": "2026.8.2",
   "description": "Workspace-safe document parser for OpenClaw plugins",
   "license": "MIT",
   "type": "module",
-  "files": ["dist/", "README.md"],
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "test": "vitest run",
+    "test": "tsc && vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "prepublishOnly": "npm run test && npm run typecheck && npm run build"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "jszip": "^3.10.1",
     "mammoth": "^1.10.0",
@@ -25,5 +30,8 @@
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
   },
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

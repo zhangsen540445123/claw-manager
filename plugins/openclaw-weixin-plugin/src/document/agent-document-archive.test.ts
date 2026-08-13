@@ -14,6 +14,8 @@ async function tempDir(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+
+
 });
 
 describe("Weixin agent document archive", () => {
@@ -64,4 +66,28 @@ describe("Weixin agent document archive", () => {
 
     expect(formatParsedDocumentForInboundBody("请总结", archived)).toContain("【用户消息】\n请总结\n\n【收到微信文件】");
   });
+
+  it("stores metadata and gives a Chinese prompt when parsing fails", async () => {
+    const root = await tempDir();
+    const downloaded = path.join(root, "bad.bin");
+    await writeFile(downloaded, "bad", "utf8");
+    const archived = await archiveAndParseWeixinDocument({
+      workspace: path.join(root, "workspace-user"),
+      downloadedFilePath: downloaded,
+      filename: "bad.bin",
+      mime: "application/octet-stream",
+      accountId: "a",
+      peerId: "p",
+      messageSid: "sid-failed",
+      day: "20260813",
+    });
+
+    expect(archived.parsed.status).toBe("unsupported");
+    const metadata = JSON.parse(await readFile(path.join(archived.workspace, archived.metadataRelativePath), "utf8"));
+    expect(metadata.status).toBe("unsupported");
+    expect(metadata.limitsHit).toContain("unsupportedMime");
+    await expect(readFile(path.join(archived.workspace, ".openclaw-inbox/weixin/20260813/sid-failed/parsed/document.txt"), "utf8")).resolves.toBe("");
+    expect(formatParsedDocumentForInboundBody("", archived)).toContain("收到一个文档，但解析失败。文件已保存到工作区");
+  });
+
 });

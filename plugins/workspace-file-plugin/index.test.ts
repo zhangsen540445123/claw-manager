@@ -228,3 +228,23 @@ it("reads office documents through read_document with workspace cache", async ()
   expect(String(result.summary)).toContain("已提取文字：4 字");
   expect(String(result.summary)).toContain("文档文字较长");
 });
+
+
+it("returns controlled read_document failure for unsupported documents", async () => {
+  const workspace = await createWorkspace();
+  await writeFile(path.join(workspace, "bad.bin"), "bad", "utf8");
+
+  const result = await executeWorkspaceFile(workspace, {
+    action: "read_document",
+    path: "bad.bin",
+  });
+
+  expect(result).toMatchObject({
+    action: "read_document",
+    path: "bad.bin",
+    status: "unsupported",
+    text: "",
+  });
+  expect(result.limitsHit).toEqual(expect.arrayContaining(["unsupportedMime"]));
+  expect(String(result.summary)).toContain("状态：失败");
+});

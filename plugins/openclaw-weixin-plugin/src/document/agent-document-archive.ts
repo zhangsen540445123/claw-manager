@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { parseDocument, type DocumentParseLimits, type ParsedDocument } from "@claw-manager/document-parser";
+import { parseDocumentInWorker, type DocumentParseLimits, type ParsedDocument } from "@claw-manager/document-parser";
 
 export type ArchivedWeixinDocument = {
   workspace: string;
@@ -63,7 +63,7 @@ export async function archiveAndParseWeixinDocument(input: ArchiveAndParseWeixin
 
   const originalPath = path.join(originalDir, safeName);
   await copyFile(input.downloadedFilePath, originalPath);
-  const parsed = await parseDocument({
+  const parsed = await parseDocumentInWorker({
     filePath: originalPath,
     filename: safeName,
     mime: input.mime,
@@ -85,6 +85,7 @@ export async function archiveAndParseWeixinDocument(input: ArchiveAndParseWeixin
     accountIdHash: sha256(input.accountId).slice(0, 16),
     peerIdHash: sha256(input.peerId).slice(0, 16),
     messageSid: input.messageSid,
+    status: normalizedParsed.status,
     filename: safeName,
     mime: normalizedParsed.mime,
     sizeBytes: normalizedParsed.sizeBytes,
@@ -92,6 +93,9 @@ export async function archiveAndParseWeixinDocument(input: ArchiveAndParseWeixin
     textTruncated: normalizedParsed.textTruncated,
     imageCount: normalizedParsed.images.length,
     warnings: normalizedParsed.warnings,
+    limitsHit: normalizedParsed.limitsHit,
+    workerExitCode: normalizedParsed.workerExitCode ?? null,
+    durationMs: normalizedParsed.durationMs ?? 0,
   };
   await writeFile(path.join(parsedDir, "metadata.json"), JSON.stringify(metadata, null, 2), "utf8");
   return {
@@ -106,7 +110,8 @@ export async function archiveAndParseWeixinDocument(input: ArchiveAndParseWeixin
 
 export function formatParsedDocumentForInboundBody(originalBody: string, archived: ArchivedWeixinDocument): string {
   const parsed = archived.parsed;
-  const status = parsed.kind === "unsupported" ? "失败" : parsed.warnings.length ? "部分成功" : "成功";
+  const failed = ["failed", "timeout", "worker_oom", "unsupported"].includes(parsed.status) || parsed.kind === "unsupported";
+  const status = failed ? "失败" : parsed.status === "partial" || parsed.warnings.length ? "部分成功" : "成功";
   const sections: string[] = [];
   const trimmedOriginal = originalBody.trim();
   if (trimmedOriginal) sections.push(`【用户消息】\n${trimmedOriginal}`);
@@ -123,7 +128,9 @@ export function formatParsedDocumentForInboundBody(originalBody: string, archive
     ...parsed.warnings.map((warning) => `- ${warning}`),
     "",
     "【文档文字】",
-    parsed.text || "（未提取到可读文字）",
+    failed
+      ? "收到一个文档，但解析失败。文件已保存到工作区，可能原因是文件过大、图片过多、格式异常或解析超时。"
+      : (parsed.text || "（未提取到可读文字）"),
   ].join("\n"));
   return sections.join("\n\n");
 }

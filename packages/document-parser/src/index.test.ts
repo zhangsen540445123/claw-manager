@@ -4,7 +4,7 @@ import path from "node:path";
 import JSZip from "jszip";
 import { describe, expect, it, afterEach } from "vitest";
 
-import { parseDocument, DEFAULT_DOCUMENT_PARSE_LIMITS } from "./index.js";
+import { parseDocument, parseDocumentInWorker, DEFAULT_DOCUMENT_PARSE_LIMITS } from "./index.js";
 
 const tempDirs: string[] = [];
 
@@ -106,6 +106,70 @@ describe("parseDocument", () => {
     expect(parsed.text).toBe("");
     expect(parsed.limits.fileSizeExceeded).toBe(true);
     expect(parsed.warnings).toContain("文件超过 5B，未解析。");
+  });
+
+
+
+  it("parses in a worker and keeps the parent process alive", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "worker.txt");
+    await writeFile(file, "worker content", "utf8");
+
+    const parsed = await parseDocumentInWorker({ filePath: file, outputDir: path.join(dir, "out") }, { timeoutMs: 10_000, maxOldSpaceMb: 128 });
+
+    expect(parsed.status).toBe("success");
+    expect(parsed.text).toContain("worker content");
+    expect(parsed.workerExitCode).toBe(0);
+  });
+
+  it("returns timeout instead of throwing when the worker is too slow", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "slow.txt");
+    await writeFile(file, "slow content", "utf8");
+
+    const parsed = await parseDocumentInWorker({ filePath: file, outputDir: path.join(dir, "out") }, { timeoutMs: 1, maxOldSpaceMb: 128 });
+
+    expect(parsed.status).toBe("timeout");
+    expect(parsed.text).toBe("");
+    expect(parsed.warnings.join("\n")).toContain("解析超过");
+  });
+
+  it("skips oversized docx embedded images while keeping text", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "large-image.docx");
+    await writeMinimalDocx(file, "Text survives", Buffer.alloc(1024, 1));
+
+    const parsed = await parseDocument({
+      filePath: file,
+      outputDir: path.join(dir, "out"),
+      limits: { maxOfficeMediaUncompressedBytes: 8 },
+    });
+
+    expect(parsed.text).toContain("Text survives");
+    expect(parsed.images).toHaveLength(0);
+    expect(parsed.status).toBe("partial");
+    expect(parsed.limitsHit).toContain("maxOfficeMediaUncompressedBytes");
+  });
+
+  it("limits workbook rows and cells", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "table.xlsx");
+    const XLSX = await import("xlsx");
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["h1", "h2"],
+      ["r1", "v1"],
+      ["r2", "v2"],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+    XLSX.writeFile(workbook, file);
+
+    const parsed = await parseDocument({ filePath: file, outputDir: path.join(dir, "out"), limits: { maxWorkbookRowsPerSheet: 2 } });
+
+    expect(parsed.text).toContain("h1\th2");
+    expect(parsed.text).toContain("r1\tv1");
+    expect(parsed.text).not.toContain("r2\tv2");
+    expect(parsed.limitsHit).toContain("maxWorkbookRowsPerSheet");
   });
 
   it("has safe conservative defaults", () => {

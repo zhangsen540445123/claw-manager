@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { createHash, randomUUID } from "node:crypto";
-import { parseDocument } from "@claw-manager/document-parser";
+import { parseDocumentInWorker } from "@claw-manager/document-parser";
 import { mkdir, open, readFile, readdir, realpath, rename, rm, lstat } from "node:fs/promises";
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import path from "node:path";
@@ -220,7 +220,7 @@ async function executeReadDocument(
 ): Promise<WorkspaceFileResult> {
   const fileSha = await currentSha256(resolved.absolute) ?? createHash("sha256").update(resolved.relative).digest("hex");
   const cacheDir = path.join(resolved.root, ".openclaw-document-cache", fileSha);
-  const parsed = await parseDocument({
+  const parsed = await parseDocumentInWorker({
     filePath: resolved.absolute,
     filename: path.basename(resolved.relative),
     outputDir: cacheDir,
@@ -234,7 +234,7 @@ async function executeReadDocument(
   const imagePaths = parsed.images.map((image) => path.relative(resolved.root, image.path).split(path.sep).join("/"));
   const summaryLines = [
     `文件名：${parsed.filename}`,
-    `状态：${parsed.kind === "unsupported" ? "失败" : parsed.warnings.length ? "部分成功" : "成功"}`,
+    `状态：${["failed", "timeout", "worker_oom", "unsupported"].includes(parsed.status) || parsed.kind === "unsupported" ? "失败" : parsed.status === "partial" || parsed.warnings.length ? "部分成功" : "成功"}`,
     `已提取文字：${parsed.textChars} 字`,
     `已提取图片：${parsed.images.length} 张`,
     ...parsed.warnings,
@@ -246,12 +246,16 @@ async function executeReadDocument(
     mime: parsed.mime,
     sizeBytes: parsed.sizeBytes,
     kind: parsed.kind,
+    status: parsed.status,
     text: parsed.text,
     textChars: parsed.textChars,
     textTruncated: parsed.textTruncated,
     imageCount: parsed.images.length,
     imagePaths,
     warnings: parsed.warnings,
+    limitsHit: parsed.limitsHit,
+    workerExitCode: parsed.workerExitCode ?? null,
+    durationMs: parsed.durationMs ?? 0,
     summary: summaryLines.join("\n"),
     cachePath: path.relative(resolved.root, cacheDir).split(path.sep).join("/"),
   };
