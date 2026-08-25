@@ -23,6 +23,9 @@ OPENCLAW_GATEWAY_READY_TIMEOUT_MS=1800000
 - 目标 Gateway 是否 ready。
 - `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` 是否包含当前 Web 访问来源。
 - 浏览器访问的是外层 Web 代理地址，不是 Runner 容器内地址。
+- 未显式配置时，生成的 `openclaw.json` 应包含 `"allowedOrigins": ["*"]`。
+- 修改 `.env` 后必须重新创建 API 容器，不能只执行 `docker compose restart`，因为 restart 不会重新注入环境变量。
+- 已存在实例不会仅因 API 环境变量变化自动更新；需要对实例执行一次“重启 Gateway”，或停止后重新启动，触发实例配置重新写入。
 
 ## 微信插件安装或升级失败
 

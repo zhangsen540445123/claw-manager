@@ -125,7 +125,7 @@ docker compose up -d api web
 - runner 镜像默认组合固定为 `openclaw@2026.6.8` + `@tencent-weixin/openclaw-weixin@2.4.4`。
 - `OPENCLAW_GATEWAY_READY_TIMEOUT_MS` 默认 30 分钟，首次启动 OpenClaw 较慢时不要过早判失败。
 - `OPENCLAW_MODEL_CONTEXT_WINDOW` 和 `OPENCLAW_MODEL_MAX_TOKENS` 写入 OpenClaw 模型配置。
-- `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` 必须包含外层 Web 访问来源；默认覆盖 `4300` 和并行调试用 `14300`。
+- `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` 未显式设置时默认为 `*`；生产环境可通过环境变量覆盖并收紧允许的来源。
 - 每实例容器 CPU/内存可通过 `OPENCLAW_RUNNER_CPUS`、`OPENCLAW_RUNNER_MEMORY` 限制。
 
 ## 8. 已继承的真实问题修复

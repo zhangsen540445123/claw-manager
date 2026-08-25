@@ -69,4 +69,4 @@ clawbot:
     gateway-ready-timeout-ms: ${OPENCLAW_GATEWAY_READY_TIMEOUT_MS:1800000}
     gateway-ready-check-interval-ms: ${OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS:10000}
     gateway-ready-probe-timeout-ms: ${OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS:5000}
-    control-ui-allowed-origins: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:http://localhost:4300,http://127.0.0.1:4300,http://localhost:14300,http://127.0.0.1:14300}
+    control-ui-allowed-origins: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:*}

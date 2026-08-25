@@ -12,4 +12,11 @@ class ClawbotPropertiesTest {
 
     assertThat(properties.runtime().wechatQrTtlMs()).isEqualTo(120_000);
   }
+
+  @Test
+  void defaultControlUiAllowedOriginsUsesWildcard() {
+    ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
+
+    assertThat(properties.runtime().controlUiAllowedOrigins()).containsExactly("*");
+  }
 }

@@ -38,12 +38,7 @@ public record ClawbotProperties(
           1_800_000,
           10_000,
           5_000,
-          List.of(
-              "http://localhost:4300",
-              "http://127.0.0.1:4300",
-              "http://localhost:14300",
-              "http://127.0.0.1:14300"
-          )
+          List.of("*")
       );
     }
   }

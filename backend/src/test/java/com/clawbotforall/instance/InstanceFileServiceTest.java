@@ -62,7 +62,7 @@ class InstanceFileServiceTest {
     assertThat(gateway).containsEntry("port", 18789);
     @SuppressWarnings("unchecked")
     Map<String, Object> controlUi = (Map<String, Object>) gateway.get("controlUi");
-    assertThat(controlUi.get("allowedOrigins")).asList().contains("http://127.0.0.1:14300");
+    assertThat(controlUi.get("allowedOrigins")).asList().containsExactly("*");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> models = (Map<String, Object>) config.get("models");
@@ -422,7 +422,7 @@ class InstanceFileServiceTest {
             1_800_000,
             10_000,
             5_000,
-            List.of("http://127.0.0.1:14300")
+            List.of("*")
         )
     );
   }

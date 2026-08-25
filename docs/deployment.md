@@ -36,7 +36,7 @@ http://127.0.0.1:4300
 | `OPENCLAW_RUNNER_CPUS` | `1.0` | 单个 Runner 容器 CPU 限制 |
 | `OPENCLAW_RUNNER_MEMORY` | `1g` | 单个 Runner 容器内存限制 |
 | `OPENCLAW_GATEWAY_READY_TIMEOUT_MS` | `1800000` | Gateway ready 等待窗口，默认 30 分钟 |
-| `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` | 覆盖 `4300` 和 `14300` | Control UI 允许的外层 Web 来源 |
+| `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` | `*` | Control UI 允许的来源；默认允许任意 Origin |
 
 OpenViking 配置不写入 `compose.yaml`，统一在管理员后台“OpenViking预设”中管理。
 
