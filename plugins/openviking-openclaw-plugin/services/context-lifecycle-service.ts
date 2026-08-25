@@ -1,6 +1,7 @@
 // Canonical ContextEngine lifecycle service: assemble / afterTurn / compact / commit orchestration.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { getHeapStatistics } from "node:v8";
 
 import { DEFAULT_PHASE2_POLL_TIMEOUT_MS, type OpenVikingClient, type OVMessage } from "../client.js";
 import type { EffectiveQueryConfig } from "../query-config.js";
@@ -48,6 +49,41 @@ function hashLogValue(value: unknown): string {
 function agentIdPreview(value: unknown): string | undefined {
   if (typeof value !== "string" || !value) return undefined;
   return value.length <= 8 ? value : `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+type MemoryDiagnostics = {
+  rssMiB: number;
+  heapTotalMiB: number;
+  heapUsedMiB: number;
+  externalMiB: number;
+  arrayBuffersMiB: number;
+  heapLimitMiB: number;
+  heapUsedPct: number;
+};
+
+function memoryDiagnostics(): MemoryDiagnostics {
+  const usage = process.memoryUsage();
+  const heapLimit = getHeapStatistics().heap_size_limit;
+  const toMiB = (bytes: number) => Math.round(bytes / 1024 / 1024);
+  return {
+    rssMiB: toMiB(usage.rss),
+    heapTotalMiB: toMiB(usage.heapTotal),
+    heapUsedMiB: toMiB(usage.heapUsed),
+    externalMiB: toMiB(usage.external),
+    arrayBuffersMiB: toMiB(usage.arrayBuffers),
+    heapLimitMiB: toMiB(heapLimit),
+    heapUsedPct: heapLimit > 0 ? Math.round((usage.heapUsed / heapLimit) * 100) : 0,
+  };
+}
+
+function completionDiagnostics(startedAt: number): {
+  durationMs: number;
+  memoryAfter: MemoryDiagnostics;
+} {
+  return {
+    durationMs: Math.max(0, Date.now() - startedAt),
+    memoryAfter: memoryDiagnostics(),
+  };
 }
 
 function safeDiagnosticData(data: Record<string, unknown>): Record<string, unknown> {
@@ -125,6 +161,7 @@ export type AssembleOpenVikingSessionParams = {
   prompt?: string;
   tokenBudget: number;
   runtimeContext?: Record<string, unknown>;
+  isHeartbeat?: boolean;
   identityHashSecret?: string;
   isMainAssemble: boolean;
   cfg: any;
@@ -530,6 +567,7 @@ async function tryBuildSenderScopedAutoRecall(
     agentId: string;
     reasonPrefix: string;
     getClient: () => Promise<OpenVikingClient | undefined>;
+    recallDiag?: (stage: string, sessionId: string, data: Record<string, unknown>) => void;
   },
 ): Promise<AutoRecallAttemptResult> {
   const {
@@ -548,6 +586,7 @@ async function tryBuildSenderScopedAutoRecall(
     agentId,
     reasonPrefix,
     getClient,
+    recallDiag,
   } = params;
   const latestMessage = messages.at(-1);
   const promptText = typeof prompt === "string" ? prompt.trim() : "";
@@ -583,10 +622,28 @@ async function tryBuildSenderScopedAutoRecall(
     );
   }
 
+  const recallStartedAt = Date.now();
+  const recallMemoryBefore = memoryDiagnostics();
+  recallDiag?.("recall_start", ovSessionId, {
+    queryChars: recallQuery.finalChars,
+    queryTruncated: recallQuery.truncated,
+    source: recallSource,
+    memoryBefore: recallMemoryBefore,
+  });
+  const emitRecallEnd = (status: "injected" | "no_hits" | "skipped" | "failed", data: Record<string, unknown> = {}) => {
+    recallDiag?.("recall_end", ovSessionId, {
+      status,
+      source: recallSource,
+      ...data,
+      ...completionDiagnostics(recallStartedAt),
+    });
+  };
+
   try {
     const client = await getClient();
     if (!client) {
       logger.info("openviking.identity_missing.skip_recall");
+      emitRecallEnd("skipped", { reason: "identity_missing", memoryCount: 0, estimatedTokens: 0 });
       return {
         kind: "passthrough",
         reason: "identity_missing",
@@ -616,6 +673,10 @@ async function tryBuildSenderScopedAutoRecall(
     });
 
     if (!recall.block) {
+      emitRecallEnd("no_hits", {
+        memoryCount: recall.memoryCount,
+        estimatedTokens: recall.estimatedTokens,
+      });
       return {
         kind: "passthrough",
         reason: `${reasonPrefix}_no_recall_hits`,
@@ -623,6 +684,10 @@ async function tryBuildSenderScopedAutoRecall(
       };
     }
 
+    emitRecallEnd("injected", {
+      memoryCount: recall.memoryCount,
+      estimatedTokens: recall.estimatedTokens,
+    });
     return {
       kind: "injected",
       block: recall.block,
@@ -631,7 +696,8 @@ async function tryBuildSenderScopedAutoRecall(
       source: recallSource,
     };
   } catch (err) {
-    logger.warn?.(`openviking: auto-recall failed: ${String(err)}`);
+    logger.warn?.(`openviking: auto-recall failed errorType=${errorType(err)}`);
+    emitRecallEnd("failed", { error: err, memoryCount: 0, estimatedTokens: 0 });
     return {
       kind: "passthrough",
       reason: `${reasonPrefix}_recall_failed`,
@@ -647,6 +713,7 @@ export async function assembleOpenVikingSession({
   prompt,
   tokenBudget,
   runtimeContext,
+  isHeartbeat,
   identityHashSecret,
   isMainAssemble,
   cfg,
@@ -665,15 +732,31 @@ export async function assembleOpenVikingSession({
   hasAutoRecallBlock,
   prependRecallToLatestUserMessage,
 }: AssembleOpenVikingSessionParams): Promise<AssembleOpenVikingSessionResult> {
+  const startedAt = Date.now();
+  const memoryBefore = memoryDiagnostics();
   const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
   diag = safeDiag(diag);
+  const baseDiag = diag;
+  const completionDiag = (event: string, id: string, data: Record<string, unknown>) =>
+    baseDiag(event, id, { ...data, ...completionDiagnostics(startedAt) });
   const isTransformContextAssemble = !isMainAssemble;
   const originalTokens = roughEstimate(messages);
   let messagesWithRecall = messages;
   let tokensWithRecall = originalTokens;
 
+  if (isHeartbeat) {
+    logger.info(`openviking: context assemble bypassed reason=heartbeat_bypassed sessionHash=${hashLogValue(ovSessionId)}`);
+    return assemblePassthrough({
+      diag: completionDiag,
+      ovSessionId,
+      reason: "heartbeat_bypassed",
+      liveMessages: messages,
+      originalTokens,
+    });
+  }
+
   if (isBypassedSession({ sessionId, sessionKey })) {
-    return assemblePassthrough({ diag, ovSessionId, reason: "session_bypassed", liveMessages: messages, originalTokens });
+    return assemblePassthrough({ diag: completionDiag, ovSessionId, reason: "session_bypassed", liveMessages: messages, originalTokens });
   }
 
   const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
@@ -683,14 +766,17 @@ export async function assembleOpenVikingSession({
     agentId: extractRuntimeAgentId(runtimeContext),
     ovSessionId,
   });
-  diag("assemble_entry", ovSessionId, {
+  baseDiag("assemble_entry", ovSessionId, {
     messagesCount: messages.length,
+    memoryBefore,
     inputTokenEstimate: originalTokens,
     tokenBudget,
     sessionKey: sessionKey ?? null,
     senderIdFound: sender.found,
     messages: messageDigest(messages),
   });
+
+  diag = completionDiag;
 
   let clientResolved = false;
   let resolvedClient: OpenVikingClient | undefined;
@@ -723,6 +809,7 @@ export async function assembleOpenVikingSession({
       agentId,
       reasonPrefix: "transform_context",
       getClient: resolveSenderScopedClient,
+      recallDiag: baseDiag,
     });
 
     if (recall.kind !== "injected") {
@@ -772,6 +859,7 @@ export async function assembleOpenVikingSession({
       agentId,
       reasonPrefix: "main_assemble",
       getClient: resolveSenderScopedClient,
+      recallDiag: baseDiag,
     });
     promptRecallBlock = recall.kind === "injected" && recall.source === "prompt"
       ? recall.block
@@ -1105,16 +1193,27 @@ export async function afterTurnOpenVikingSession({
   isBypassedSession,
   diag,
 }: AfterTurnOpenVikingSessionParams): Promise<void> {
+  const startedAt = Date.now();
+  const memoryBefore = memoryDiagnostics();
+  diag = safeDiag(diag);
+  const completionDiag = (event: string, id: string, data: Record<string, unknown>) =>
+    diag(event, id, { ...data, ...completionDiagnostics(startedAt) });
+
   if (!cfg.autoCapture) {
     return;
   }
 
   if (isHeartbeat) {
+    const ovSessionId = openClawSessionToOvStorageId(sessionId, sessionKey);
+    completionDiag("afterTurn_skip", ovSessionId, {
+      reason: "heartbeat_bypassed",
+      totalMessages: rawMessages?.length ?? 0,
+    });
+    logger.info(`openviking: afterTurn bypassed reason=heartbeat_bypassed sessionHash=${hashLogValue(ovSessionId)}`);
     return;
   }
 
   try {
-    diag = safeDiag(diag);
     const sender = await resolveLifecycleSenderIdentity({ runtimeContext, sessionKey, identityHashSecret });
     const activeTurn = readActiveOpenVikingTurn({
       sessionKey,
@@ -1203,6 +1302,7 @@ export async function afterTurnOpenVikingSession({
 
     diag("afterTurn_entry", ovSessionId, {
       totalMessages: messages.length,
+      memoryBefore,
       newMessageCount: newCount,
       prePromptMessageCount: start,
       newTurnTokens,
@@ -1291,7 +1391,7 @@ export async function afterTurnOpenVikingSession({
       `openviking: committed sessionHash=${hashLogValue(ovSessionId)}, status=${commitResult.status}, archived=${commitResult.archived ?? false}, taskPresent=${Boolean(commitResult.task_id)}`,
     );
 
-    diag("afterTurn_commit", ovSessionId, {
+    completionDiag("afterTurn_commit", ovSessionId, {
       pendingTokens,
       commitTokenThreshold: cfg.commitTokenThreshold,
       commitReason: forceCommitForMemoryIntent && pendingTokens < cfg.commitTokenThreshold ? "memory_intent" : "threshold",
@@ -1310,7 +1410,7 @@ export async function afterTurnOpenVikingSession({
     }
   } catch (err) {
     logger.warn?.(`openviking: afterTurn failed errorType=${errorType(err)}`);
-    diag("afterTurn_error", sessionId ?? "(unknown)", {
+    completionDiag("afterTurn_error", sessionId ?? "(unknown)", {
       error: String(err),
       senderIdFound: false,
     });

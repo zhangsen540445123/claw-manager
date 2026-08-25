@@ -52,6 +52,18 @@ function makeStats() {
   };
 }
 
+function diagnostics(logger: ReturnType<typeof makeLogger>, stage: string) {
+  return logger.info.mock.calls
+    .map(([message]) => String(message))
+    .filter((message) => message.startsWith("openviking: diag "))
+    .map((message) => JSON.parse(message.slice("openviking: diag ".length)) as {
+      stage: string;
+      sessionId: string;
+      data: Record<string, unknown>;
+    })
+    .filter((entry) => entry.stage === stage);
+}
+
 function makeEngine(
   contextResult: unknown,
   opts?: {
@@ -117,6 +129,141 @@ describe("context-engine assemble()", () => {
     "agent:main:openclaw-weixin:bot:direct:wx_sender_ABC",
     "agent:main:cron:nightly:run:1",
   ]);
+
+  it("bypasses OpenViking identity resolution and recall for heartbeat assemble", async () => {
+    const liveMessages = [{ role: "user", content: "heartbeat check" }];
+    const { engine, getClient, getClientForSender, logger, resolveAgentId } = makeEngine(
+      {
+        latest_archive_overview: "must not be loaded",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        useSenderScopedClient: true,
+        cfgOverrides: { emitStandardDiagnostics: true },
+      },
+    );
+
+    const result = await engine.assemble({
+      sessionId: "heartbeat-session",
+      sessionKey: "agent:main:cron:nightly:run:1",
+      messages: liveMessages,
+      isHeartbeat: true,
+    });
+
+    expect(result.messages).toBe(liveMessages);
+    expect(result.estimatedTokens).toBe(roughEstimate(liveMessages));
+    expect(result.systemPromptAddition).toBeUndefined();
+    expect(getClient).not.toHaveBeenCalled();
+    expect(getClientForSender).not.toHaveBeenCalled();
+    expect(resolveAgentId).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("heartbeat_bypassed"),
+    );
+    const resultDiag = diagnostics(logger, "assemble_result").at(-1);
+    expect(resultDiag).toBeDefined();
+    expect(resultDiag?.sessionId).not.toContain("heartbeat-session");
+    expect(resultDiag?.data).toMatchObject({
+      reason: "heartbeat_bypassed",
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({
+        rssMiB: expect.any(Number),
+        heapUsedMiB: expect.any(Number),
+        heapLimitMiB: expect.any(Number),
+      }),
+    });
+    expect(JSON.stringify(resultDiag)).not.toContain("heartbeat-session");
+  });
+
+  it("emits lifecycle memory diagnostics without logging message content", async () => {
+    const secretText = "private assemble message";
+    const { engine, logger } = makeEngine(
+      {
+        latest_archive_overview: "",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      { cfgOverrides: { emitStandardDiagnostics: true } },
+    );
+
+    await engine.assemble({
+      sessionId: "diagnostic-session",
+      messages: [{ role: "user", content: secretText }],
+    });
+
+    const entry = diagnostics(logger, "assemble_entry").at(-1);
+    const result = diagnostics(logger, "assemble_result").at(-1);
+    expect(entry?.data).toMatchObject({
+      memoryBefore: expect.objectContaining({
+        rssMiB: expect.any(Number),
+        heapUsedMiB: expect.any(Number),
+        heapLimitMiB: expect.any(Number),
+      }),
+    });
+    expect(result?.data).toMatchObject({
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({
+        heapUsedMiB: expect.any(Number),
+      }),
+    });
+    expect(JSON.stringify({ entry, result })).not.toContain(secretText);
+  });
+
+  it("emits recall start and end diagnostics without logging the query text", async () => {
+    const secretQuery = "what backend language should remain private?";
+    const { engine, client, logger } = makeEngine(
+      {
+        latest_archive_overview: "unused",
+        pre_archive_abstracts: [],
+        messages: [],
+        estimatedTokens: 0,
+        stats: makeStats(),
+      },
+      {
+        cfgOverrides: {
+          autoRecall: true,
+          recallPreferAbstract: true,
+          emitStandardDiagnostics: true,
+        },
+      },
+    );
+    client.find.mockResolvedValueOnce({
+      memories: [{
+        uri: "viking://user/memories/private-preference",
+        level: 2,
+        category: "preferences",
+        abstract: "Use Rust.",
+        score: 0.9,
+      }],
+      total: 1,
+    });
+
+    await engine.assemble({
+      sessionId: "recall-diagnostic-session",
+      messages: [{ role: "user", content: secretQuery }],
+    });
+
+    const start = diagnostics(logger, "recall_start").at(-1);
+    const end = diagnostics(logger, "recall_end").at(-1);
+    expect(start?.data).toMatchObject({
+      queryChars: secretQuery.length,
+      queryTruncated: false,
+      source: "message",
+      memoryBefore: expect.objectContaining({ heapUsedMiB: expect.any(Number) }),
+    });
+    expect(end?.data).toMatchObject({
+      status: "injected",
+      memoryCount: 1,
+      estimatedTokens: expect.any(Number),
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({ heapUsedMiB: expect.any(Number) }),
+    });
+    expect(JSON.stringify({ start, end })).not.toContain(secretQuery);
+  });
   it("uses sender-scoped client from handoff when assemble has no runtimeContext", async () => {
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "ov-handoff-"));

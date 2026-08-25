@@ -80,6 +80,7 @@ type ContextEngine = {
     prompt?: string;
     tokenBudget?: number;
     runtimeContext?: Record<string, unknown>;
+    isHeartbeat?: boolean;
   }) => Promise<AssembleResult>;
   compact: (params: {
     sessionId: string;
@@ -358,6 +359,7 @@ export function createMemoryOpenVikingContextEngine(params: {
         prompt: assembleParams.prompt,
         tokenBudget,
         runtimeContext: assembleParams.runtimeContext,
+        isHeartbeat: assembleParams.isHeartbeat,
         identityHashSecret: cfg.identityHashSecret,
         isMainAssemble,
         cfg,

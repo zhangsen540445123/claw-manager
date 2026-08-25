@@ -23,6 +23,18 @@ function makeLogger() {
   };
 }
 
+function diagnostics(logger: ReturnType<typeof makeLogger>, stage: string) {
+  return logger.info.mock.calls
+    .map(([message]) => String(message))
+    .filter((message) => message.startsWith("openviking: diag "))
+    .map((message) => JSON.parse(message.slice("openviking: diag ".length)) as {
+      stage: string;
+      sessionId: string;
+      data: Record<string, unknown>;
+    })
+    .filter((entry) => entry.stage === stage);
+}
+
 function makeEngine(opts?: {
   autoCapture?: boolean;
   commitTokenThreshold?: number;
@@ -901,7 +913,9 @@ describe("context-engine afterTurn()", () => {
   });
 
   it("skips heartbeat via isHeartbeat flag", async () => {
-    const { engine, client } = makeEngine();
+    const { engine, client, getClient, getClientForSender, logger } = makeEngine({
+      useSenderScopedClient: true,
+    });
 
     const messages = [
       { role: "user", content: "regular message" },
@@ -909,7 +923,7 @@ describe("context-engine afterTurn()", () => {
     ];
 
     await engine.afterTurn!({
-      sessionId: "s1",
+      sessionId: "heartbeat-after-turn-session",
       sessionFile: "",
       messages,
       prePromptMessageCount: 0,
@@ -917,6 +931,70 @@ describe("context-engine afterTurn()", () => {
     });
 
     expect(client.addSessionMessage).not.toHaveBeenCalled();
+    expect(getClient).not.toHaveBeenCalled();
+    expect(getClientForSender).not.toHaveBeenCalled();
+    const skipped = diagnostics(logger, "afterTurn_skip").at(-1);
+    expect(skipped?.sessionId).not.toContain("heartbeat-after-turn-session");
+    expect(skipped?.data).toMatchObject({
+      reason: "heartbeat_bypassed",
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({
+        heapUsedMiB: expect.any(Number),
+        heapLimitMiB: expect.any(Number),
+      }),
+    });
+    expect(JSON.stringify(skipped)).not.toContain("heartbeat-after-turn-session");
+  });
+
+  it("emits afterTurn entry and commit memory diagnostics", async () => {
+    const { engine, logger } = makeEngine({ commitTokenThreshold: 1 });
+
+    await engine.afterTurn!({
+      sessionId: "after-turn-diagnostic-session",
+      sessionFile: "",
+      messages: [
+        { role: "user", content: "remember a private preference" },
+        { role: "assistant", content: "acknowledged" },
+      ],
+      prePromptMessageCount: 0,
+    });
+
+    const entry = diagnostics(logger, "afterTurn_entry").at(-1);
+    const commit = diagnostics(logger, "afterTurn_commit").at(-1);
+    expect(entry?.data).toMatchObject({
+      memoryBefore: expect.objectContaining({
+        rssMiB: expect.any(Number),
+        heapUsedMiB: expect.any(Number),
+        heapLimitMiB: expect.any(Number),
+      }),
+    });
+    expect(commit?.data).toMatchObject({
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({ heapUsedMiB: expect.any(Number) }),
+    });
+    expect(JSON.stringify({ entry, commit })).not.toContain("private preference");
+  });
+
+  it("emits controlled memory diagnostics when afterTurn fails", async () => {
+    const { engine, logger } = makeEngine({
+      addSessionMessageError: new Error("secret backend response"),
+    });
+
+    await engine.afterTurn!({
+      sessionId: "after-turn-error-session",
+      sessionFile: "",
+      messages: [{ role: "user", content: "private failing message" }],
+      prePromptMessageCount: 0,
+    });
+
+    const error = diagnostics(logger, "afterTurn_error").at(-1);
+    expect(error?.data).toMatchObject({
+      durationMs: expect.any(Number),
+      memoryAfter: expect.objectContaining({ heapUsedMiB: expect.any(Number) }),
+      errorType: "Error",
+    });
+    expect(JSON.stringify(error)).not.toContain("backend response");
+    expect(JSON.stringify(error)).not.toContain("private failing message");
   });
 
   it("skips store when all new messages are system only", async () => {
