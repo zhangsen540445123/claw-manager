@@ -3,6 +3,9 @@ package com.clawbotforall.runtime;
 import com.clawbotforall.instance.InstanceEntity;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 管理 OpenClaw 容器和命令的运行时抽象。
@@ -94,4 +97,84 @@ public interface OpenClawRuntime {
       Map<String, String> env,
       RuntimeExecListener listener
   );
+
+  /**
+   * 执行有界的非交互式命令并收集有限输出。用于诊断采样，失败不会向业务线程抛出。
+   */
+  default RuntimeCommandResult executeReadOnly(
+      InstanceEntity instance,
+      List<String> command,
+      long timeoutMs,
+      int maxOutputChars
+  ) {
+    if (command == null || command.isEmpty() || maxOutputChars < 1) {
+      return new RuntimeCommandResult("", -1, false, new IllegalArgumentException("诊断命令参数无效。"));
+    }
+    StringBuilder output = new StringBuilder(Math.min(maxOutputChars, 4096));
+    CountDownLatch completed = new CountDownLatch(1);
+    AtomicBoolean timedOut = new AtomicBoolean(false);
+    AtomicBoolean terminal = new AtomicBoolean(false);
+    RuntimeExecHandle[] handle = new RuntimeExecHandle[1];
+    Throwable[] error = new Throwable[1];
+    int[] exitCode = new int[] {-1};
+    try {
+      handle[0] = startExec(instance, command, Math.max(1, timeoutMs), new RuntimeExecListener() {
+        @Override
+        public void onOutput(String chunk) {
+          if (chunk == null || terminal.get()) {
+            return;
+          }
+          synchronized (output) {
+            if (output.length() < maxOutputChars) {
+              int remaining = maxOutputChars - output.length();
+              output.append(chunk, 0, Math.min(remaining, chunk.length()));
+            }
+          }
+        }
+
+        @Override
+        public void onComplete(int code) {
+          if (terminal.compareAndSet(false, true)) {
+            exitCode[0] = code;
+            completed.countDown();
+          }
+        }
+
+        @Override
+        public void onTimeout() {
+          if (terminal.compareAndSet(false, true)) {
+            timedOut.set(true);
+            completed.countDown();
+          }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+          if (terminal.compareAndSet(false, true)) {
+            error[0] = throwable;
+            completed.countDown();
+          }
+        }
+      });
+      if (!completed.await(Math.max(1, timeoutMs) + 2_000, TimeUnit.MILLISECONDS)
+          && terminal.compareAndSet(false, true)) {
+        timedOut.set(true);
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      timedOut.set(true);
+      error[0] = interrupted;
+    } catch (Throwable throwable) {
+      error[0] = throwable;
+    } finally {
+      if ((timedOut.get() || error[0] != null) && handle[0] != null) {
+        try {
+          handle[0].cancel();
+        } catch (Throwable ignored) {
+          // 诊断清理失败不影响业务。
+        }
+      }
+    }
+    return new RuntimeCommandResult(output.toString(), exitCode[0], timedOut.get(), error[0]);
+  }
 }

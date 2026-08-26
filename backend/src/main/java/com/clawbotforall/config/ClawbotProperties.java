@@ -12,8 +12,13 @@ public record ClawbotProperties(
     Paths paths,
     Admin admin,
     Security security,
-    Runtime runtime
+    Runtime runtime,
+    OomDiagnostics oomDiagnostics
 ) {
+  public ClawbotProperties(Paths paths, Admin admin, Security security, Runtime runtime) {
+    this(paths, admin, security, runtime, null);
+  }
+
   @ConstructorBinding
   public ClawbotProperties {
     if (paths == null) {
@@ -41,6 +46,9 @@ public record ClawbotProperties(
           List.of("*")
       );
     }
+    if (oomDiagnostics == null) {
+      oomDiagnostics = OomDiagnostics.defaults();
+    }
   }
 
   public record Paths(String dataDir) {}
@@ -48,6 +56,47 @@ public record ClawbotProperties(
   public record Admin(String email, String name, String password) {}
 
   public record Security(String sessionCookieName, int sessionTtlDays) {}
+
+  public record OomDiagnostics(
+      boolean enabled,
+      long intervalMs,
+      int retentionDays,
+      long metricsLimitMib,
+      long minFreeDiskGib,
+      List<String> heapSnapshotInstanceIds,
+      int heapSnapshotMaxCount,
+      long heapSnapshotMaxTotalGib,
+      int heapSnapshotPerInstanceMaxCount,
+      long heapSnapshotMinIntervalMs
+  ) {
+    public OomDiagnostics {
+      intervalMs = intervalMs > 0 ? intervalMs : 30_000;
+      retentionDays = retentionDays > 0 ? retentionDays : 7;
+      metricsLimitMib = metricsLimitMib > 0 ? metricsLimitMib : 256;
+      minFreeDiskGib = minFreeDiskGib > 0 ? minFreeDiskGib : 30;
+      heapSnapshotInstanceIds = heapSnapshotInstanceIds == null
+          ? List.of()
+          : heapSnapshotInstanceIds.stream().filter(id -> id != null && !id.isBlank()).map(String::trim).distinct().toList();
+      heapSnapshotMaxCount = heapSnapshotMaxCount > 0 ? heapSnapshotMaxCount : 5;
+      heapSnapshotMaxTotalGib = heapSnapshotMaxTotalGib > 0 ? heapSnapshotMaxTotalGib : 12;
+      heapSnapshotPerInstanceMaxCount = heapSnapshotPerInstanceMaxCount > 0 ? heapSnapshotPerInstanceMaxCount : 1;
+      heapSnapshotMinIntervalMs = heapSnapshotMinIntervalMs > 0 ? heapSnapshotMinIntervalMs : 600_000;
+    }
+
+    public static OomDiagnostics defaults() {
+      return new OomDiagnostics(false, 30_000, 7, 256, 30, List.of(), 5, 12, 1, 600_000);
+    }
+
+    public boolean collectionEnabledFor(String instanceId) {
+      return enabled
+          && instanceId != null
+          && (heapSnapshotInstanceIds.isEmpty() || heapSnapshotInstanceIds.contains(instanceId));
+    }
+
+    public boolean snapshotEnabledFor(String instanceId) {
+      return collectionEnabledFor(instanceId);
+    }
+  }
 
   public record Runtime(
       String runnerImage,

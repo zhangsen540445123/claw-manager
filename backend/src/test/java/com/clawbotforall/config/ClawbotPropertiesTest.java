@@ -19,4 +19,12 @@ class ClawbotPropertiesTest {
 
     assertThat(properties.runtime().controlUiAllowedOrigins()).containsExactly("*");
   }
+  @Test
+  void oomDiagnosticsDefaultsToDisabledInCode() {
+    ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
+
+    assertThat(properties.oomDiagnostics().enabled()).isFalse();
+    assertThat(properties.oomDiagnostics().intervalMs()).isEqualTo(30_000);
+    assertThat(properties.oomDiagnostics().heapSnapshotInstanceIds()).isEmpty();
+  }
 }
