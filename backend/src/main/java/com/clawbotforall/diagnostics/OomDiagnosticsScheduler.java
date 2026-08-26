@@ -9,6 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,7 @@ public class OomDiagnosticsScheduler {
   private final Executor collectionExecutor;
   private final AtomicBoolean collectionInProgress = new AtomicBoolean(false);
 
+  @Autowired
   public OomDiagnosticsScheduler(
       InstanceAggregateMapper instanceAggregateMapper,
       OomDiagnosticsService diagnosticsService,

@@ -10,7 +10,9 @@ import static org.mockito.Mockito.when;
 import com.clawbotforall.config.ClawbotProperties;
 import com.clawbotforall.instance.InstanceAggregateMapper;
 import com.clawbotforall.instance.InstanceEntity;
+import java.lang.reflect.Constructor;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -24,6 +26,17 @@ class OomDiagnosticsSchedulerTest {
 
   @Mock
   OomDiagnosticsService diagnosticsService;
+
+  @Test
+  void marksTheSpringConstructorExplicitlyWhenTestConstructorAlsoExists() throws Exception {
+    Constructor<OomDiagnosticsScheduler> constructor = OomDiagnosticsScheduler.class.getConstructor(
+        InstanceAggregateMapper.class,
+        OomDiagnosticsService.class,
+        ClawbotProperties.class
+    );
+
+    org.assertj.core.api.Assertions.assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue();
+  }
 
   @Test
   void doesNotQueryInstancesWhenDiagnosticsAreDisabled() {
