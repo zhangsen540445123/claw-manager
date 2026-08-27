@@ -56,6 +56,24 @@ class OomDiagnosticsServiceTest {
   }
 
   @Test
+  void collectionScriptRecognizesOpenClawProcessTitle() {
+    StubRuntime runtime = new StubRuntime();
+    OomDiagnosticsService service = new OomDiagnosticsService(properties(true), runtime, new ObjectMapper());
+
+    service.collect(instance("inst-1"));
+
+    assertThat(runtime.lastReadOnlyCommand).hasSize(3);
+    assertThat(runtime.lastReadOnlyCommand.get(2)).contains("node|nodejs|openclaw)");
+  }
+
+  @Test
+  void pidOneIsAValidHeapSnapshotTargetInsideTheRunnerContainer() {
+    assertThat(OomDiagnosticsService.isValidSnapshotPid(1)).isTrue();
+    assertThat(OomDiagnosticsService.isValidSnapshotPid(0)).isFalse();
+    assertThat(OomDiagnosticsService.isValidSnapshotPid(-1)).isFalse();
+  }
+
+  @Test
   void parsesOnlyWhitelistedDiagnosticKeys() {
     Map<String, Object> parsed = OomDiagnosticsService.parseProcessSample("""
         node_pid=42
@@ -130,6 +148,7 @@ class OomDiagnosticsServiceTest {
   }
 
   private static final class StubRuntime implements OpenClawRuntime {
+    private List<String> lastReadOnlyCommand = List.of();
     @Override public RuntimeState startInstance(InstanceEntity instance, InstancePaths paths) { return new RuntimeState(true, "running", null); }
     @Override public RuntimeState stopInstance(InstanceEntity instance) { return RuntimeState.stopped(); }
     @Override public RuntimeState inspectInstance(InstanceEntity instance) { return new RuntimeState(true, "running", null); }
@@ -143,6 +162,7 @@ class OomDiagnosticsServiceTest {
     @Override public RuntimeExecHandle startExec(InstanceEntity instance, String command, long timeoutMs, Map<String, String> env, RuntimeExecListener listener) { throw new UnsupportedOperationException(); }
     @Override public RuntimeExecHandle startExec(InstanceEntity instance, List<String> command, long timeoutMs, Map<String, String> env, RuntimeExecListener listener) { throw new UnsupportedOperationException(); }
     @Override public RuntimeCommandResult executeReadOnly(InstanceEntity instance, List<String> command, long timeoutMs, int maxOutputChars) {
+      lastReadOnlyCommand = List.copyOf(command);
       return new RuntimeCommandResult("""
           node_pid=42
           node_cmd_match=1

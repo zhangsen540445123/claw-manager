@@ -63,9 +63,9 @@ public class OomDiagnosticsService {
         pid="${proc#/proc/}"
         comm="$(cat "$proc/comm" 2>/dev/null)"
         case "$comm" in
-          node|nodejs)
+          node|nodejs|openclaw)
             [ -n "$fallback_pid" ] || fallback_pid="$pid"
-            if tr '\\000' ' ' < "$proc/cmdline" 2>/dev/null | grep -Eiq '(openclaw|gateway)'; then
+            if [ "$comm" = "openclaw" ] || tr '\\000' ' ' < "$proc/cmdline" 2>/dev/null | grep -Eiq '(openclaw|gateway)'; then
               node_pid="$pid"
               break
             fi
@@ -75,7 +75,8 @@ public class OomDiagnosticsService {
       [ -n "$node_pid" ] || node_pid="$fallback_pid"
       printf 'node_pid=%s\\n' "${node_pid:-0}"
       if [ -n "$node_pid" ] && [ "$node_pid" != "0" ]; then
-        if tr '\\000' ' ' < "/proc/$node_pid/cmdline" 2>/dev/null | grep -Eiq '(openclaw|gateway)'; then
+        selected_comm="$(cat "/proc/$node_pid/comm" 2>/dev/null)"
+        if [ "$selected_comm" = "openclaw" ] || tr '\\000' ' ' < "/proc/$node_pid/cmdline" 2>/dev/null | grep -Eiq '(openclaw|gateway)'; then
           echo 'node_cmd_match=1'
         else
           echo 'node_cmd_match=0'
@@ -238,7 +239,7 @@ public class OomDiagnosticsService {
       return;
     }
     long nodePid = number(sample.get("nodePid"));
-    if (nodePid <= 1 || !snapshotCapacityAvailable(diagnosticsDir, instance.getId())) {
+    if (!isValidSnapshotPid(nodePid) || !snapshotCapacityAvailable(diagnosticsDir, instance.getId())) {
       return;
     }
     if (!SNAPSHOT_IN_PROGRESS.compareAndSet(false, true)) {
@@ -257,6 +258,10 @@ public class OomDiagnosticsService {
         SNAPSHOT_IN_PROGRESS.set(false);
       }
     });
+  }
+
+  static boolean isValidSnapshotPid(long nodePid) {
+    return nodePid >= 1;
   }
 
   static boolean shouldScheduleHeapSnapshot(
