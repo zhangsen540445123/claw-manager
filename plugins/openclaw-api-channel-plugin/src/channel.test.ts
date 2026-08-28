@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getEventListeners, setMaxListeners } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -786,6 +787,29 @@ describe("buildApiInboundContext", () => {
     expect(status.running).toBe(true);
     expect(typeof status.updatedAt).toBe("string");
     expect(typeof status.updatedAtEpochMs).toBe("number");
+  });
+
+  it("does not accumulate abort listeners while the resident monitor is idle", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "claw-manager-api-monitor-"));
+    vi.stubEnv("OPENCLAW_HOME", home);
+    const abortController = new AbortController();
+    setMaxListeners(0, abortController.signal);
+
+    const monitor = monitorApiQueue({
+      cfg: persistedApiConfig(),
+      channelRuntime: makeRuntime() as any,
+      abortSignal: abortController.signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 850));
+    const listenerCount = getEventListeners(abortController.signal, "abort").length;
+
+    abortController.abort();
+    await monitor;
+
+    expect(listenerCount).toBeLessThanOrEqual(1);
+    expect(getEventListeners(abortController.signal, "abort")).toHaveLength(0);
   });
 
   it("processes different API users concurrently in the resident monitor", async () => {
