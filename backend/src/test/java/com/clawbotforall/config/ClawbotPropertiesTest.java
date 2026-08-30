@@ -19,12 +19,14 @@ class ClawbotPropertiesTest {
 
     assertThat(properties.runtime().controlUiAllowedOrigins()).containsExactly("*");
   }
+
   @Test
-  void oomDiagnosticsDefaultsToDisabledInCode() {
+  void defaultRunnerResourcesRemainStable() {
     ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
 
-    assertThat(properties.oomDiagnostics().enabled()).isFalse();
-    assertThat(properties.oomDiagnostics().intervalMs()).isEqualTo(30_000);
-    assertThat(properties.oomDiagnostics().heapSnapshotInstanceIds()).isEmpty();
+    assertThat(properties.runtime().runnerCpus()).isEqualTo("1");
+    assertThat(properties.runtime().runnerMemory()).isEqualTo("2g");
+    assertThat(properties.runtime().runnerMemorySwap()).isEqualTo("4g");
+    assertThat(properties.runtime().runnerNodeMaxOldSpaceMb()).isEqualTo(1536);
   }
 }

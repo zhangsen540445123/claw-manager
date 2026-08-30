@@ -129,8 +129,7 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         .withEnv(runnerEnv(
             openVikingSettingsService.effectiveSettings(),
             instance.getId(),
-            properties.runtime().runnerNodeMaxOldSpaceMb(),
-            properties.oomDiagnostics()
+            properties.runtime().runnerNodeMaxOldSpaceMb()
         ))
         .withHostConfig(hostConfig);
 
@@ -601,15 +600,6 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
   }
 
   static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId, int nodeMaxOldSpaceMb) {
-    return runnerEnv(settings, instanceId, nodeMaxOldSpaceMb, ClawbotProperties.OomDiagnostics.defaults());
-  }
-
-  static List<String> runnerEnv(
-      OpenVikingEffectiveSettings settings,
-      String instanceId,
-      int nodeMaxOldSpaceMb,
-      ClawbotProperties.OomDiagnostics diagnostics
-  ) {
     List<String> env = new ArrayList<>(List.of(
         "HOME=/var/lib/openclaw",
         "OPENCLAW_HOME=/var/lib/openclaw",
@@ -623,20 +613,8 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         "OPENVIKING_BROKER_TOKEN=" + settings.brokerToken(),
         "OPENVIKING_OPENCLAW_INSTANCE_ID=" + instanceId
     ));
-    List<String> nodeOptions = new ArrayList<>();
     if (nodeMaxOldSpaceMb > 0) {
-      nodeOptions.add("--max-old-space-size=" + nodeMaxOldSpaceMb);
-    }
-    if (diagnostics != null && diagnostics.enabled()) {
-      env.add("CLAW_MANAGER_OOM_DIAGNOSTICS_ENABLED=true");
-      env.add("CLAW_MANAGER_OOM_DIAGNOSTICS_DIR=/var/lib/openclaw/diagnostics/oom");
-      if (diagnostics.snapshotEnabledFor(instanceId)) {
-        nodeOptions.add("--heapsnapshot-signal=SIGUSR2");
-        nodeOptions.add("--diagnostic-dir=/var/lib/openclaw/diagnostics/oom/snapshots");
-      }
-    }
-    if (!nodeOptions.isEmpty()) {
-      env.add("NODE_OPTIONS=" + String.join(" ", nodeOptions));
+      env.add("NODE_OPTIONS=--max-old-space-size=" + nodeMaxOldSpaceMb);
     }
     if (hasText(settings.baseUrl())) {
       env.add("OPENVIKING_BASE_URL=" + settings.baseUrl());

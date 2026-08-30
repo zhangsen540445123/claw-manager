@@ -2,7 +2,6 @@ package com.clawbotforall.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.clawbotforall.config.ClawbotProperties;
 import com.clawbotforall.openviking.OpenVikingEffectiveSettings;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -86,40 +85,5 @@ class DockerJavaOpenClawRuntimeOpenVikingTest {
     );
     assertThat(env).noneMatch(item -> item.startsWith("OPENVIKING_BASE_URL="));
     assertThat(env).noneMatch(item -> item.startsWith("OPENVIKING_PLUGIN_PACKAGE="));
-  }
-  @Test
-  void runnerEnvEnablesDiagnosticsAndSnapshotSignalForSelectedInstance() {
-    OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
-        "", true, "claw-manager", "shared-secret", "", "root-key-never-in-runner",
-        "broker-token", "http://claw-manager-api:8080"
-    );
-    ClawbotProperties.OomDiagnostics diagnostics = new ClawbotProperties.OomDiagnostics(
-        true, 30_000, 7, 256, 30, List.of("inst_1"), 5, 12, 1, 600_000
-    );
-
-    List<String> env = DockerJavaOpenClawRuntime.runnerEnv(settings, "inst_1", 1536, diagnostics);
-
-    assertThat(env).contains(
-        "CLAW_MANAGER_OOM_DIAGNOSTICS_ENABLED=true",
-        "CLAW_MANAGER_OOM_DIAGNOSTICS_DIR=/var/lib/openclaw/diagnostics/oom",
-        "NODE_OPTIONS=--max-old-space-size=1536 --heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/var/lib/openclaw/diagnostics/oom/snapshots"
-    );
-  }
-
-  @Test
-  void runnerEnvDoesNotInjectDiagnosticsWhenDisabled() {
-    OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
-        "", true, "claw-manager", "shared-secret", "", "root-key-never-in-runner",
-        "broker-token", "http://claw-manager-api:8080"
-    );
-    ClawbotProperties.OomDiagnostics diagnostics = new ClawbotProperties.OomDiagnostics(
-        false, 30_000, 7, 256, 30, List.of("inst_1"), 5, 12, 1, 600_000
-    );
-
-    List<String> env = DockerJavaOpenClawRuntime.runnerEnv(settings, "inst_1", 1536, diagnostics);
-
-    assertThat(env).contains("NODE_OPTIONS=--max-old-space-size=1536");
-    assertThat(env).noneMatch(item -> item.startsWith("CLAW_MANAGER_OOM_DIAGNOSTICS_"));
-    assertThat(env).noneMatch(item -> item.contains("heapsnapshot-signal"));
   }
 }

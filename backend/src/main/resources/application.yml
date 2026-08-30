@@ -70,14 +70,3 @@ clawbot:
     gateway-ready-check-interval-ms: ${OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS:10000}
     gateway-ready-probe-timeout-ms: ${OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS:5000}
     control-ui-allowed-origins: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:*}
-  oom-diagnostics:
-    enabled: ${CLAWBOT_OOM_DIAGNOSTICS_ENABLED:true}
-    interval-ms: ${CLAWBOT_OOM_DIAGNOSTICS_INTERVAL_MS:30000}
-    retention-days: ${CLAWBOT_OOM_DIAGNOSTICS_RETENTION_DAYS:7}
-    metrics-limit-mib: ${CLAWBOT_OOM_DIAGNOSTICS_METRICS_LIMIT_MIB:256}
-    min-free-disk-gib: ${CLAWBOT_OOM_DIAGNOSTICS_MIN_FREE_DISK_GIB:30}
-    heap-snapshot-instance-ids: ${CLAWBOT_OOM_HEAP_SNAPSHOT_INSTANCE_IDS:}
-    heap-snapshot-max-count: ${CLAWBOT_OOM_HEAP_SNAPSHOT_MAX_COUNT:5}
-    heap-snapshot-max-total-gib: ${CLAWBOT_OOM_HEAP_SNAPSHOT_MAX_TOTAL_GIB:12}
-    heap-snapshot-per-instance-max-count: ${CLAWBOT_OOM_HEAP_SNAPSHOT_PER_INSTANCE_MAX_COUNT:1}
-    heap-snapshot-min-interval-ms: ${CLAWBOT_OOM_HEAP_SNAPSHOT_MIN_INTERVAL_MS:600000}
