@@ -171,6 +171,32 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void reusesExistingUnexpiredMiniappLinkForSameBindingSubject() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+    WechatBindLinkEntity existing = newLink("token_existing");
+    existing.setMode("existing");
+    existing.setInstanceId("inst_1");
+    existing.setTargetAccountId("account_1");
+    existing.setMiniappOpenidHash("openid_hash_1");
+    existing.setStatus("waiting_scan");
+    existing.setExpiresAt("2026-07-20T00:00:00Z");
+    existing.setQrLink("https://qr.example.test/existing");
+    when(linkMapper.findActiveMiniappLinkForUpdate(
+        eq("openid_hash_1"), eq("inst_1"), eq("account_1"), org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(existing);
+
+    PublicWechatBindLink link = service.createMiniappLink(
+        "openid_hash_1", "inst_1", "account_1", "https://miniapp.example.test");
+
+    assertThat(link.token()).isEqualTo("token_existing");
+    verify(linkMapper, never()).insert(any());
+    assertThat(executor.size()).isZero();
+  }
+
+  @Test
   void rejectsNewUserLinkWhenNoReadyRunningInstanceExists() {
     when(aggregateMapper.listAll()).thenReturn(List.of(instance("inst_1", "实例一", "stopped")));
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));

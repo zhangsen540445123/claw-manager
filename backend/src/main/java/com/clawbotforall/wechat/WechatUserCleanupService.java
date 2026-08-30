@@ -289,7 +289,7 @@ public class WechatUserCleanupService {
       throw new ApiException(HttpStatus.NOT_FOUND, "微信绑定账号不存在。");
     }
     WechatBindLinkEntity activeBind = bindLinkMapper.findActiveForUserForUpdate(
-        instance.getId(), account.getPhone(), account.getAccountId(), account.getWechatUserId());
+        instance.getId(), account.getPhone(), account.getAccountId(), account.getWechatUserId(), now());
     if (activeBind != null) {
       throw new ApiException(HttpStatus.CONFLICT, "该用户正在扫码绑定，暂时不能解绑。");
     }
@@ -366,7 +366,7 @@ public class WechatUserCleanupService {
       if (persisted != null) {
         throw new ApiException(HttpStatus.CONFLICT, "微信账号已落库，不能按幽灵凭证清理。");
       }
-      List<String> protectedAccountIds = bindLinkMapper.listProtectedAccountIds(instance.getId());
+      List<String> protectedAccountIds = bindLinkMapper.listProtectedAccountIds(instance.getId(), now());
       if (protectedAccountIds != null && protectedAccountIds.contains(text(evidence.accountId()))) {
         throw new ApiException(HttpStatus.CONFLICT, "微信账号仍处于绑定或清理流程，已跳过幽灵清理。");
       }

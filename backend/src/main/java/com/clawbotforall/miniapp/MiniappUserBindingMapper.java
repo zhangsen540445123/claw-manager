@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 public interface MiniappUserBindingMapper {
   MiniappUserBindingEntity findByOpenidHash(@Param("openidHash") String openidHash);
 
+  MiniappUserBindingEntity findByOpenidHashForUpdate(@Param("openidHash") String openidHash);
+
   MiniappUserBindingEntity findByWechatUserId(@Param("wechatUserId") String wechatUserId);
 
   List<MiniappWechatBindingSummary> listWechatSummariesByInstanceIds(@Param("instanceIds") List<String> instanceIds);
@@ -25,6 +27,12 @@ public interface MiniappUserBindingMapper {
   int insert(MiniappUserBindingEntity binding);
 
   int updateBindToken(
+      @Param("openidHash") String openidHash,
+      @Param("currentBindToken") String currentBindToken,
+      @Param("updatedAt") String updatedAt
+  );
+
+  int updateBindTokenPreservingStatus(
       @Param("openidHash") String openidHash,
       @Param("currentBindToken") String currentBindToken,
       @Param("updatedAt") String updatedAt

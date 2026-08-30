@@ -2,6 +2,7 @@ package com.clawbotforall.wechat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -330,7 +331,7 @@ class WechatUserResidueScannerTest {
     when(miniappBindingMapper.listByInstanceId("inst-1")).thenReturn(List.of());
     when(cleanupOperationMapper.listByInstance("inst-1")).thenReturn(List.of());
     when(rebindOperationMapper.listByInstance("inst-1")).thenReturn(List.of());
-    when(bindLinkMapper.listProtectedAccountIds("inst-1")).thenReturn(List.of("protected-account"));
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst-1"), anyString())).thenReturn(List.of("protected-account"));
 
     WechatUserResidueScanner.ScanResult result = scanner().scanInstance(instance);
 

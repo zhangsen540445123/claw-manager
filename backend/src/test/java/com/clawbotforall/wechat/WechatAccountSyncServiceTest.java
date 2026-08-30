@@ -117,7 +117,7 @@ class WechatAccountSyncServiceTest {
     InstanceEntity instance = instanceWithStateAccount();
 
     when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
-    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of("wx_1"));
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst_1"), anyString())).thenReturn(List.of("wx_1"));
 
     service.syncInstanceAccounts(instance);
 
@@ -131,7 +131,7 @@ class WechatAccountSyncServiceTest {
     Path stateDir = tempDir.resolve("home").resolve(".openclaw").resolve("openclaw-weixin");
     Files.writeString(stateDir.resolve("accounts").resolve("wx_1.sync.json"), "{}");
     when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
-    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of());
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst_1"), anyString())).thenReturn(List.of());
     when(cleanupServiceProvider.getIfAvailable()).thenReturn(cleanupService);
     WechatUserCleanupOperationEntity completed = new WechatUserCleanupOperationEntity();
     completed.setOperationId("cleanup-account-only");
@@ -154,7 +154,7 @@ class WechatAccountSyncServiceTest {
   void defersAllGhostCleanupUntilTransactionCommitUsingSingleSynchronization() throws Exception {
     InstanceEntity instance = instanceWithStateAccounts("wx_1", "wx_2");
     when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
-    when(bindLinkMapper.listProtectedAccountIds("inst_1")).thenReturn(List.of());
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst_1"), anyString())).thenReturn(List.of());
     when(cleanupServiceProvider.getIfAvailable()).thenReturn(cleanupService);
     WechatUserCleanupOperationEntity completed = new WechatUserCleanupOperationEntity();
     completed.setOperationId("cleanup-account-only");

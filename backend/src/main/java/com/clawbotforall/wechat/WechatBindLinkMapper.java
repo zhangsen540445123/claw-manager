@@ -14,6 +14,13 @@ public interface WechatBindLinkMapper {
 
   WechatBindLinkEntity findByTokenForUpdate(@Param("token") String token);
 
+  WechatBindLinkEntity findActiveMiniappLinkForUpdate(
+      @Param("miniappOpenidHash") String miniappOpenidHash,
+      @Param("instanceId") String instanceId,
+      @Param("targetAccountId") String targetAccountId,
+      @Param("now") String now
+  );
+
   List<WechatBindLinkEntity> listAdminLinks(
       @Param("mode") String mode,
       @Param("status") String status,
@@ -30,13 +37,17 @@ public interface WechatBindLinkMapper {
       @Param("now") String now
   );
 
-  List<String> listProtectedAccountIds(@Param("instanceId") String instanceId);
+  List<String> listProtectedAccountIds(
+      @Param("instanceId") String instanceId,
+      @Param("now") String now
+  );
 
   WechatBindLinkEntity findActiveForUserForUpdate(
       @Param("instanceId") String instanceId,
       @Param("phone") String phone,
       @Param("accountId") String accountId,
-      @Param("wechatUserId") String wechatUserId
+      @Param("wechatUserId") String wechatUserId,
+      @Param("now") String now
   );
 
   int insert(WechatBindLinkEntity link);

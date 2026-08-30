@@ -211,11 +211,15 @@ public class MiniappUserAccessService {
     if ("connected".equals(binding.getBindStatus())) {
       return binding;
     }
-    if (!ACTIVE_SCAN_STATES.contains(trim(binding.getBindStatus()))) {
+    String token = trim(binding.getCurrentBindToken());
+    if (hasCompletePersistedIdentity(binding)) {
+      WechatBindLinkEntity link = token.isBlank() ? null : bindLinkMapper.findByToken(token);
+      if (link == null || isTerminalLink(link) || isExpired(link.getExpiresAt())) {
+        restoreConnectedStatus(binding, openidHash);
+      }
       return binding;
     }
-    String token = trim(binding.getCurrentBindToken());
-    if (token.isBlank()) {
+    if (!ACTIVE_SCAN_STATES.contains(trim(binding.getBindStatus())) || token.isBlank()) {
       return binding;
     }
     WechatBindLinkEntity link = bindLinkMapper.findByToken(token);
@@ -289,9 +293,48 @@ public class MiniappUserAccessService {
     return trim(value).isBlank();
   }
 
+  private void restoreConnectedStatus(MiniappUserBindingEntity binding, String openidHash) {
+    String now = clock.instant().toString();
+    bindingMapper.updateStatus(openidHash, "connected", now);
+    binding.setBindStatus("connected");
+    binding.setUpdatedAt(now);
+    log.info(
+        "miniapp.binding.legacyStatusRepaired openidHash={} previousTokenPresent={} instanceId={} agentIdPreview={}",
+        openidHash,
+        trim(binding.getCurrentBindToken()).isBlank() ? "absent" : "present",
+        binding.getInstanceId(),
+        agentPreview(binding.getAgentId())
+    );
+  }
+
+  private boolean isExpired(String expiresAt) {
+    String normalized = trim(expiresAt);
+    if (normalized.isBlank()) {
+      return false;
+    }
+    try {
+      return !Instant.parse(normalized).isAfter(clock.instant());
+    } catch (java.time.format.DateTimeParseException ignored) {
+      return false;
+    }
+  }
+
+  private static boolean isTerminalLink(WechatBindLinkEntity link) {
+    String status = trim(link == null ? "" : link.getStatus());
+    return Set.of("connected", "rejected", "expired", "failed", "revoked").contains(status);
+  }
+
+  private static boolean hasCompletePersistedIdentity(MiniappUserBindingEntity binding) {
+    return binding != null
+        && !blank(binding.getWechatUserId())
+        && !blank(binding.getAgentId())
+        && !blank(binding.getOpenvikingUserId());
+  }
+
   private static boolean completeConnectedIdentity(MiniappUserBindingEntity binding) {
     return binding != null
         && "connected".equals(binding.getBindStatus())
+        && !blank(binding.getWechatUserId())
         && !blank(binding.getAgentId())
         && !blank(binding.getOpenvikingUserId());
   }

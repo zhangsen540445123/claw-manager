@@ -391,7 +391,7 @@ class WechatUserCleanupServiceTest {
         "account-only-ghost", "wechat-user", null, null,
         List.of(), List.of(), List.of("wechat_account_state")
     );
-    when(bindLinkMapper.listProtectedAccountIds("inst-1")).thenReturn(List.of());
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst-1"), anyString())).thenReturn(List.of());
 
     WechatUserCleanupOperationEntity result = service.startResidue(instance, evidence, "account_sync");
 
@@ -652,7 +652,7 @@ class WechatUserCleanupServiceTest {
     link.setStatus("waiting_scan");
     when(aggregateMapper.findWechatAccountByAccountIdForUpdate("account-1")).thenReturn(account);
     when(bindLinkMapper.findActiveForUserForUpdate(
-        "inst-1", "13500000000", "account-1", "wechat-user")).thenReturn(link);
+        eq("inst-1"), eq("13500000000"), eq("account-1"), eq("wechat-user"), anyString())).thenReturn(link);
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
         () -> service.start(instance, "account-1", "user_center"))

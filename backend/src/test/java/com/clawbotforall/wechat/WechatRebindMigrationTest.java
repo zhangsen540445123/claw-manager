@@ -25,10 +25,15 @@ class WechatRebindMigrationTest {
   }
 
   @Test
-  void cleanupFailedScannedAccountsRemainProtectedForRetry() throws IOException {
+  void activeScanProtectionExpiresButCleanupFailuresRemainProtectedForRetry() throws IOException {
     String mapper = new ClassPathResource("mappers/wechat/WechatBindLinkMapper.xml")
         .getContentAsString(StandardCharsets.UTF_8);
 
-    assertThat(mapper).contains("'waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed'");
+    assertThat(mapper).contains("status IN ('cleaning', 'cleanup_failed')");
+    assertThat(mapper).contains(
+        "status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')");
+    assertThat(mapper).contains("AND (expires_at IS NULL OR expires_at &gt; #{now})");
+    assertThat(mapper).doesNotContain(
+        "status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')");
   }
 }

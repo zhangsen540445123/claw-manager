@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -138,6 +139,7 @@ public class WechatUserResidueScanner {
 
   private ScanResult scanLocked(InstanceEntity instance) {
     String instanceId = instance.getId();
+    String now = Instant.now().toString();
     InstancePaths paths = fileService.paths(instanceId);
     OpenClawSnapshot snapshot = readSnapshot(paths.homeDir().resolve("openclaw.json"));
     List<WechatPairedAccountEntity> accounts = safe(
@@ -147,7 +149,7 @@ public class WechatUserResidueScanner {
     List<MiniappUserBindingEntity> miniapps = safe(miniappBindingMapper.listByInstanceId(instanceId));
     List<WechatUserCleanupOperationEntity> cleanups = safe(cleanupOperationMapper.listByInstance(instanceId));
     List<WechatRebindOperationEntity> rebinds = safe(rebindOperationMapper.listByInstance(instanceId));
-    List<String> protectedAccountIds = safe(bindLinkMapper.listProtectedAccountIds(instanceId));
+    List<String> protectedAccountIds = safe(bindLinkMapper.listProtectedAccountIds(instanceId, now));
 
     Map<String, WechatPairedAccountEntity> accountsById = new HashMap<>();
     Map<String, WechatPairedAccountEntity> accountsByPeer = new HashMap<>();

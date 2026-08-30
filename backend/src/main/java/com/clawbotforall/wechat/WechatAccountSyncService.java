@@ -82,9 +82,10 @@ public class WechatAccountSyncService {
     }
 
     List<WechatPairedAccountEntity> rawAccounts = readRawAccounts(instance, remarks);
-    Set<String> protectedAccountIds = new LinkedHashSet<>(bindLinkMapper.listProtectedAccountIds(instance.getId()));
-    List<WechatPairedAccountEntity> ghostAccounts = new ArrayList<>();
     String now = Instant.now().toString();
+    Set<String> protectedAccountIds = new LinkedHashSet<>(
+        bindLinkMapper.listProtectedAccountIds(instance.getId(), now));
+    List<WechatPairedAccountEntity> ghostAccounts = new ArrayList<>();
     for (WechatPairedAccountEntity raw : rawAccounts) {
       WechatPairedAccountEntity existingAccount = existingByAccountId.get(raw.getAccountId());
       if (existingAccount == null) {

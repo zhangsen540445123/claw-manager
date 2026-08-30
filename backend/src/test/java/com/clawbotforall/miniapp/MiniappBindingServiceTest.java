@@ -1,10 +1,14 @@
 package com.clawbotforall.miniapp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.clawbotforall.externalapi.ExternalApiIdentity;
 import com.clawbotforall.externalapi.ExternalApiIdentityService;
 import com.clawbotforall.instance.InstanceAggregateMapper;
+import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.openviking.OpenVikingSettingsService;
 import com.clawbotforall.wechat.PublicWechatBindLink;
 import com.clawbotforall.wechat.WechatBindLinkEntity;
@@ -82,6 +86,40 @@ class MiniappBindingServiceTest {
     MiniappBindLinkResult result = service.getBindLink("wbl_sensitive_token", "");
 
     assertThat(result.canCreateUserKey()).isFalse();
+  }
+
+  @Test
+  void creatingAnotherQrLinkDoesNotDowngradeAConnectedBinding() {
+    when(openVikingSettingsService.effectiveSettings()).thenReturn(
+        new com.clawbotforall.openviking.OpenVikingEffectiveSettings(
+            "", true, "account_1", "salt_1", "", "", "", ""));
+    when(identityService.resolve("openid_1", "salt_1"))
+        .thenReturn(new ExternalApiIdentity("openid_1", "openid_hash_1", "api_1", "api:openid_hash_1"));
+    MiniappUserBindingEntity binding = new MiniappUserBindingEntity();
+    binding.setOpenidHash("openid_hash_1");
+    binding.setOpenid("openid_1");
+    binding.setInstanceId("inst_1");
+    binding.setWechatUserId("wechat_user_1");
+    binding.setAgentId("user_11111111111111111111111111111111");
+    binding.setOpenvikingUserId("wx_11111111111111111111111111111111");
+    binding.setBindStatus("connected");
+    when(bindingMapper.findByOpenidHashForUpdate("openid_hash_1")).thenReturn(binding);
+    WechatPairedAccountEntity account = new WechatPairedAccountEntity();
+    account.setAccountId("account_1");
+    when(instanceMapper.findWechatAccountByWechatUserId("wechat_user_1")).thenReturn(account);
+    when(wechatBindLinkService.createMiniappLink(
+        "openid_hash_1", "inst_1", "account_1", "https://miniapp.example.test"))
+        .thenReturn(publicLink("token_2", "created"));
+
+    MiniappBindLinkResult result = service.createWechatBindLink(
+        "openid_1", "https://miniapp.example.test");
+
+    verify(bindingMapper).updateBindTokenPreservingStatus(
+        "openid_hash_1", "token_2", "2026-07-19T12:00:00Z");
+    verify(bindingMapper, never()).updateBindToken(
+        "openid_hash_1", "token_2", "2026-07-19T12:00:00Z");
+    assertThat(result.canCreateUserKey()).isTrue();
+    assertThat(binding.getBindStatus()).isEqualTo("connected");
   }
 
   private static PublicWechatBindLink publicLink(String token, String status) {

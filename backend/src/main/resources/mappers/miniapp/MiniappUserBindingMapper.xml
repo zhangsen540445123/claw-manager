@@ -22,6 +22,14 @@
     LIMIT 1
   </select>
 
+  <select id="findByOpenidHashForUpdate" resultMap="MiniappUserBindingMap">
+    SELECT *
+    FROM miniapp_user_bindings
+    WHERE openid_hash = #{openidHash}
+    LIMIT 1
+    FOR UPDATE
+  </select>
+
   <select id="findByWechatUserId" resultMap="MiniappUserBindingMap">
     SELECT *
     FROM miniapp_user_bindings
@@ -74,6 +82,13 @@
     UPDATE miniapp_user_bindings
     SET current_bind_token = #{currentBindToken},
         bind_status = 'waiting_scan',
+        updated_at = #{updatedAt}
+    WHERE openid_hash = #{openidHash}
+  </update>
+
+  <update id="updateBindTokenPreservingStatus">
+    UPDATE miniapp_user_bindings
+    SET current_bind_token = #{currentBindToken},
         updated_at = #{updatedAt}
     WHERE openid_hash = #{openidHash}
   </update>

@@ -219,13 +219,21 @@ public class WechatBindLinkService {
         instanceId,
         "该小程序用户绑定的 OpenClaw 实例暂不可用，请先启动并等待实例就绪。"
     );
+    String normalizedTargetAccountId = defaultString(targetAccountId).trim();
     String now = Instant.now().toString();
+    WechatBindLinkEntity existing = linkMapper.findActiveMiniappLinkForUpdate(
+        normalizedHash, instance.getId(), normalizedTargetAccountId, now);
+    if (existing != null) {
+      log.info("小程序复用微信扫码链接：instanceId={}, openidHash={}, status={}",
+          instance.getId(), normalizedHash, defaultString(existing.getStatus()));
+      return publicLink(existing, origin);
+    }
     WechatBindLinkEntity link = new WechatBindLinkEntity();
     link.setToken(randomToken());
-    link.setMode(hasText(targetAccountId) ? "existing" : "new");
+    link.setMode(hasText(normalizedTargetAccountId) ? "existing" : "new");
     link.setPhone(null);
     link.setInstanceId(instance.getId());
-    link.setTargetAccountId(hasText(targetAccountId) ? targetAccountId : targetAccountIdFromToken(link.getToken()));
+    link.setTargetAccountId(hasText(normalizedTargetAccountId) ? normalizedTargetAccountId : targetAccountIdFromToken(link.getToken()));
     link.setMiniappOpenidHash(normalizedHash);
     link.setStatus("created");
     link.setCreatedAt(now);

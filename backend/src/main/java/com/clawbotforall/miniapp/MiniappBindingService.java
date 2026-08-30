@@ -69,7 +69,7 @@ public class MiniappBindingService {
   @Transactional
   public MiniappBindLinkResult createWechatBindLink(String openid, String origin) {
     ExternalApiIdentity identity = resolveOpenid(openid);
-    MiniappUserBindingEntity binding = bindingMapper.findByOpenidHash(identity.openidHash());
+    MiniappUserBindingEntity binding = bindingMapper.findByOpenidHashForUpdate(identity.openidHash());
     if (binding == null) {
       InstanceEntity selected = instanceService.selectLeastLoadedInstance();
       String now = clock.instant().toString();
@@ -96,9 +96,15 @@ public class MiniappBindingService {
         targetAccountId,
         origin
     );
-    bindingMapper.updateBindToken(identity.openidHash(), link.token(), clock.instant().toString());
+    String updatedAt = clock.instant().toString();
+    if (hasCompletePersistedIdentity(binding)) {
+      bindingMapper.updateBindTokenPreservingStatus(identity.openidHash(), link.token(), updatedAt);
+    } else {
+      bindingMapper.updateBindToken(identity.openidHash(), link.token(), updatedAt);
+      binding.setBindStatus("waiting_scan");
+    }
     binding.setCurrentBindToken(link.token());
-    binding.setBindStatus("waiting_scan");
+    binding.setUpdatedAt(updatedAt);
     return result(identity.openid(), binding, link);
   }
 
@@ -135,6 +141,13 @@ public class MiniappBindingService {
 
   private ExternalApiIdentity resolveOpenid(String openid) {
     return identityService.resolve(openid, openVikingSettingsService.effectiveSettings().identityHashSecret());
+  }
+
+  private static boolean hasCompletePersistedIdentity(MiniappUserBindingEntity binding) {
+    return binding != null
+        && !blank(binding.getWechatUserId())
+        && !blank(binding.getAgentId())
+        && !blank(binding.getOpenvikingUserId());
   }
 
   private static boolean blank(String value) {

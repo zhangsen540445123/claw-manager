@@ -40,6 +40,29 @@
     FOR UPDATE
   </select>
 
+  <select id="findActiveMiniappLinkForUpdate" resultMap="WechatBindLinkMap">
+    SELECT *
+    FROM wechat_bind_links
+    WHERE miniapp_openid_hash = #{miniappOpenidHash}
+      AND instance_id = #{instanceId}
+      AND status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
+      AND (expires_at IS NULL OR expires_at &gt; #{now})
+      AND (
+        (
+          (#{targetAccountId} IS NULL OR #{targetAccountId} = '')
+          AND mode = 'new'
+        )
+        OR (
+          #{targetAccountId} IS NOT NULL
+          AND #{targetAccountId} != ''
+          AND target_account_id COLLATE utf8mb4_unicode_ci = #{targetAccountId} COLLATE utf8mb4_unicode_ci
+        )
+      )
+    ORDER BY created_at DESC, token ASC
+    LIMIT 1
+    FOR UPDATE
+  </select>
+
   <sql id="AdminLinkFilters">
     <where>
       <if test="mode != null and mode != ''">
@@ -94,7 +117,13 @@
       SELECT target_account_id COLLATE utf8mb4_unicode_ci AS account_id
       FROM wechat_bind_links
       WHERE instance_id = #{instanceId}
-        AND status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')
+        AND (
+          status IN ('cleaning', 'cleanup_failed')
+          OR (
+            status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
+            AND (expires_at IS NULL OR expires_at &gt; #{now})
+          )
+        )
       UNION ALL
       SELECT old_account_id COLLATE utf8mb4_unicode_ci AS account_id
       FROM wechat_rebind_operations
@@ -119,7 +148,13 @@
     SELECT *
     FROM wechat_bind_links
     WHERE instance_id = #{instanceId}
-      AND status IN ('waiting_scan', 'scanned', 'initializing', 'cleaning', 'cleanup_failed')
+      AND (
+        status IN ('cleaning', 'cleanup_failed')
+        OR (
+          status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
+          AND (expires_at IS NULL OR expires_at &gt; #{now})
+        )
+      )
       AND (
         (#{phone} IS NOT NULL AND #{phone} != ''
           AND phone COLLATE utf8mb4_unicode_ci = #{phone} COLLATE utf8mb4_unicode_ci)

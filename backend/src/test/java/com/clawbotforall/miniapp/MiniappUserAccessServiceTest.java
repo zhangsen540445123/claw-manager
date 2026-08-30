@@ -293,6 +293,43 @@ class MiniappUserAccessServiceTest {
   }
 
   @Test
+  void repairsLegacyWaitingScanStatusWhenPersistedIdentityIsComplete() {
+    MiniappUserBindingEntity binding = binding(
+        "hash_1", "openid_1", "waiting_scan", "inst_1", "wechat_user_1", "wx_persisted");
+    binding.setCurrentBindToken("token_rejected");
+    WechatBindLinkEntity link = new WechatBindLinkEntity();
+    link.setToken("token_rejected");
+    link.setStatus("rejected");
+    when(bindingMapper.findByOpenidHash("hash_1")).thenReturn(binding);
+    when(bindLinkMapper.findByToken("token_rejected")).thenReturn(link);
+
+    MiniappUserBindingEntity result = service.reconcileBinding("hash_1");
+
+    assertThat(result.getBindStatus()).isEqualTo("connected");
+    verify(bindingMapper).updateStatus("hash_1", "connected", "2026-07-04T10:00:00Z");
+    verify(userAgentIdentityService, never()).resolve("inst_1", "wechat_user_1");
+  }
+
+  @Test
+  void keepsLegacyWaitingScanStatusWhileCurrentLinkIsStillActive() {
+    MiniappUserBindingEntity binding = binding(
+        "hash_1", "openid_1", "waiting_scan", "inst_1", "wechat_user_1", "wx_persisted");
+    binding.setCurrentBindToken("token_active");
+    WechatBindLinkEntity link = new WechatBindLinkEntity();
+    link.setToken("token_active");
+    link.setStatus("waiting_scan");
+    link.setExpiresAt("2026-07-04T11:00:00Z");
+    when(bindingMapper.findByOpenidHash("hash_1")).thenReturn(binding);
+    when(bindLinkMapper.findByToken("token_active")).thenReturn(link);
+
+    MiniappUserBindingEntity result = service.reconcileBinding("hash_1");
+
+    assertThat(result.getBindStatus()).isEqualTo("waiting_scan");
+    verify(bindingMapper, never()).updateStatus("hash_1", "connected", "2026-07-04T10:00:00Z");
+    verify(userAgentIdentityService, never()).resolve("inst_1", "wechat_user_1");
+  }
+
+  @Test
   void keepsHistoricalConnectedBindingIncompleteWithoutLazyIdentityCreation() {
     MiniappUserBindingEntity binding = binding(
         "hash_1", "openid_1", "connected", "inst_1", "historical_wechat_user", "wx_historical");
