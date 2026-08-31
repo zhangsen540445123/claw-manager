@@ -30,6 +30,7 @@ describe("claw-manager-api plugin entry", () => {
     const logs: string[] = [];
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: (message: string) => logs.push(message) },
       config: { session: {} },
       agent: {
@@ -62,6 +63,7 @@ describe("claw-manager-api plugin entry", () => {
     const gatewayMethods = new Map<string, (input: any) => Promise<void> | void>();
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: { agents: { list: [] }, bindings: [] },
       runtime: { channel: {} },
@@ -93,6 +95,7 @@ describe("claw-manager-api plugin entry", () => {
     };
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg,
       runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
@@ -142,7 +145,9 @@ describe("claw-manager-api plugin entry", () => {
       return { result, nextConfig: currentCfg };
     };
     const api = {
-      registrationMode: "full", logger: { info: () => {}, warn: () => {}, error: () => {} },
+      registrationMode: "full",
+      on: vi.fn(),
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg, runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
       registerGatewayMethod: (name: string, handler: (input: any) => Promise<void> | void) => gatewayMethods.set(name, handler),
       registerChannel: () => {},
@@ -181,7 +186,9 @@ describe("claw-manager-api plugin entry", () => {
       return { result, nextConfig: currentCfg };
     };
     const api = {
-      registrationMode: "full", logger: { info: () => {}, warn: () => {}, error: () => {} },
+      registrationMode: "full",
+      on: vi.fn(),
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg, runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
       registerGatewayMethod: (name: string, handler: (input: any) => Promise<void> | void) => gatewayMethods.set(name, handler),
       registerChannel: () => {},
@@ -216,6 +223,7 @@ describe("claw-manager-api plugin entry", () => {
     };
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg,
       runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
@@ -253,6 +261,7 @@ describe("claw-manager-api plugin entry", () => {
     };
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg,
       runtime: {
@@ -284,6 +293,7 @@ describe("claw-manager-api plugin entry", () => {
     let mutationCount = 0;
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg,
       runtime: {
@@ -343,6 +353,7 @@ describe("claw-manager-api plugin entry", () => {
       };
       const api = {
         registrationMode: "full",
+        on: vi.fn(),
         logger: { info: () => {}, warn: () => {}, error: () => {} },
         config: currentCfg,
         runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
@@ -384,6 +395,7 @@ describe("claw-manager-api plugin entry", () => {
     };
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: currentCfg,
       runtime: { channel: {}, config: { current: () => currentCfg, mutateConfigFile } },
@@ -412,6 +424,7 @@ describe("claw-manager-api plugin entry", () => {
     });
     const api = {
       registrationMode: "full",
+      on: vi.fn(),
       logger: { info: () => {}, warn: () => {}, error: () => {} },
       config: { session: {} },
       runtime: { channel: {} },

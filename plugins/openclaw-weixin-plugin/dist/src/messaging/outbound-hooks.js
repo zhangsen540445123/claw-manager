@@ -3,6 +3,25 @@ import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { logger } from "../util/logger.js";
 const CHANNEL_ID = "openclaw-weixin";
 /**
+ * Build the context passed to OpenClaw's message_sending hook.
+ *
+ * Runtime heartbeat metadata is deliberately opt-in: ordinary Weixin
+ * deliveries must not acquire heartbeat markers merely because this helper
+ * is used.
+ */
+export function buildWeixinMessageSendingContext(input) {
+    return {
+        channelId: CHANNEL_ID,
+        ...(input.accountId ? { accountId: input.accountId } : {}),
+        ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.isHeartbeat !== undefined ? { isHeartbeat: input.isHeartbeat } : {}),
+        ...(input.trigger ? { trigger: input.trigger } : {}),
+        ...(input.runKind ? { runKind: input.runKind } : {}),
+        ...(input.runType ? { runType: input.runType } : {}),
+    };
+}
+/**
  * Run message_sending hook before sending.
  * Returns the (possibly modified) text content plus a cancelled flag.
  * Hook errors are caught and logged — sending proceeds regardless.
@@ -22,7 +41,15 @@ export async function applyWeixinMessageSendingHook(params) {
                 runId: params.runId,
                 ...(params.mediaUrl ? { mediaUrls: [params.mediaUrl] } : {}),
             },
-        }, { channelId: CHANNEL_ID, accountId: params.accountId });
+        }, buildWeixinMessageSendingContext({
+            accountId: params.accountId,
+            sessionKey: params.sessionKey,
+            runId: params.runId,
+            isHeartbeat: params.isHeartbeat,
+            trigger: params.trigger,
+            runKind: params.runKind,
+            runType: params.runType,
+        }));
         if (hookResult?.cancel) {
             return { cancelled: true, text: params.text };
         }

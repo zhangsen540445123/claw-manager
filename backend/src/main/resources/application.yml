@@ -70,3 +70,8 @@ clawbot:
     gateway-ready-check-interval-ms: ${OPENCLAW_GATEWAY_READY_CHECK_INTERVAL_MS:10000}
     gateway-ready-probe-timeout-ms: ${OPENCLAW_GATEWAY_READY_PROBE_TIMEOUT_MS:5000}
     control-ui-allowed-origins: ${OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS:*}
+    agent-heartbeat-enabled: ${OPENCLAW_AGENT_HEARTBEAT_ENABLED:false}
+    agent-heartbeat-every: ${OPENCLAW_AGENT_HEARTBEAT_EVERY:30m}
+    agent-heartbeat-isolated-session: ${OPENCLAW_AGENT_HEARTBEAT_ISOLATED_SESSION:true}
+    agent-heartbeat-light-context: ${OPENCLAW_AGENT_HEARTBEAT_LIGHT_CONTEXT:true}
+    agent-heartbeat-direct-policy: ${OPENCLAW_AGENT_HEARTBEAT_DIRECT_POLICY:block}

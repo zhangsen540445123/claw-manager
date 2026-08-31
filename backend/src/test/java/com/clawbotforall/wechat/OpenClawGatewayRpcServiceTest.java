@@ -152,6 +152,37 @@ class OpenClawGatewayRpcServiceTest {
     assertThat(result.success()).isTrue();
   }
 
+  @Test
+  void resetSessionUsesOfficialAdminRpcWithoutReason() {
+    completeExecWith("{\"ok\":true}");
+
+    service.resetSession(instance(), "agent:user-secret:main");
+
+    String script = capturedCommand.get().get(3);
+    assertThat(script).contains("method: \"sessions.reset\"");
+    assertThat(script).contains("\"key\":\"agent:user-secret:main\"");
+    assertThat(script).doesNotContain("reason");
+  }
+
+  @Test
+  void resetSessionRejectsBlankSessionKeyBeforeCallingRuntime() {
+    assertThatThrownBy(() -> service.resetSession(instance(), "  "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Session Key");
+
+    verifyNoInteractions(openClawRuntime);
+  }
+
+  @Test
+  void resetSessionRequiresSuccessfulGatewayPayload() {
+    completeExecWith("{\"ok\":false,\"error\":\"not reset\"}");
+
+    assertThatThrownBy(() -> service.resetSession(instance(), "agent:user-secret:main"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("sessions.reset")
+        .hasMessageContaining("ok");
+  }
+
   private void completeExecWith(String output) {
     doAnswer(invocation -> {
       @SuppressWarnings("unchecked")

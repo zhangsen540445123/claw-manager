@@ -7,8 +7,41 @@ import {
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 
 import { logger } from "../util/logger.js";
+import type { HeartbeatMessageContext } from "./heartbeat-isolation.js";
 
 const CHANNEL_ID = "openclaw-weixin";
+
+export type WeixinMessageSendingContextInput = {
+  accountId?: string;
+  sessionKey?: string;
+  runId?: string;
+  isHeartbeat?: boolean;
+  trigger?: string;
+  runKind?: string;
+  runType?: string;
+};
+
+/**
+ * Build the context passed to OpenClaw's message_sending hook.
+ *
+ * Runtime heartbeat metadata is deliberately opt-in: ordinary Weixin
+ * deliveries must not acquire heartbeat markers merely because this helper
+ * is used.
+ */
+export function buildWeixinMessageSendingContext(
+  input: WeixinMessageSendingContextInput,
+): HeartbeatMessageContext {
+  return {
+    channelId: CHANNEL_ID,
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.isHeartbeat !== undefined ? { isHeartbeat: input.isHeartbeat } : {}),
+    ...(input.trigger ? { trigger: input.trigger } : {}),
+    ...(input.runKind ? { runKind: input.runKind } : {}),
+    ...(input.runType ? { runType: input.runType } : {}),
+  };
+}
 
 /**
  * Run message_sending hook before sending.
@@ -21,6 +54,11 @@ export async function applyWeixinMessageSendingHook(params: {
   accountId?: string;
   mediaUrl?: string;
   runId?: string;
+  sessionKey?: string;
+  isHeartbeat?: boolean;
+  trigger?: string;
+  runKind?: string;
+  runType?: string;
 }): Promise<{ cancelled: boolean; text: string }> {
   const hookRunner = getGlobalHookRunner();
   if (!hookRunner?.hasHooks("message_sending")) {
@@ -38,7 +76,15 @@ export async function applyWeixinMessageSendingHook(params: {
           ...(params.mediaUrl ? { mediaUrls: [params.mediaUrl] } : {}),
         },
       },
-      { channelId: CHANNEL_ID, accountId: params.accountId },
+      buildWeixinMessageSendingContext({
+        accountId: params.accountId,
+        sessionKey: params.sessionKey,
+        runId: params.runId,
+        isHeartbeat: params.isHeartbeat,
+        trigger: params.trigger,
+        runKind: params.runKind,
+        runType: params.runType,
+      }) as Parameters<typeof hookRunner.runMessageSending>[1],
     );
     if (hookResult?.cancel) {
       return { cancelled: true, text: params.text };

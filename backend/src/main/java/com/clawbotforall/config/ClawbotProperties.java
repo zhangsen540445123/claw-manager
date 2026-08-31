@@ -38,7 +38,12 @@ public record ClawbotProperties(
           1_800_000,
           10_000,
           5_000,
-          List.of("*")
+          List.of("*"),
+          false,
+          "30m",
+          true,
+          true,
+          "block"
       );
     }
   }
@@ -61,7 +66,12 @@ public record ClawbotProperties(
       long gatewayReadyTimeoutMs,
       long gatewayReadyCheckIntervalMs,
       long gatewayReadyProbeTimeoutMs,
-      List<String> controlUiAllowedOrigins
+      List<String> controlUiAllowedOrigins,
+      boolean agentHeartbeatEnabled,
+      String agentHeartbeatEvery,
+      boolean agentHeartbeatIsolatedSession,
+      boolean agentHeartbeatLightContext,
+      String agentHeartbeatDirectPolicy
   ) {
     public Runtime(
         String runnerImage,
@@ -78,7 +88,8 @@ public record ClawbotProperties(
       this(
           runnerImage, runnerPullTimeoutMs, runnerCpus, runnerMemory, "", 0,
           wechatBindTimeoutMs, wechatQrTtlMs, gatewayReadyTimeoutMs,
-          gatewayReadyCheckIntervalMs, gatewayReadyProbeTimeoutMs, controlUiAllowedOrigins
+          gatewayReadyCheckIntervalMs, gatewayReadyProbeTimeoutMs, controlUiAllowedOrigins,
+          false, "30m", true, true, "block"
       );
     }
 
@@ -89,6 +100,24 @@ public record ClawbotProperties(
       if (controlUiAllowedOrigins == null) {
         controlUiAllowedOrigins = List.of();
       }
+      agentHeartbeatEvery = normalizeHeartbeatEvery(agentHeartbeatEvery);
+      if (!agentHeartbeatIsolatedSession) {
+        throw new IllegalArgumentException("OpenClaw Agent Heartbeat 必须使用独立 Session。");
+      }
+      agentHeartbeatDirectPolicy = agentHeartbeatDirectPolicy == null
+          ? "block"
+          : agentHeartbeatDirectPolicy.trim().toLowerCase(java.util.Locale.ROOT);
+      if (!"block".equals(agentHeartbeatDirectPolicy)) {
+        throw new IllegalArgumentException("OpenClaw Agent Heartbeat directPolicy 只允许 block。");
+      }
+    }
+
+    private static String normalizeHeartbeatEvery(String value) {
+      String normalized = value == null ? "30m" : value.trim().toLowerCase(java.util.Locale.ROOT);
+      if (!normalized.matches("[1-9][0-9]*(ms|s|m|h|d)")) {
+        throw new IllegalArgumentException("OPENCLAW_AGENT_HEARTBEAT_EVERY 格式无效。");
+      }
+      return normalized;
     }
   }
 }

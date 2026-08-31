@@ -21,6 +21,17 @@ class ClawbotPropertiesTest {
   }
 
   @Test
+  void defaultAgentHeartbeatIsDisabledAndSafe() {
+    ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
+
+    assertThat(properties.runtime().agentHeartbeatEnabled()).isFalse();
+    assertThat(properties.runtime().agentHeartbeatEvery()).isEqualTo("30m");
+    assertThat(properties.runtime().agentHeartbeatIsolatedSession()).isTrue();
+    assertThat(properties.runtime().agentHeartbeatLightContext()).isTrue();
+    assertThat(properties.runtime().agentHeartbeatDirectPolicy()).isEqualTo("block");
+  }
+
+  @Test
   void defaultRunnerResourcesRemainStable() {
     ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
 

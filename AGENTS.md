@@ -98,6 +98,8 @@ docker compose -f compose.yaml -f compose.local.yaml up -d --build
 - Control UI 代理曾修复过以下真实问题：Gateway 健康检查使用容器网络目标；HTTP proxy 固定 HTTP/1.1；Nginx 仅真实 Upgrade 时设置 `Connection: upgrade`；`dashboardUrl` 使用 `#token=` fragment 注入 Gateway token；WebSocket proxy 握手传递登录用户、拼接上游分片消息，并透传浏览器 `Origin`。
 - `/ws` 握手阶段需要从 Spring Security 上下文恢复 Principal，登录态浏览器应直接完成 STOMP `CONNECTED`，前端显示实时状态。
 - `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` 未显式设置时默认使用 `*`，即 Control UI 允许任意 Origin；生产环境可通过环境变量收紧来源范围。
+- OpenClaw Agent Heartbeat 默认关闭（`every: "0m"`）；如显式启用，必须使用独立 `:heartbeat` Session、轻量上下文和 `directPolicy: "block"`。API Channel monitor heartbeat 与 SSE 保活不受影响。
+- Heartbeat 与 Cron 定时任务必须分开处理；普通用户合法的 `2018`、`-1`、`HEARTBEAT_OK` 不允许被全局过滤。历史混合 Session 优先通过 `/new` 或官方 `sessions.reset` 轮换，不直接删除普通 Session，也不删除 OpenViking 服务端记忆。
 - 真实实例验证曾确认 `/proxy/{instanceId}/` 可返回 OpenClaw Control UI HTML，静态 JS 资源可通过代理下载，WebSocket 代理可收到 Gateway `connect.challenge`。
 
 更完整的迁移记录见 `docs/history/refactor-memory.md`。

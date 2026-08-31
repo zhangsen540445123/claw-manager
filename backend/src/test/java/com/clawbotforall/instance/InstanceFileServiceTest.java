@@ -56,6 +56,15 @@ class InstanceFileServiceTest {
         .extractingByKey("memoryFlush")
         .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
         .containsEntry("enabled", false);
+    assertThat(defaults.get("heartbeat"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("every", "0m")
+        .containsEntry("isolatedSession", true)
+        .containsEntry("lightContext", true)
+        .containsEntry("includeSystemPromptSection", false)
+        .containsEntry("target", "none")
+        .containsEntry("directPolicy", "block")
+        .containsEntry("ackMaxChars", 300);
 
     @SuppressWarnings("unchecked")
     Map<String, Object> gateway = (Map<String, Object>) config.get("gateway");
@@ -254,6 +263,70 @@ class InstanceFileServiceTest {
   }
 
   @Test
+  void rewritesLegacyHeartbeatConfigToDisabledSafeDefaults() throws Exception {
+    ClawbotProperties properties = testProperties();
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+    Path homeDir = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home");
+    Files.createDirectories(homeDir);
+    objectMapper.writeValue(homeDir.resolve("openclaw.json").toFile(), Map.of(
+        "agents", Map.of(
+            "defaults", Map.of(
+                "workspace", "/old-workspace",
+                "heartbeat", Map.of(
+                    "every", "30m",
+                    "isolatedSession", false,
+                    "target", "last",
+                    "directPolicy", "allow"
+                )
+            )
+        )
+    ));
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Map<String, Object> config = objectMapper.readValue(
+        homeDir.resolve("openclaw.json").toFile(),
+        new TypeReference<>() {}
+    );
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("defaults")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("heartbeat")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("every", "0m")
+        .containsEntry("isolatedSession", true)
+        .containsEntry("target", "none")
+        .containsEntry("directPolicy", "block");
+  }
+
+  @Test
+  void writesExplicitlyEnabledHeartbeatIntervalWithoutRelaxingIsolation() throws Exception {
+    ClawbotProperties properties = testProperties(true, "15m");
+    InstanceCreationDraft draft = createDraft("OpenClaw");
+    InstanceFileService fileService = new InstanceFileService(properties, objectMapper, ImageGenerationSettingsProvider.disabled());
+
+    fileService.writeInstanceFiles(draft.instance(), List.of(draft.model()));
+
+    Path configPath = tempDir.resolve("instances").resolve(draft.instance().getId()).resolve("home").resolve("openclaw.json");
+    Map<String, Object> config = objectMapper.readValue(configPath.toFile(), new TypeReference<>() {});
+    assertThat(config.get("agents"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("defaults")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .extractingByKey("heartbeat")
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("every", "15m")
+        .containsEntry("isolatedSession", true)
+        .containsEntry("lightContext", true)
+        .containsEntry("includeSystemPromptSection", false)
+        .containsEntry("target", "none")
+        .containsEntry("directPolicy", "block")
+        .containsEntry("ackMaxChars", 300);
+  }
+
+  @Test
   void preservesDynamicUserAgentsAndBindingsWhenRewritingManagedConfig() throws Exception {
     ClawbotProperties properties = testProperties();
     InstanceCreationDraft draft = createDraft("OpenClaw");
@@ -408,6 +481,10 @@ class InstanceFileServiceTest {
   }
 
   private ClawbotProperties testProperties() {
+    return testProperties(false, "30m");
+  }
+
+  private ClawbotProperties testProperties(boolean heartbeatEnabled, String heartbeatEvery) {
     return new ClawbotProperties(
         new ClawbotProperties.Paths(tempDir.toString()),
         new ClawbotProperties.Admin("", "平台管理员", ""),
@@ -417,12 +494,19 @@ class InstanceFileServiceTest {
             600_000,
             "1.0",
             "1g",
+            "2g",
+            1536,
             600_000,
             120_000,
             1_800_000,
             10_000,
             5_000,
-            List.of("*")
+            List.of("*"),
+            heartbeatEnabled,
+            heartbeatEvery,
+            true,
+            true,
+            "block"
         )
     );
   }
