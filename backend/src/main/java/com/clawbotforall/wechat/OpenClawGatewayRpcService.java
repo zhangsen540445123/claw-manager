@@ -59,6 +59,30 @@ public class OpenClawGatewayRpcService {
     log.debug("API Channel monitor is auto-started by the plugin runtime: instanceId={}", instance.getId());
   }
 
+
+  /**
+   * 通过 OpenClaw 官方 Gateway 管理 RPC 轮换指定 Session。
+   *
+   * <p>只传递 Session Key，不附加 reason，也不直接改写或删除 Session 文件。</p>
+   */
+  public void resetSession(InstanceEntity instance, String sessionKey) {
+    String normalizedSessionKey = defaultString(sessionKey).trim();
+    if (normalizedSessionKey.isEmpty()) {
+      throw new IllegalArgumentException("Session Key 不能为空。");
+    }
+    JsonNode result = runGatewayJsonMethodRaw(
+        instance,
+        "sessions.reset",
+        Map.of("key", normalizedSessionKey)
+    );
+    requireTrue("sessions.reset", result, "ok");
+    log.info(
+        "OpenClaw Session 已通过官方 RPC 轮换: instanceId={} sessionHash={}",
+        instance.getId(),
+        WechatLogSanitizer.identityHashPreview(normalizedSessionKey)
+    );
+  }
+
   public void ensureUserAgent(
       InstanceEntity instance,
       String agentId,

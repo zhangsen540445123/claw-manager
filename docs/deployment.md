@@ -37,8 +37,42 @@ http://127.0.0.1:4300
 | `OPENCLAW_RUNNER_MEMORY` | `1g` | 单个 Runner 容器内存限制 |
 | `OPENCLAW_GATEWAY_READY_TIMEOUT_MS` | `1800000` | Gateway ready 等待窗口，默认 30 分钟 |
 | `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` | `*` | Control UI 允许的来源；默认允许任意 Origin |
+| `OPENCLAW_AGENT_HEARTBEAT_ENABLED` | `false` | OpenClaw Agent Heartbeat 默认关闭；不影响 API 队列 monitor 和 SSE 保活 |
+| `OPENCLAW_AGENT_HEARTBEAT_EVERY` | `30m` | 仅显式启用 Agent Heartbeat 时使用的周期 |
+| `OPENCLAW_AGENT_HEARTBEAT_ISOLATED_SESSION` | `true` | Heartbeat 必须使用独立 Session，不能复用微信/API 主会话 |
+| `OPENCLAW_AGENT_HEARTBEAT_LIGHT_CONTEXT` | `true` | Heartbeat 使用轻量上下文 |
+| `OPENCLAW_AGENT_HEARTBEAT_DIRECT_POLICY` | `block` | 禁止 Heartbeat 结果直接投递到微信/API 用户 |
 
 OpenViking 配置不写入 `compose.yaml`，统一在管理员后台“OpenViking预设”中管理。
+
+
+## Agent Heartbeat 与定时任务
+
+默认关闭的是会调用 Agent/模型的 OpenClaw Agent Heartbeat。API Channel 队列 monitor heartbeat 和 SSE 长连接保活仍保持启用，它们不会进入用户 Session。
+
+默认生成的 `openclaw.json` 包含：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "heartbeat": {
+        "every": "0m",
+        "isolatedSession": true,
+        "lightContext": true,
+        "includeSystemPromptSection": false,
+        "target": "none",
+        "directPolicy": "block",
+        "ackMaxChars": 300
+      }
+    }
+  }
+}
+```
+
+Cron 定时任务与 Agent Heartbeat 是两套机制。关闭 Agent Heartbeat 不会删除 Cron 任务，但启用且配置为 `wakeMode=next-heartbeat` 的 Cron 任务可能无法再被唤醒；部署前应使用后端只读扫描器检查这类依赖并单独调整 Cron 任务。
+
+修改 Heartbeat 环境变量后需要重新创建 API 容器。已有实例还需要重新生成 `openclaw.json` 并重启 Gateway，旧配置才会被覆盖。不要只执行 `docker compose restart api`。API 启动后会延迟执行一次只读扫描，随后默认每 5 分钟扫描一次；扫描只生成脱敏摘要，不会自动删除或轮换 Session，也不会修改 Cron 任务。
 
 ## 并行端口
 

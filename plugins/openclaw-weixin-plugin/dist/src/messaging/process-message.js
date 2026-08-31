@@ -434,6 +434,7 @@ export async function processOneMessage(full, deps) {
                 accountId: deps.accountId,
                 mediaUrl,
                 runId,
+                sessionKey: route.sessionKey,
             });
             if (sendingResult.cancelled) {
                 logger.info(`outbound: cancelled by message_sending hook to=${senderForLog}`);

@@ -104,6 +104,29 @@ OpenClaw API Channel 已请求启动，但未检测到队列 monitor heartbeat
 4. Runner 挂载目录下 `.openclaw/claw-manager-api` 是否能创建 `requests`、`streams`、`responses` 等目录。
 5. 若日志出现 `channels.start invalid channel`，优先确认插件是否已在 Gateway 启动时完成注册。
 
+
+## 微信或 API 会话出现 HEARTBEAT_OK、2018、-1
+
+先区分三类机制：
+
+- OpenClaw Agent Heartbeat：可能调用模型和创建 Session，本项目默认关闭。
+- API Channel monitor heartbeat：只检查队列存活，保持启用。
+- API SSE heartbeat：只保持长连接，保持启用。
+
+排查与处理：
+
+1. 检查实例 `openclaw.json` 中 `agents.defaults.heartbeat.every` 是否为 `0m`。
+2. 检查 Heartbeat 是否使用以 `:heartbeat` 结尾的独立 Session；不要仅凭正文中出现数字、`HEARTBEAT_OK` 就认定为 Heartbeat。
+3. 后端 `HeartbeatSessionScanner` 只读扫描本地 Session 索引、明确的 Heartbeat 元数据和 active turn，结果仅包含脱敏 Hash；`ACTIVE_PROTECTED`、`UNKNOWN` 不允许自动清理。
+4. 后端 `CronHeartbeatDependencyScanner` 单独报告启用且 `wakeMode=next-heartbeat` 的 Cron 任务；不要把 Cron 返回的合法数字按 Heartbeat 全局过滤。
+5. 对已经混入普通微信/API 主会话的历史内容，优先让用户发送 `/new` 创建新的普通 Session，或由管理员通过官方 `sessions.reset` RPC 轮换指定 Session。
+6. `/new` 和 `sessions.reset` 不删除 OpenViking 服务端用户或远端记忆，也不应直接改写历史 Session JSONL。
+7. 对明确的 `:heartbeat` 专用 Session，只在 Gateway 停止且没有 active turn 后归档；不要直接删除普通 Session 文件。
+8. 修改环境变量后重新创建 API 容器，再对已有实例重新生成配置并重启 Gateway。API 启动后会延迟执行一次只读扫描，随后默认每 5 分钟扫描一次；后台扫描失败不会阻塞 API，也不会自动删除或修改 Session。
+
+出站插件只在明确的 `:heartbeat` Session 上阻止投递，不会全局过滤普通用户合法的 `2018`、`-1` 或 `HEARTBEAT_OK` 文本。
+
+
 ## 小程序 API 记忆写到错误用户
 
 小程序聊天应使用 `cm_user_...` 解析到 `miniapp_user_bindings.openviking_user_id=wx_<hash>`，不应新建 `api_<hash>`。排查顺序：

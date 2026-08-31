@@ -209,6 +209,7 @@ public class InstanceFileService {
     defaults.put("compaction", Map.of(
         "memoryFlush", Map.of("enabled", false)
     ));
+    defaults.put("heartbeat", heartbeatConfig());
     if (!models.isEmpty()) {
       InstanceModelEntity primary = models.getFirst();
       Map<String, Object> model = new LinkedHashMap<>();
@@ -223,6 +224,20 @@ public class InstanceFileService {
       defaults.put("model", model);
     }
     return Map.of("defaults", defaults);
+  }
+
+
+  private Map<String, Object> heartbeatConfig() {
+    ClawbotProperties.Runtime runtime = properties.runtime();
+    Map<String, Object> heartbeat = new LinkedHashMap<>();
+    heartbeat.put("every", runtime.agentHeartbeatEnabled() ? runtime.agentHeartbeatEvery() : "0m");
+    heartbeat.put("isolatedSession", true);
+    heartbeat.put("lightContext", runtime.agentHeartbeatLightContext());
+    heartbeat.put("includeSystemPromptSection", false);
+    heartbeat.put("target", "none");
+    heartbeat.put("directPolicy", "block");
+    heartbeat.put("ackMaxChars", 300);
+    return heartbeat;
   }
 
   private Map<String, Object> mergeProviderConfigs(List<InstanceModelEntity> models) {

@@ -17,6 +17,7 @@ import {
 } from "./src/channel.js";
 import type { ApiAssistantAgentEvent, ApiGatewayStartContext } from "./src/channel.js";
 import { setApiConfigRuntime } from "./src/config-runtime.js";
+import { createHeartbeatMessageSendingHook } from "./src/heartbeat-isolation.js";
 
 type ApiLogSink = {
   info?: (message: string) => void;
@@ -331,6 +332,10 @@ const pluginEntry = {
   }),
   register(api: OpenClawPluginApi) {
     setApiConfigRuntime(api.runtime?.config as never);
+    api.on("message_sending", createHeartbeatMessageSendingHook({
+      channelId: "claw-manager-api",
+      log: (message) => api.logger.info(message),
+    }));
     api.registerChannel({ plugin: apiChannelPlugin });
     void installOpenClawInternalAgentEventBridge(api);
     registerApiGatewayStartMethod(api as GatewayMethodApi);
