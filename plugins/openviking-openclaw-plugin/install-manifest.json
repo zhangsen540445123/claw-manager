@@ -1,6 +1,6 @@
 {
   "manifestVersion": "1.0",
-  "pluginVersion": "2026.6.38",
+  "pluginVersion": "2026.6.40",
   "plugin": {
     "id": "openviking",
     "kind": "context-engine",
@@ -21,6 +21,7 @@
       "session-transcript-repair.ts",
       "runtime-utils.ts",
       "recall-trace.ts",
+      "model-call-audit.ts",
       "query-config.ts",
       "adapters/",
       "registries/",
@@ -47,13 +48,13 @@
     "install": true,
     "omitDev": true,
     "build": true,
-    "buildMinOpenclawVersion": "2026.5.3",
+    "buildMinOpenclawVersion": "2026.6.8",
     "buildScript": "build",
     "pruneAfterBuild": true
   },
   "compatibility": {
-    "minOpenclawVersion": "2026.4.8",
-    "recommendedOpenclawVersion": "2026.6.6",
+    "minOpenclawVersion": "2026.6.8",
+    "recommendedOpenclawVersion": "2026.6.8",
     "minOpenvikingVersion": "0.4.5",
     "recommendedOpenvikingVersion": "0.4.5"
   }

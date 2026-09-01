@@ -18,6 +18,8 @@ export type MemoryOpenVikingConfig = {
   clawManagerInternalBaseUrl?: string;
   /** Broker token used only when calling Claw Manager internal OpenViking user-key broker. */
   openVikingBrokerToken?: string;
+  /** Enable best-effort full model input audit reporting to Claw Manager. */
+  modelCallAuditEnabled?: boolean;
   targetUri?: string;
   timeoutMs?: number;
   autoCapture?: boolean;
@@ -130,6 +132,7 @@ const DEFAULT_COMMIT_TOKEN_THRESHOLD = 20000;
 const DEFAULT_COMMIT_KEEP_RECENT_COUNT = 10;
 const DEFAULT_BYPASS_SESSION_PATTERNS: string[] = [];
 const DEFAULT_EMIT_STANDARD_DIAGNOSTICS = false;
+const DEFAULT_MODEL_CALL_AUDIT_ENABLED = true;
 const DEFAULT_PEER_ROLE = "assistant" as const;
 const DEFAULT_PEER_PREFIX = "";
 const DEFAULT_TRACE_RECALL_DIR = "~/.openclaw/openviking/recall-traces";
@@ -354,6 +357,15 @@ function normalizeEnabledTools(cfg: Record<string, unknown>): {
 }
 
 /** True when env is 1 / true / yes (case-insensitive). Used for debug flags without editing plugin JSON. */
+function parseEnvBoolean(name: string, fallback: boolean): boolean {
+  const v = getEnv(name);
+  if (v == null || v.trim() === "") return fallback;
+  const t = v.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(t)) return true;
+  if (["0", "false", "no", "off"].includes(t)) return false;
+  return fallback;
+}
+
 function envFlag(name: string): boolean {
   const v = getEnv(name);
   if (v == null || v === "") {
@@ -399,6 +411,7 @@ export const memoryOpenVikingConfigSchema = {
         "identityHashSecret",
         "clawManagerInternalBaseUrl",
         "openVikingBrokerToken",
+        "modelCallAuditEnabled",
         "targetUri",
         "timeoutMs",
         "autoCapture",
@@ -489,6 +502,10 @@ export const memoryOpenVikingConfigSchema = {
       typeof cfg.openVikingBrokerToken === "string" && cfg.openVikingBrokerToken.trim()
         ? resolveEnvVars(cfg.openVikingBrokerToken).trim()
         : (getEnv("OPENVIKING_BROKER_TOKEN")?.trim() || "");
+    const modelCallAuditEnabled =
+      typeof cfg.modelCallAuditEnabled === "boolean"
+        ? cfg.modelCallAuditEnabled
+        : parseEnvBoolean("MODEL_CALL_AUDIT_ENABLED", DEFAULT_MODEL_CALL_AUDIT_ENABLED);
 
     const recallMaxInjectedChars = Math.max(
       100,
@@ -520,6 +537,7 @@ export const memoryOpenVikingConfigSchema = {
       identityHashSecret,
       clawManagerInternalBaseUrl,
       openVikingBrokerToken,
+      modelCallAuditEnabled,
       targetUri: typeof cfg.targetUri === "string" ? cfg.targetUri : DEFAULT_TARGET_URI,
       timeoutMs: Math.max(1000, Math.floor(toNumber(cfg.timeoutMs, DEFAULT_TIMEOUT_MS))),
       autoCapture: cfg.autoCapture !== false,
@@ -721,6 +739,12 @@ export const memoryOpenVikingConfigSchema = {
       sensitive: true,
       placeholder: "${OPENVIKING_IDENTITY_HASH_SECRET}",
       help: "Shared secret used to derive stable per-sender OpenViking user IDs in trusted deployments.",
+      advanced: true,
+    },
+    modelCallAuditEnabled: {
+      label: "Model Call Audit",
+      placeholder: "true",
+      help: "Record the complete OpenClaw-assembled model input for OpenViking injection diagnosis. Set MODEL_CALL_AUDIT_ENABLED=false to disable.",
       advanced: true,
     },
     clawManagerInternalBaseUrl: {

@@ -48,6 +48,9 @@ springdoc:
 
 clawbot:
   miniapp-open-api-base-url: ${MINIAPP_OPEN_API_BASE_URL:}
+  model-call-audit:
+    enabled: ${MODEL_CALL_AUDIT_ENABLED:true}
+    retention-days: ${MODEL_CALL_AUDIT_RETENTION_DAYS:30}
   paths:
     data-dir: ${DATA_DIR:data}
   admin:

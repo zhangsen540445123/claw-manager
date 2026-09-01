@@ -32,6 +32,14 @@ class ClawbotPropertiesTest {
   }
 
   @Test
+  void defaultModelCallAuditIsEnabledForThirtyDays() {
+    ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
+
+    assertThat(properties.modelCallAudit().enabled()).isTrue();
+    assertThat(properties.modelCallAudit().retentionDays()).isEqualTo(30);
+  }
+
+  @Test
   void defaultRunnerResourcesRemainStable() {
     ClawbotProperties properties = new ClawbotProperties(null, null, null, null);
 

@@ -113,7 +113,7 @@ describe("OpenClaw 5.5 package runtime contract", () => {
   it("lets ov-install build runtime output from downloaded source", () => {
     expect(installManifest.npm).toMatchObject({
       build: true,
-      buildMinOpenclawVersion: "2026.5.3",
+      buildMinOpenclawVersion: "2026.6.8",
       buildScript: "build",
       omitDev: true,
       pruneAfterBuild: true,
@@ -121,19 +121,20 @@ describe("OpenClaw 5.5 package runtime contract", () => {
     expect(installManifest.files?.required).toEqual(expect.arrayContaining([
       "index.ts",
       "recall-trace.ts",
+      "model-call-audit.ts",
       "commands/setup.ts",
       "tsconfig.json",
       "tsconfig.build.json",
       "package.json",
       "openclaw.plugin.json",
     ]));
-    expect(installManifest.compatibility?.minOpenclawVersion).toBe("2026.4.8");
+    expect(installManifest.compatibility?.minOpenclawVersion).toBe("2026.6.8");
   });
 
   it("declares compatibility floors and recommended versions, and keeps version fields in sync", () => {
     expect(installManifest.compatibility).toMatchObject({
-      minOpenclawVersion: "2026.4.8",
-      recommendedOpenclawVersion: "2026.6.6",
+      minOpenclawVersion: "2026.6.8",
+      recommendedOpenclawVersion: "2026.6.8",
       minOpenvikingVersion: "0.4.5",
       recommendedOpenvikingVersion: "0.4.5",
     });

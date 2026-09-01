@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.clawbotforall.trace.ModelCallAuditMapper">
+  <resultMap id="audit" type="com.clawbotforall.trace.ModelCallAudit">
+    <constructor>
+      <arg column="id" javaType="string"/><arg column="event_type" javaType="string"/>
+      <arg column="instance_id" javaType="string"/><arg column="agent_id" javaType="string"/>
+      <arg column="session_id" javaType="string"/><arg column="session_key_hash" javaType="string"/>
+      <arg column="run_id" javaType="string"/><arg column="call_id" javaType="string"/>
+      <arg column="provider" javaType="string"/><arg column="model" javaType="string"/>
+      <arg column="api_transport" javaType="string"/><arg column="plugin_version" javaType="string"/>
+      <arg column="system_prompt" javaType="string"/><arg column="prompt" javaType="string"/>
+      <arg column="history_messages_json" javaType="string"/><arg column="images_count" javaType="java.lang.Integer"/>
+      <arg column="output_text" javaType="string"/><arg column="usage_json" javaType="string"/>
+      <arg column="stop_reason" javaType="string"/><arg column="duration_ms" javaType="java.lang.Long"/>
+      <arg column="outcome" javaType="string"/><arg column="error_category" javaType="string"/>
+      <arg column="created_at" javaType="string"/><arg column="expires_at" javaType="string"/>
+    </constructor>
+  </resultMap>
+  <insert id="insert">
+    INSERT INTO model_call_audits(id,event_type,instance_id,agent_id,session_id,session_key_hash,run_id,call_id,
+      provider,model,api_transport,plugin_version,system_prompt,prompt,history_messages_json,images_count,output_text,usage_json,stop_reason,
+      duration_ms,outcome,error_category,created_at,expires_at)
+    VALUES(#{id},#{eventType},#{instanceId},#{agentId},#{sessionId},#{sessionKeyHash},#{runId},#{callId},#{provider},#{model},
+      #{apiTransport},#{pluginVersion},#{systemPrompt},#{prompt},#{historyMessagesJson},#{imagesCount},#{outputText},#{usageJson},#{stopReason},
+      #{durationMs},#{outcome},#{errorCategory},#{createdAt},#{expiresAt})
+  </insert>
+  <select id="findForTrace" resultMap="audit">
+    SELECT * FROM model_call_audits
+    WHERE instance_id = #{instanceId}
+      AND created_at &gt;= #{from}
+      AND created_at &lt;= #{to}
+      <if test="sessionKeyHash != null and sessionKeyHash != ''">AND session_key_hash = #{sessionKeyHash}</if>
+    ORDER BY created_at ASC, id ASC
+    LIMIT 500
+  </select>
+  <delete id="deleteBefore">DELETE FROM model_call_audits WHERE expires_at &lt; #{cutoff}</delete>
+  <delete id="deleteByInstanceId">DELETE FROM model_call_audits WHERE instance_id = #{instanceId}</delete>
+</mapper>

@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -41,8 +42,18 @@ public class IntegrationTraceService {
       "imageIntentReason", "streamMode", "agentEventDeltaCount", "deliverDeltaCount", "deltaCount", "firstDeltaMs");
   private final IntegrationTraceMapper mapper;
   private final ObjectMapper json;
+  private final ModelCallAuditService modelCallAuditService;
 
-  public IntegrationTraceService(IntegrationTraceMapper mapper, ObjectMapper json) { this.mapper = mapper; this.json = json; }
+  public IntegrationTraceService(IntegrationTraceMapper mapper, ObjectMapper json) {
+    this(mapper, json, null);
+  }
+
+  @Autowired
+  public IntegrationTraceService(IntegrationTraceMapper mapper, ObjectMapper json, ModelCallAuditService modelCallAuditService) {
+    this.mapper = mapper;
+    this.json = json;
+    this.modelCallAuditService = modelCallAuditService;
+  }
 
   public void record(IntegrationTraceEventRequest request, String headerTraceId) {
     if (request == null) throw new ApiException(HttpStatus.BAD_REQUEST, "trace 事件不能为空。");
@@ -93,8 +104,56 @@ public class IntegrationTraceService {
     List<Map<String, Object>> timeline = events.stream().map(this::publicEvent).toList();
     LinkedHashSet<String> requestIds = new LinkedHashSet<>();
     events.forEach(event -> { if (!event.requestId().isBlank()) requestIds.add(event.requestId()); if (!event.parentRequestId().isBlank()) requestIds.add(event.parentRequestId()); });
+    List<ModelCallAudit> audits = modelCallAuditService == null ? List.of()
+        : modelCallAuditService.forTrace(firstNonBlankInstanceId(events), sessionKeyHash(events),
+            events.getFirst().createdAt(), events.getLast().createdAt());
     return Map.of("summary", summary, "diagnosis", diagnosis(events), "timeline", timeline,
-        "relatedRequestIds", requestIds, "artifact", artifact(events));
+        "relatedRequestIds", requestIds, "artifact", artifact(events),
+        "modelCallAudits", audits.stream().map(this::publicAudit).toList());
+  }
+
+  private String firstNonBlankInstanceId(List<IntegrationTraceEvent> events) {
+    return events.stream().map(IntegrationTraceEvent::instanceId).filter(value -> !value(value).isBlank()).findFirst().orElse("");
+  }
+
+  private String sessionKeyHash(List<IntegrationTraceEvent> events) {
+    return events.stream().map(IntegrationTraceEvent::sessionKeyHash).filter(value -> !value(value).isBlank()).findFirst().orElse("");
+  }
+
+  private Map<String, Object> publicAudit(ModelCallAudit audit) {
+    LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+    result.put("id", audit.id());
+    result.put("eventType", audit.eventType());
+    result.put("instanceId", audit.instanceId());
+    result.put("agentId", audit.agentId());
+    result.put("sessionId", audit.sessionId());
+    result.put("sessionKeyHash", audit.sessionKeyHash());
+    result.put("runId", audit.runId());
+    result.put("callId", audit.callId());
+    result.put("provider", audit.provider());
+    result.put("model", audit.model());
+    result.put("apiTransport", audit.apiTransport());
+    result.put("pluginVersion", audit.pluginVersion());
+    result.put("systemPrompt", audit.systemPrompt());
+    result.put("prompt", audit.prompt());
+    result.put("historyMessages", read(audit.historyMessagesJson()));
+    result.put("imagesCount", audit.imagesCount());
+    result.put("output", parseAuditValue(audit.outputText()));
+    result.put("usage", read(audit.usageJson()));
+    result.put("stopReason", audit.stopReason());
+    result.put("durationMs", audit.durationMs());
+    result.put("outcome", audit.outcome());
+    result.put("errorCategory", audit.errorCategory());
+    result.put("createdAt", audit.createdAt());
+    result.put("expiresAt", audit.expiresAt());
+    return result;
+  }
+
+  private Object parseAuditValue(String value) {
+    String normalized = value(value);
+    if (normalized.isBlank()) return "";
+    Object parsed = read(normalized);
+    return parsed instanceof Map<?, ?> || parsed instanceof List<?> ? parsed : normalized;
   }
 
   private Map<String, Object> artifact(List<IntegrationTraceEvent> events) {

@@ -1,6 +1,6 @@
 {
   "name": "@claw-manager/openviking-openclaw-plugin",
-  "version": "2026.6.39",
+  "version": "2026.6.40",
   "displayName": "OpenViking",
   "description": "OpenClaw context-engine plugin — OpenViking AI memory, long-term memory, knowledge base, semantic search, RAG, context engine. 长期记忆 · 知识库 · 语义检索 · 上下文引擎",
   "type": "module",
@@ -47,7 +47,7 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "openclaw": ">=2026.4.8"
+    "openclaw": ">=2026.6.8"
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.48",
@@ -74,12 +74,12 @@
     ],
     "setupEntry": "./dist/commands/setup.js",
     "compat": {
-      "pluginApi": ">=2026.4.8",
-      "minGatewayVersion": "2026.4.8"
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
     },
     "build": {
-      "openclawVersion": "2026.4.8",
-      "pluginSdkVersion": "2026.4.8"
+      "openclawVersion": "2026.6.8",
+      "pluginSdkVersion": "2026.6.8"
     }
   },
   "devDependencies": {

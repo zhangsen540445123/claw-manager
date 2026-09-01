@@ -12,8 +12,13 @@ public record ClawbotProperties(
     Paths paths,
     Admin admin,
     Security security,
-    Runtime runtime
+    Runtime runtime,
+    ModelCallAudit modelCallAudit
 ) {
+  public ClawbotProperties(Paths paths, Admin admin, Security security, Runtime runtime) {
+    this(paths, admin, security, runtime, null);
+  }
+
   @ConstructorBinding
   public ClawbotProperties {
     if (paths == null) {
@@ -46,6 +51,9 @@ public record ClawbotProperties(
           "block"
       );
     }
+    if (modelCallAudit == null) {
+      modelCallAudit = new ModelCallAudit(true, 30);
+    }
   }
 
   public record Paths(String dataDir) {}
@@ -53,6 +61,12 @@ public record ClawbotProperties(
   public record Admin(String email, String name, String password) {}
 
   public record Security(String sessionCookieName, int sessionTtlDays) {}
+
+  public record ModelCallAudit(boolean enabled, int retentionDays) {
+    public ModelCallAudit {
+      retentionDays = Math.max(1, Math.min(retentionDays, 3650));
+    }
+  }
 
   public record Runtime(
       String runnerImage,

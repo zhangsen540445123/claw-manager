@@ -36,6 +36,7 @@ class DockerJavaOpenClawRuntimeOpenVikingTest {
         "CLAW_MANAGER_INTERNAL_BASE_URL=http://claw-manager-api:8080",
         "OPENVIKING_BROKER_TOKEN=broker-token",
         "OPENVIKING_OPENCLAW_INSTANCE_ID=inst_1",
+        "MODEL_CALL_AUDIT_ENABLED=true",
         "OPENVIKING_PLUGIN_PACKAGE=npm:@example/openviking-openclaw-memory@1.0.0"
     );
     assertThat(env).noneMatch(item -> item.contains("root-key-never-in-runner"));
@@ -60,6 +61,25 @@ class DockerJavaOpenClawRuntimeOpenVikingTest {
     assertThat(env).contains("NODE_OPTIONS=--max-old-space-size=1536");
   }
 
+
+  @Test
+  void runnerEnvCanDisableModelCallAudit() {
+    OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
+        "",
+        true,
+        "claw-manager",
+        "shared-secret",
+        "",
+        "root-key-never-in-runner",
+        "broker-token",
+        "http://claw-manager-api:8080"
+    );
+
+    List<String> env = DockerJavaOpenClawRuntime.runnerEnv(settings, "inst_3", 0, false);
+
+    assertThat(env).contains("MODEL_CALL_AUDIT_ENABLED=false");
+  }
+
   @Test
   void runnerEnvOmitsOptionalBlankOpenVikingPackageAndBaseUrl() {
     OpenVikingEffectiveSettings settings = new OpenVikingEffectiveSettings(
@@ -81,7 +101,8 @@ class DockerJavaOpenClawRuntimeOpenVikingTest {
         "OPENVIKING_IDENTITY_HASH_SECRET=shared-secret",
         "CLAW_MANAGER_INTERNAL_BASE_URL=http://claw-manager-api:8080",
         "OPENVIKING_BROKER_TOKEN=broker-token",
-        "OPENVIKING_OPENCLAW_INSTANCE_ID=inst_2"
+        "OPENVIKING_OPENCLAW_INSTANCE_ID=inst_2",
+        "MODEL_CALL_AUDIT_ENABLED=true"
     );
     assertThat(env).noneMatch(item -> item.startsWith("OPENVIKING_BASE_URL="));
     assertThat(env).noneMatch(item -> item.startsWith("OPENVIKING_PLUGIN_PACKAGE="));

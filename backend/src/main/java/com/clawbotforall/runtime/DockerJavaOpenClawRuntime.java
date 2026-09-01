@@ -129,7 +129,8 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         .withEnv(runnerEnv(
             openVikingSettingsService.effectiveSettings(),
             instance.getId(),
-            properties.runtime().runnerNodeMaxOldSpaceMb()
+            properties.runtime().runnerNodeMaxOldSpaceMb(),
+            properties.modelCallAudit().enabled()
         ))
         .withHostConfig(hostConfig);
 
@@ -596,10 +597,19 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
   }
 
   static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId) {
-    return runnerEnv(settings, instanceId, 0);
+    return runnerEnv(settings, instanceId, 0, true);
   }
 
   static List<String> runnerEnv(OpenVikingEffectiveSettings settings, String instanceId, int nodeMaxOldSpaceMb) {
+    return runnerEnv(settings, instanceId, nodeMaxOldSpaceMb, true);
+  }
+
+  static List<String> runnerEnv(
+      OpenVikingEffectiveSettings settings,
+      String instanceId,
+      int nodeMaxOldSpaceMb,
+      boolean modelCallAuditEnabled
+  ) {
     List<String> env = new ArrayList<>(List.of(
         "HOME=/var/lib/openclaw",
         "OPENCLAW_HOME=/var/lib/openclaw",
@@ -611,7 +621,8 @@ public class DockerJavaOpenClawRuntime implements OpenClawRuntime {
         "OPENVIKING_IDENTITY_HASH_SECRET=" + settings.identityHashSecret(),
         "CLAW_MANAGER_INTERNAL_BASE_URL=" + settings.internalBaseUrl(),
         "OPENVIKING_BROKER_TOKEN=" + settings.brokerToken(),
-        "OPENVIKING_OPENCLAW_INSTANCE_ID=" + instanceId
+        "OPENVIKING_OPENCLAW_INSTANCE_ID=" + instanceId,
+        "MODEL_CALL_AUDIT_ENABLED=" + modelCallAuditEnabled
     ));
     if (nodeMaxOldSpaceMb > 0) {
       env.add("NODE_OPTIONS=--max-old-space-size=" + nodeMaxOldSpaceMb);

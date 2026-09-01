@@ -22,6 +22,7 @@ import { registerOpenVikingArchiveTools } from "./plugin/openviking-archive-tool
 import { createOpenVikingImportRuntime } from "./plugin/openviking-import-runtime.js";
 import { registerOpenVikingImportTools } from "./plugin/openviking-import-tools.js";
 import { registerOpenVikingLifecycleHooks } from "./plugin/openviking-lifecycle-hooks.js";
+import { createModelCallAuditReporter, registerModelCallAuditHooks } from "./model-call-audit.js";
 import { registerOpenVikingMemoryRecallTools } from "./plugin/openviking-memory-recall-tools.js";
 import { registerOpenVikingMemoryTools } from "./plugin/openviking-memory-tools.js";
 import { registerOpenVikingQueryTools } from "./plugin/openviking-query-tools.js";
@@ -187,6 +188,19 @@ const contextEnginePlugin = {
       registerSetupCli(api);
       return;
     }
+
+    const modelCallAuditReporter = createModelCallAuditReporter({
+      enabled: cfg.modelCallAuditEnabled,
+      baseUrl: cfg.clawManagerInternalBaseUrl,
+      token: cfg.openVikingBrokerToken,
+      instanceId: process.env.OPENVIKING_OPENCLAW_INSTANCE_ID,
+      logger: api.logger,
+    });
+    registerModelCallAuditHooks({
+      on: (hookName, handler, opts) => api.on(hookName, handler, opts),
+      reporter: modelCallAuditReporter,
+      logger: api.logger,
+    });
 
     const { isBypassedSession } = createOpenVikingBypassRuntime({ cfg });
     const { getClient, getClientForSender, verboseRoutingInfo } = createOpenVikingClientRuntime({
