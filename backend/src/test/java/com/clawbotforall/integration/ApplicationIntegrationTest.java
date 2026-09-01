@@ -93,7 +93,7 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
-        .isEqualTo(5);
+        .isEqualTo(6);
     assertThat(jdbcTemplate.queryForObject(
         """
             SELECT COUNT(*)
