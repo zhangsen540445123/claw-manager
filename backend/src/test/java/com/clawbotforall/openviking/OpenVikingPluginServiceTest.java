@@ -21,14 +21,17 @@ import com.clawbotforall.runtime.RuntimeExecHandle;
 import com.clawbotforall.runtime.RuntimeExecListener;
 import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -115,10 +118,51 @@ class OpenVikingPluginServiceTest {
     verify(mutationMapper).updateInstancePlugins(
         eq("inst_1"),
         eq("[\"openviking\"]"),
-        eq("{\"openviking\":{\"enabled\":true,\"config\":{\"mode\":\"remote\",\"baseUrl\":\"http://openviking:1933\",\"accountId\":\"claw-manager\",\"identityHashSecret\":\"${OPENVIKING_IDENTITY_HASH_SECRET}\",\"peer_role\":\"assistant\",\"autoRecallTimeoutMs\":30000}}}"),
+        eq("{\"openviking\":{\"enabled\":true,\"hooks\":{\"allowConversationAccess\":true},\"config\":{\"mode\":\"remote\",\"baseUrl\":\"http://openviking:1933\",\"accountId\":\"claw-manager\",\"identityHashSecret\":\"${OPENVIKING_IDENTITY_HASH_SECRET}\",\"peer_role\":\"assistant\",\"autoRecallTimeoutMs\":30000}}}"),
         any()
     );
     verify(fileService).writeInstanceFiles(instance, List.of());
+  }
+
+  @Test
+  void installPreservesExistingOpenVikingEntryAndForcesConversationAccessHook() throws Exception {
+    InstanceEntity instance = instance();
+    instance.setPluginsAllow("[\"other-plugin\",\"openviking\"]");
+    instance.setPluginsEntries("{\"openviking\":{\"enabled\":false,\"hooks\":{\"existingHook\":\"keep\",\"allowConversationAccess\":false},\"metadata\":{\"source\":\"manual\"},\"config\":{\"old\":\"value\"}},\"other-plugin\":{\"enabled\":true}}");
+    when(settingsService.effectiveSettings()).thenReturn(settings());
+    when(openClawRuntime.inspectInstance(instance)).thenReturn(new RuntimeState(true, "running", "now"));
+    when(commandService.listModels("inst_1")).thenReturn(List.of());
+    when(openClawRuntime.startExec(eq(instance), anyList(), anyLong(), anyMap(), any(RuntimeExecListener.class)))
+        .thenAnswer(invocation -> {
+          RuntimeExecListener listener = invocation.getArgument(4);
+          listener.onComplete(0);
+          return execHandle;
+        });
+
+    service.startInstall(instance, "2026.6.37");
+    executor.runNext();
+
+    ArgumentCaptor<String> entriesCaptor = ArgumentCaptor.forClass(String.class);
+    verify(mutationMapper).updateInstancePlugins(
+        eq("inst_1"),
+        eq("[\"other-plugin\",\"openviking\"]"),
+        entriesCaptor.capture(),
+        any()
+    );
+    Map<String, Object> entries = new ObjectMapper().readValue(entriesCaptor.getValue(), new TypeReference<>() {});
+    assertThat(entries).containsKey("other-plugin");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> openviking = (Map<String, Object>) entries.get("openviking");
+    assertThat(openviking).containsEntry("enabled", true);
+    assertThat(openviking).containsKey("metadata");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> hooks = (Map<String, Object>) openviking.get("hooks");
+    assertThat(hooks).containsEntry("existingHook", "keep");
+    assertThat(hooks).containsEntry("allowConversationAccess", true);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> config = (Map<String, Object>) openviking.get("config");
+    assertThat(config).containsEntry("mode", "remote");
+    assertThat(config).containsEntry("baseUrl", "http://openviking:1933");
   }
 
   @Test

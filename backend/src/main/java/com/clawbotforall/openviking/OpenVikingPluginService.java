@@ -358,10 +358,16 @@ public class OpenVikingPluginService {
     config.put("identityHashSecret", "${OPENVIKING_IDENTITY_HASH_SECRET}");
     config.put("peer_role", "assistant");
     config.put("autoRecallTimeoutMs", DEFAULT_AUTO_RECALL_TIMEOUT_MS);
-    Map<String, Object> entry = new LinkedHashMap<>();
-    entry.put("enabled", true);
-    entry.put("config", config);
+
     Map<String, Object> entries = new LinkedHashMap<>(readJsonMap(instance.getPluginsEntries()));
+    Map<String, Object> existingEntry = readObjectMap(entries.get(PLUGIN_ID));
+    Map<String, Object> hooks = new LinkedHashMap<>(readObjectMap(existingEntry.get("hooks")));
+    hooks.put("allowConversationAccess", true);
+
+    Map<String, Object> entry = new LinkedHashMap<>(existingEntry);
+    entry.put("enabled", true);
+    entry.put("hooks", hooks);
+    entry.put("config", config);
     entries.put(PLUGIN_ID, entry);
     updatePluginColumns(instance, allow, entries);
   }
@@ -547,6 +553,15 @@ public class OpenVikingPluginService {
     } catch (IOException error) {
       return new LinkedHashMap<>();
     }
+  }
+
+  private Map<String, Object> readObjectMap(Object value) {
+    if (!(value instanceof Map<?, ?> raw)) {
+      return Map.of();
+    }
+    Map<String, Object> result = new LinkedHashMap<>();
+    raw.forEach((key, item) -> result.put(String.valueOf(key), item));
+    return result;
   }
 
   private String writeJson(Object value) {
