@@ -27,9 +27,24 @@ describe("model call audit hooks", () => {
       instanceId: "inst-1",
       prompt: expect.stringContaining("relevant-memories"),
       apiTransport: "",
-      pluginVersion: "2026.6.40",
+      pluginVersion: "2026.6.41",
     });
     expect(body.historyMessages).toEqual([{ role: "user", content: "你好" }]);
+  });
+
+  it("stores OpenClaw llm_output assistantTexts as the model output", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true });
+    const reporter = createModelCallAuditReporter({
+      enabled: true, baseUrl: "http://api", token: "t", instanceId: "i", fetchImpl,
+    });
+
+    await reporter.record("llm_output", {
+      runId: "run-1", sessionId: "session-1", provider: "openai", model: "gpt-5.6",
+      assistantTexts: ["第一段回复", "2017"],
+    });
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.output).toBe("第一段回复\n\n2017");
   });
 
   it("computes duration for model_call_ended from started callId when missing", async () => {

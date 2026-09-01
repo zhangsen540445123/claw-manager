@@ -55,13 +55,19 @@ function jsonSafe(value: unknown): unknown {
   }
 }
 
+function assistantTextsOutput(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const texts = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+  return texts.length > 0 ? texts.join("\n\n") : undefined;
+}
+
 function normalizeEvent(type: ModelCallAuditEventType, event: unknown, ctx: HookContext | undefined, options: ReporterOptions) {
   const body = recordOf(event);
   const context = recordOf(ctx);
   const session = recordOf(body.session);
   const usage = firstValue(body.usage, body.tokenUsage, body.tokens);
   const historyMessages = firstValue(body.historyMessages, body.history, body.messages);
-  const output = firstValue(body.output, body.text, body.response, body.content);
+  const output = firstValue(body.output, body.text, body.response, body.content, assistantTextsOutput(body.assistantTexts), body.lastAssistant);
   const imagesCount = firstValue(body.imagesCount, body.imageCount, Array.isArray(body.images) ? body.images.length : undefined);
 
   return {
@@ -89,7 +95,7 @@ function normalizeEvent(type: ModelCallAuditEventType, event: unknown, ctx: Hook
     errorCategory: firstString(body.errorCategory, body.errorCode, recordOf(body.error).category),
     errorMessage: firstString(body.errorMessage, recordOf(body.error).message),
     createdAt: firstString(body.createdAt, body.timestamp, body.ts) || new Date().toISOString(),
-    pluginVersion: options.pluginVersion || "2026.6.40",
+    pluginVersion: options.pluginVersion || "2026.6.41",
   };
 }
 
