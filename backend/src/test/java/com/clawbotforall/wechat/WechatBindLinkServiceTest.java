@@ -197,6 +197,59 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void doesNotReuseMiniappLinkWhenItsQrCodeHasExpired() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+    WechatBindLinkEntity existing = newLink("token_expired_qr");
+    existing.setMode("new");
+    existing.setInstanceId("inst_1");
+    existing.setMiniappOpenidHash("openid_hash_1");
+    existing.setStatus("waiting_scan");
+    existing.setExpiresAt(Instant.now().plusSeconds(3600).toString());
+    existing.setQrExpiresAt(Instant.now().minusSeconds(1).toString());
+    existing.setQrLink("https://qr.example.test/expired");
+    when(linkMapper.findActiveMiniappLinkForUpdate(
+        eq("openid_hash_1"), eq("inst_1"), eq(""), org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(existing);
+
+    PublicWechatBindLink link = service.createMiniappLink(
+        "openid_hash_1", "inst_1", "", "https://miniapp.example.test");
+
+    assertThat(link.token()).isNotEqualTo("token_expired_qr");
+    verify(linkMapper).insert(any(WechatBindLinkEntity.class));
+    assertThat(executor.size()).isEqualTo(1);
+  }
+
+  @Test
+  void keepsMiniappAssociationWhenOnlyQrCodeExpires() {
+    WechatBindLinkEntity stored = existingLink("token_miniapp_qr_expired", "inst_1");
+    stored.setMode("new");
+    stored.setStatus("waiting_scan");
+    stored.setMiniappOpenidHash("openid_hash_1");
+    stored.setTargetAccountId("cmwx_miniapp_qr_expired");
+    stored.setExpiresAt(Instant.now().plusSeconds(3600).toString());
+    stored.setQrExpiresAt(Instant.now().minusSeconds(1).toString());
+    stored.setQrLink("https://qr.example.test/expired");
+    when(linkMapper.findByToken("token_miniapp_qr_expired")).thenReturn(stored);
+    when(aggregateMapper.findById("inst_1"))
+        .thenReturn(instance("inst_1", "实例一", "running"));
+    when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1")))
+        .thenReturn(List.of(readyProvisioning("inst_1")));
+    when(fileService.paths("inst_1")).thenReturn(testPaths());
+
+    PublicWechatBindLink link = service.getPublicStatus(
+        "token_miniapp_qr_expired", "https://miniapp.example.test");
+
+    ArgumentCaptor<WechatBindLinkEntity> captor = ArgumentCaptor.forClass(WechatBindLinkEntity.class);
+    verify(linkMapper).update(captor.capture());
+    assertThat(captor.getValue().getStatus()).isEqualTo("expired");
+    assertThat(captor.getValue().getMiniappOpenidHash()).isEqualTo("openid_hash_1");
+    assertThat(link.status()).isEqualTo("expired");
+  }
+
+  @Test
   void rejectsNewUserLinkWhenNoReadyRunningInstanceExists() {
     when(aggregateMapper.listAll()).thenReturn(List.of(instance("inst_1", "实例一", "stopped")));
     when(aggregateMapper.listProvisioningByInstanceIds(List.of("inst_1"))).thenReturn(List.of(readyProvisioning("inst_1")));
@@ -353,7 +406,7 @@ class WechatBindLinkServiceTest {
     assertThat(captor.getValue().getQrLink()).isNull();
     assertThat(captor.getValue().getTargetAccountId()).isNull();
     assertThat(captor.getValue().getScannedWechatUserId()).isNull();
-    assertThat(captor.getValue().getMiniappOpenidHash()).isNull();
+    assertThat(captor.getValue().getMiniappOpenidHash()).isEqualTo("miniapp-sensitive");
     assertThat(captor.getValue().getCleanupError()).isNull();
     assertThat(captor.getValue().getCompletedAt()).isNotBlank();
     assertThat(link.status()).isEqualTo("expired");

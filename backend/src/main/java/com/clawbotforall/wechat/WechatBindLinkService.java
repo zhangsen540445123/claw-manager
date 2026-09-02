@@ -223,7 +223,7 @@ public class WechatBindLinkService {
     String now = Instant.now().toString();
     WechatBindLinkEntity existing = linkMapper.findActiveMiniappLinkForUpdate(
         normalizedHash, instance.getId(), normalizedTargetAccountId, now);
-    if (existing != null) {
+    if (existing != null && isReusableMiniappLink(existing)) {
       log.info("小程序复用微信扫码链接：instanceId={}, openidHash={}, status={}",
           instance.getId(), normalizedHash, defaultString(existing.getStatus()));
       return publicLink(existing, origin);
@@ -531,7 +531,7 @@ public class WechatBindLinkService {
     }
 
     if ("waiting_scan".equals(link.getStatus()) && isExpired(link.getQrExpiresAt())) {
-      markExpired(link, "二维码已过期，请重新生成后扫码绑定。");
+      markExpired(link, "二维码已过期，请重新生成后扫码绑定。", true);
       return link;
     }
 
@@ -920,13 +920,19 @@ public class WechatBindLinkService {
   }
 
   private void redactTerminalAudit(WechatBindLinkEntity link) {
+    redactTerminalAudit(link, false);
+  }
+
+  private void redactTerminalAudit(WechatBindLinkEntity link, boolean preserveMiniappAssociation) {
     link.setQrMode(null);
     link.setQrPayload(null);
     link.setQrLink(null);
     link.setQrExpiresAt(null);
     link.setScannedWechatUserId(null);
     link.setTargetAccountId(null);
-    link.setMiniappOpenidHash(null);
+    if (!preserveMiniappAssociation) {
+      link.setMiniappOpenidHash(null);
+    }
     link.setCleanupError(null);
   }
 
@@ -1009,17 +1015,26 @@ public class WechatBindLinkService {
   }
 
   private void markExpired(WechatBindLinkEntity link, String message) {
+    markExpired(link, message, false);
+  }
+
+  private void markExpired(WechatBindLinkEntity link, String message, boolean preserveMiniappAssociation) {
     String accountId = defaultString(link.getTargetAccountId()).trim();
     String wechatUserId = defaultString(link.getScannedWechatUserId()).trim();
     cleanupTemporaryAccountState(link);
     String timestamp = Instant.now().toString();
     link.setStatus("expired");
     link.setErrorMessage(message);
-    redactTerminalAudit(link);
+    redactTerminalAudit(link, preserveMiniappAssociation);
     link.setCompletedAt(timestamp);
     link.setUpdatedAt(timestamp);
     linkMapper.update(link);
     logStatusChange(link, "expired", accountId, wechatUserId, "");
+  }
+
+  private boolean isReusableMiniappLink(WechatBindLinkEntity link) {
+    return link != null
+        && !("waiting_scan".equals(link.getStatus()) && isExpired(link.getQrExpiresAt()));
   }
 
   private void logStatusChange(
