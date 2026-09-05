@@ -9,6 +9,7 @@ import type {
   PublicApiChannelPluginStatus,
   PublicApiChannelPluginVersions,
   PublicAgentWorkspacePreset,
+  AgentWorkspacePresetPushResult,
   PublicMiniappClient,
   PublicOpenVikingPluginStatus,
   PublicOpenVikingPluginVersions,
@@ -330,6 +331,13 @@ export const useAdminStore = defineStore("admin", {
       });
       this.agentWorkspacePreset = response.preset;
       return response.preset;
+    },
+    async pushAgentWorkspacePreset() {
+      const response = await api<{ result: AgentWorkspacePresetPushResult }>(
+        '/api/admin/agent-workspace-preset/push',
+        { method: 'POST' }
+      );
+      return response.result;
     },
     async saveImageGenerationSettings(payload: Record<string, unknown>) {
       const response = await api<{ settings: PublicImageGenerationSettings; syncedInstanceIds: string[]; restartRequired: boolean }>(

@@ -41,6 +41,20 @@ export interface PublicImageGenerationSettings {
   updatedAt: string;
 }
 
+export interface AgentWorkspacePresetPushFailure {
+  instanceId: string;
+  agentId: string;
+  message: string;
+}
+
+export interface AgentWorkspacePresetPushResult {
+  version: number;
+  instancesProcessed: number;
+  agentsUpdated: number;
+  filesWritten: number;
+  failures: AgentWorkspacePresetPushFailure[];
+}
+
 export interface PublicAgentWorkspacePreset {
   version: number;
   agentsMd: string;
