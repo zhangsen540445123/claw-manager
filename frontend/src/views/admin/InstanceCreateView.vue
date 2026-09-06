@@ -4,6 +4,7 @@ import { Plus } from "lucide-vue-next";
 import { ElMessage } from "element-plus";
 import PageHeader from "../../components/PageHeader.vue";
 import { useAdminStore } from "../../stores/admin";
+import type { PublicModelPreset } from "../../api/types";
 
 const admin = useAdminStore();
 const actionLoading = ref("");
@@ -19,6 +20,18 @@ watch(
   },
   { immediate: true }
 );
+
+function presetLabel(preset: PublicModelPreset) {
+  const fallbackCount = preset.fallbackPresetIds?.length ?? 0;
+  const marks: string[] = [];
+  if (preset.isDefault) {
+    marks.push("默认");
+  }
+  if (fallbackCount) {
+    marks.push(`${fallbackCount} 个 Fallback`);
+  }
+  return marks.length ? `${preset.name} · ${marks.join(" · ")}` : preset.name;
+}
 
 async function createInstance() {
   if (!createForm.presetId) {
@@ -66,7 +79,7 @@ async function createInstance() {
             <el-option
               v-for="preset in admin.configuredPresets"
               :key="preset.id"
-              :label="preset.isDefault ? `${preset.name} · 默认` : preset.name"
+              :label="presetLabel(preset)"
               :value="preset.id"
             />
           </el-select>
@@ -86,6 +99,12 @@ async function createInstance() {
         <el-table-column label="模型" min-width="220">
           <template #default="{ row }">{{ row.providerId }}/{{ row.modelId }}</template>
         </el-table-column>
+        <el-table-column label="Fallback" width="120">
+          <template #default="{ row }">
+            <span v-if="row.fallbackPresetIds?.length">{{ row.fallbackPresetIds.length }} 个</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="Context Window" width="150" align="right">
           <template #default="{ row }">{{ row.contextWindow }}</template>
         </el-table-column>
@@ -103,3 +122,9 @@ async function createInstance() {
     </el-card>
   </section>
 </template>
+
+<style scoped>
+.muted {
+  color: var(--el-text-color-placeholder, #a8abb2);
+}
+</style>

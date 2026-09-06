@@ -10,22 +10,25 @@ import com.clawbotforall.instance.InstanceProvisioningService;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.RuntimeState;
 import com.clawbotforall.web.ApiException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
- * 管理模型预设创建、更新、删除和默认选择。
+ * 管理模型预设创建、更新、删除、默认选择以及保存后向全部实例同步模型链。
  */
 @Service
 public class ModelPresetService {
@@ -65,7 +68,11 @@ public class ModelPresetService {
   @Transactional(readOnly = true)
   public List<PublicModelPreset> listPublicPresets() {
     return modelPresetMapper.listAll().stream()
-        .map(preset -> PublicModelPreset.from(preset, normalizer.isConfigured(preset)))
+        .map(preset -> PublicModelPreset.from(
+            preset,
+            normalizer.isConfigured(preset),
+            ModelPresetFallbacks.parse(preset.getFallbackPresetIds())
+        ))
         .toList();
   }
 
@@ -96,6 +103,12 @@ public class ModelPresetService {
         payload == null ? null : payload.get("isDefault"),
         modelPresetMapper.countAll() == 0
     );
+    List<String> fallbackPresetIds = validateFallbackReferences(
+        null,
+        ModelPresetFallbacks.normalizeRequest(
+            payload == null ? null : payload.get("fallbackPresetIds")
+        )
+    );
 
     ModelPresetEntity preset = new ModelPresetEntity();
     preset.setId("preset_" + Long.toString(System.currentTimeMillis(), 36)
@@ -103,6 +116,7 @@ public class ModelPresetService {
     preset.setName(name);
     preset.setDefault(isDefault);
     applyModel(preset, model);
+    preset.setFallbackPresetIds(ModelPresetFallbacks.toJsonOrNull(fallbackPresetIds));
     preset.setCreatedAt(Instant.now().toString());
 
     if (preset.isDefault()) {
@@ -110,14 +124,15 @@ public class ModelPresetService {
     }
     modelPresetMapper.insert(preset);
     log.info(
-        "模型预设已创建：presetId={}, name={}, providerKey={}, modelId={}, default={}",
+        "模型预设已创建：presetId={}, name={}, providerKey={}, modelId={}, default={}, fallbackCount={}",
         preset.getId(),
         preset.getName(),
         preset.getProviderKey(),
         preset.getModelId(),
-        preset.isDefault()
+        preset.isDefault(),
+        fallbackPresetIds.size()
     );
-    return PublicModelPreset.from(preset, normalizer.isConfigured(preset));
+    return PublicModelPreset.from(preset, normalizer.isConfigured(preset), fallbackPresetIds);
   }
 
   /**
@@ -138,36 +153,43 @@ public class ModelPresetService {
         payload == null ? null : payload.get("isDefault"),
         preset.isDefault()
     );
+    List<String> fallbackPresetIds;
+    if (payload != null && payload.containsKey("fallbackPresetIds")) {
+      fallbackPresetIds = validateFallbackReferences(
+          presetId,
+          ModelPresetFallbacks.normalizeRequest(payload.get("fallbackPresetIds"))
+      );
+    } else {
+      fallbackPresetIds = ModelPresetFallbacks.parse(preset.getFallbackPresetIds());
+    }
 
     preset.setName(name);
     preset.setDefault(isDefault);
     applyModel(preset, model);
+    preset.setFallbackPresetIds(ModelPresetFallbacks.toJsonOrNull(fallbackPresetIds));
     if (preset.isDefault()) {
       modelPresetMapper.clearDefault();
     }
     modelPresetMapper.update(preset);
 
-    boolean shouldSyncReferencedInstances = normalizer.parseBooleanFlag(
+    boolean shouldSync = normalizer.parseBooleanFlag(
         payload == null ? null : payload.get("syncReferencedInstances"),
         false
     );
-    List<ReferencedPresetInstance> references = referencedInstances(presetId);
-    if (shouldSyncReferencedInstances && !references.isEmpty()) {
-      normalizer.validateRuntimeUsable(model, preset.getName());
-    }
-    ModelPresetSyncResult sync = shouldSyncReferencedInstances
-        ? syncReferencedInstances(preset, model, references)
-        : ModelPresetSyncResult.notRequested(references.size());
+    ModelPresetSyncResult sync = shouldSync
+        ? syncAllInstancesWithChain(preset)
+        : ModelPresetSyncResult.notRequested(0);
     log.info(
-        "模型预设已更新：presetId={}, name={}, syncRequested={}, referencedInstances={}, restartedInstances={}",
+        "模型预设已更新：presetId={}, name={}, syncRequested={}, affectedInstances={}, restartedInstances={}, fallbackCount={}",
         preset.getId(),
         preset.getName(),
-        shouldSyncReferencedInstances,
-        references.size(),
-        sync.restartedInstanceIds().size()
+        shouldSync,
+        sync.affectedInstances(),
+        sync.restartedInstanceIds().size(),
+        fallbackPresetIds.size()
     );
     return new ModelPresetUpdateResult(
-        PublicModelPreset.from(preset, normalizer.isConfigured(preset)),
+        PublicModelPreset.from(preset, normalizer.isConfigured(preset), fallbackPresetIds),
         sync
     );
   }
@@ -183,14 +205,31 @@ public class ModelPresetService {
   }
 
   /**
-   * 在不会破坏预设目录时删除预设。
+   * 删除预设；若被其它预设作为 Fallback 引用，则自动从引用方列表移除并持久化。
+   *
+   * @return 受影响（引用被删预设作为 Fallback）的其它预设名称列表
    */
 
   @Transactional
-  public void deletePreset(String presetId) {
+  public List<String> deletePreset(String presetId) {
     ModelPresetEntity preset = modelPresetMapper.findById(presetId);
     if (preset == null) {
       throw new ApiException(HttpStatus.NOT_FOUND, "预设不存在。");
+    }
+
+    List<String> affectedNames = new ArrayList<>();
+    for (ModelPresetEntity candidate : modelPresetMapper.listAll()) {
+      if (candidate.getId().equals(presetId)) {
+        continue;
+      }
+      List<String> fallbacks = new ArrayList<>(
+          ModelPresetFallbacks.parse(candidate.getFallbackPresetIds())
+      );
+      if (fallbacks.remove(presetId)) {
+        candidate.setFallbackPresetIds(ModelPresetFallbacks.toJsonOrNull(fallbacks));
+        modelPresetMapper.update(candidate);
+        affectedNames.add(candidate.getName());
+      }
     }
 
     boolean deletingDefault = preset.isDefault();
@@ -201,7 +240,13 @@ public class ModelPresetService {
         modelPresetMapper.setDefault(fallback.getId());
       }
     }
-    log.info("模型预设已删除：presetId={}, deletedDefault={}", presetId, deletingDefault);
+    log.info(
+        "模型预设已删除：presetId={}, deletedDefault={}, removedFromFallbackPresets={}",
+        presetId,
+        deletingDefault,
+        affectedNames
+    );
+    return List.copyOf(affectedNames);
   }
 
   private ModelPresetEntity requirePreset(String presetId) {
@@ -210,6 +255,62 @@ public class ModelPresetService {
       throw new ApiException(HttpStatus.NOT_FOUND, "预设不存在。");
     }
     return preset;
+  }
+
+  /**
+   * 校验请求中的 Fallback 预设 ID 列表：必须存在、非自引用、去重、已配置完成且不构成循环引用。
+   */
+  private List<String> validateFallbackReferences(String ownerId, List<String> requested) {
+    if (requested == null || requested.isEmpty()) {
+      return List.of();
+    }
+    List<String> result = new ArrayList<>();
+    Set<String> seen = new LinkedHashSet<>();
+    for (String fallbackId : requested) {
+      if (fallbackId == null || fallbackId.isBlank()) {
+        continue;
+      }
+      if (ownerId != null && ownerId.equals(fallbackId)) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "预设不能引用自身作为 Fallback。");
+      }
+      if (!seen.add(fallbackId)) {
+        continue;
+      }
+      ModelPresetEntity fallbackPreset = modelPresetMapper.findById(fallbackId);
+      if (fallbackPreset == null) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "Fallback 预设不存在。");
+      }
+      if (!normalizer.isConfigured(fallbackPreset)) {
+        throw new ApiException(
+            HttpStatus.BAD_REQUEST,
+            "Fallback 预设“" + fallbackPreset.getName() + "”尚未配置完成，请先补全配置。"
+        );
+      }
+      if (ownerId != null && reachesOwner(ownerId, fallbackPreset, new HashSet<>())) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "Fallback 配置不能形成循环引用。");
+      }
+      result.add(fallbackId);
+    }
+    return List.copyOf(result);
+  }
+
+  /**
+   * 沿存储的 Fallback 引用图递归，判断是否能够回到 owner 预设（用于成环检测）。
+   */
+  private boolean reachesOwner(String ownerId, ModelPresetEntity current, Set<String> visited) {
+    if (!visited.add(current.getId())) {
+      return false;
+    }
+    for (String nextId : ModelPresetFallbacks.parse(current.getFallbackPresetIds())) {
+      if (ownerId.equals(nextId)) {
+        return true;
+      }
+      ModelPresetEntity next = modelPresetMapper.findById(nextId);
+      if (next != null && reachesOwner(ownerId, next, visited)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private List<ReferencedPresetInstance> referencedInstances(String presetId) {
@@ -243,39 +344,31 @@ public class ModelPresetService {
     return result;
   }
 
-  private ModelPresetSyncResult syncReferencedInstances(
-      ModelPresetEntity preset,
-      NormalizedModelSelection model,
-      List<ReferencedPresetInstance> references
-  ) {
-    if (references.isEmpty()) {
+  /**
+   * 保存并同步：把该预设的完整模型链（主模型 + 一级 Fallback）覆盖到全部实例。
+   * 运行中实例在事务提交后重启（重新 provisioning）；停止实例重写配置文件。
+   */
+  private ModelPresetSyncResult syncAllInstancesWithChain(ModelPresetEntity owner) {
+    List<InstanceEntity> instances = instanceAggregateMapper.listAll();
+    if (instances.isEmpty()) {
       return new ModelPresetSyncResult(true, 0, List.of(), List.of());
     }
 
-    log.info("开始同步模型预设到引用实例：presetId={}, affectedInstances={}", preset.getId(), references.size());
-    List<String> instanceIds = references.stream()
-        .map(reference -> reference.instance().getId())
-        .toList();
-    Map<String, List<InstanceModelEntity>> modelsByInstanceId = new LinkedHashMap<>();
-    for (InstanceModelEntity instanceModel : instanceAggregateMapper.listModelsByInstanceIds(instanceIds)) {
-      modelsByInstanceId
-          .computeIfAbsent(instanceModel.getInstanceId(), ignored -> new ArrayList<>())
-          .add(instanceModel);
-    }
+    List<ModelChainEntry> chain = materializeChain(owner);
+    log.info(
+        "开始同步模型预设链到全部实例：presetId={}, affectedInstances={}, chainSize={}",
+        owner.getId(),
+        instances.size(),
+        chain.size()
+    );
 
     List<String> updatedInstanceIds = new ArrayList<>();
     List<String> restartedInstanceIds = new ArrayList<>();
     List<Runnable> afterCommitTasks = new ArrayList<>();
     String now = Instant.now().toString();
 
-    for (ReferencedPresetInstance reference : references) {
-      InstanceEntity instance = reference.instance();
-      List<InstanceModelEntity> currentModels = modelsByInstanceId.getOrDefault(instance.getId(), List.of());
-      List<InstanceModelEntity> nextModels = syncModelsForPreset(preset.getId(), model, currentModels);
-      if (nextModels.isEmpty()) {
-        continue;
-      }
-
+    for (InstanceEntity instance : instances) {
+      List<InstanceModelEntity> nextModels = buildInstanceModels(instance.getId(), chain);
       instanceMutationMapper.deleteModelsForInstance(instance.getId());
       for (InstanceModelEntity nextModel : nextModels) {
         instanceMutationMapper.insertModel(nextModel);
@@ -300,26 +393,46 @@ public class ModelPresetService {
     runAfterCommit(() -> afterCommitTasks.forEach(Runnable::run));
     return new ModelPresetSyncResult(
         true,
-        references.size(),
+        instances.size(),
         List.copyOf(updatedInstanceIds),
         List.copyOf(restartedInstanceIds)
     );
   }
 
-  private List<InstanceModelEntity> syncModelsForPreset(
-      String presetId,
-      NormalizedModelSelection model,
-      List<InstanceModelEntity> currentModels
-  ) {
-    List<InstanceModelEntity> nextModels = new ArrayList<>();
-    for (InstanceModelEntity currentModel : currentModels) {
-      if (presetId.equals(defaultString(currentModel.getPresetId()))) {
-        nextModels.add(toInstanceModel(currentModel.getInstanceId(), currentModel.getSortOrder(), presetId, model));
-      } else {
-        nextModels.add(currentModel);
+  /**
+   * 物化完整模型链：主预设与每个 Fallback 预设均做运行时可用性校验，返回按优先级排序的链。
+   */
+  private List<ModelChainEntry> materializeChain(ModelPresetEntity owner) {
+    List<ModelChainEntry> chain = new ArrayList<>();
+    NormalizedModelSelection primary = normalizer.normalizePreset(owner);
+    normalizer.validateRuntimeUsable(primary, owner.getName());
+    chain.add(new ModelChainEntry(primary, owner.getId()));
+    for (String fallbackId : ModelPresetFallbacks.parse(owner.getFallbackPresetIds())) {
+      ModelPresetEntity fallbackPreset = modelPresetMapper.findById(fallbackId);
+      if (fallbackPreset == null) {
+        throw new ApiException(
+            HttpStatus.BAD_REQUEST,
+            "Fallback 预设已不存在，请先调整预设配置后再同步。"
+        );
       }
+      NormalizedModelSelection fallbackModel = normalizer.normalizePreset(fallbackPreset);
+      normalizer.validateRuntimeUsable(fallbackModel, fallbackPreset.getName());
+      chain.add(new ModelChainEntry(fallbackModel, fallbackPreset.getId()));
     }
-    return nextModels;
+    return List.copyOf(chain);
+  }
+
+  private static List<InstanceModelEntity> buildInstanceModels(
+      String instanceId,
+      List<ModelChainEntry> chain
+  ) {
+    List<InstanceModelEntity> models = new ArrayList<>();
+    int sortOrder = 0;
+    for (ModelChainEntry entry : chain) {
+      models.add(toInstanceModel(instanceId, sortOrder, entry.presetId(), entry.model()));
+      sortOrder++;
+    }
+    return models;
   }
 
   private void resetModelAuth(String instanceId, String updatedAt) {

@@ -3,6 +3,7 @@ import { api, jsonBody } from "../api/http";
 import type {
   AppEvent,
   InstanceStats,
+  ModelPresetDeleteResult,
   ModelPresetSyncResult,
   ModelPresetUsage,
   ModelProviderDefinition,
@@ -903,8 +904,9 @@ export const useAdminStore = defineStore("admin", {
       return response.usage;
     },
     async deletePreset(presetId: string) {
-      await api<{ ok: boolean }>(`/api/admin/model-presets/${presetId}`, { method: "DELETE" });
+      const response = await api<ModelPresetDeleteResult>(`/api/admin/model-presets/${presetId}`, { method: "DELETE" });
       await this.reloadPresets();
+      return response;
     },
     async setDefaultPreset(presetId: string) {
       await api<{ ok: boolean }>(`/api/admin/model-presets/${presetId}/default`, { method: "POST" });

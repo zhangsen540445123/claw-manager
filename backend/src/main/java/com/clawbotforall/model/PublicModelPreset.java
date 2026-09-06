@@ -1,5 +1,7 @@
 package com.clawbotforall.model;
 
+import java.util.List;
+
 /**
  * 隐藏敏感状态后的模型预设 API 安全响应模型。
  */
@@ -20,12 +22,18 @@ public record PublicModelPreset(
     boolean hasApiKey,
     int contextWindow,
     int maxTokens,
-    String createdAt
+    String createdAt,
+    List<String> fallbackPresetIds
 ) {
 
-  public static PublicModelPreset from(ModelPresetEntity preset, boolean isConfigured) {
+  public static PublicModelPreset from(
+      ModelPresetEntity preset,
+      boolean isConfigured,
+      List<String> fallbackPresetIds
+  ) {
     String baseUrl = defaultString(preset.getBaseUrl());
     String apiKey = defaultString(preset.getApiKey());
+    List<String> fallbacks = fallbackPresetIds == null ? List.of() : List.copyOf(fallbackPresetIds);
     return new PublicModelPreset(
         preset.getId(),
         preset.getName(),
@@ -43,7 +51,8 @@ public record PublicModelPreset(
         !apiKey.trim().isEmpty(),
         preset.getContextWindow(),
         preset.getMaxTokens(),
-        preset.getCreatedAt()
+        preset.getCreatedAt(),
+        fallbacks
     );
   }
 

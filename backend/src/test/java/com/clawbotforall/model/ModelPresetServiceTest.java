@@ -121,6 +121,7 @@ class ModelPresetServiceTest {
     ModelPresetEntity deleting = preset("preset_1", true);
     ModelPresetEntity fallback = preset("preset_2", false);
     when(mapper.findById("preset_1")).thenReturn(deleting);
+    when(mapper.listAll()).thenReturn(List.of());
     when(mapper.countAll()).thenReturn(1);
     when(mapper.countDefault()).thenReturn(0);
     when(mapper.findFirstByCreatedAtDesc()).thenReturn(fallback);
@@ -160,8 +161,6 @@ class ModelPresetServiceTest {
     ModelPresetEntity preset = preset("preset_1", false);
     InstanceEntity stopped = instance("inst_stopped", "停止实例", "stopped");
     InstanceEntity running = instance("inst_running", "运行实例", "running");
-    InstanceModelEntity stoppedModel = instanceModel("inst_stopped", 0, "preset_1", "gpt-5.5");
-    InstanceModelEntity runningModel = instanceModel("inst_running", 0, "preset_1", "gpt-5.5");
     Map<String, Object> payload = Map.of(
         "name", "GPT-6",
         "isDefault", false,
@@ -172,9 +171,8 @@ class ModelPresetServiceTest {
     when(normalizer.parseBooleanFlag(false, false)).thenReturn(false);
     when(normalizer.parseBooleanFlag(true, false)).thenReturn(true);
     when(normalizer.isConfigured(preset)).thenReturn(true);
+    when(normalizer.normalizePreset(preset)).thenReturn(selection("openai", "gpt-6"));
     when(instanceAggregateMapper.listAll()).thenReturn(List.of(stopped, running));
-    when(instanceAggregateMapper.listModelsByInstanceIds(List.of("inst_stopped", "inst_running")))
-        .thenReturn(List.of(stoppedModel, runningModel));
     when(openClawRuntime.inspectInstance(stopped)).thenReturn(RuntimeState.stopped());
     when(openClawRuntime.inspectInstance(running)).thenReturn(new RuntimeState(true, "running", "now"));
 
@@ -198,6 +196,184 @@ class ModelPresetServiceTest {
     assertThat(result.sync().affectedInstances()).isEqualTo(2);
     assertThat(result.sync().updatedInstanceIds()).containsExactly("inst_stopped", "inst_running");
     assertThat(result.sync().restartedInstanceIds()).containsExactly("inst_running");
+  }
+
+  @Test
+  void createPresetWithFallbacksPersistsOrderedReferenceList() {
+    ModelPresetEntity fallbackOne = preset("preset_2", false);
+    ModelPresetEntity fallbackTwo = preset("preset_3", false);
+    when(mapper.countAll()).thenReturn(0);
+    when(normalizer.normalizePayload(any(), org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(selection("openai", "gpt-5.5"));
+    when(normalizer.parseBooleanFlag(org.mockito.ArgumentMatchers.isNull(), eq(true))).thenReturn(true);
+    when(mapper.findById("preset_2")).thenReturn(fallbackOne);
+    when(mapper.findById("preset_3")).thenReturn(fallbackTwo);
+    when(normalizer.isConfigured(any())).thenReturn(true);
+
+    PublicModelPreset result = service.createPreset(Map.of(
+        "name", "GPT-5.5",
+        "fallbackPresetIds", List.of("preset_2", "preset_3")
+    ));
+
+    ArgumentCaptor<ModelPresetEntity> captor = ArgumentCaptor.forClass(ModelPresetEntity.class);
+    verify(mapper).insert(captor.capture());
+    assertThat(ModelPresetFallbacks.parse(captor.getValue().getFallbackPresetIds()))
+        .containsExactly("preset_2", "preset_3");
+    assertThat(result.fallbackPresetIds()).containsExactly("preset_2", "preset_3");
+  }
+
+  @Test
+  void createPresetRejectsUnknownFallbackPreset() {
+    when(mapper.countAll()).thenReturn(0);
+    when(normalizer.normalizePayload(any(), org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(selection("openai", "gpt-5.5"));
+    when(normalizer.parseBooleanFlag(org.mockito.ArgumentMatchers.isNull(), eq(true))).thenReturn(true);
+
+    assertThatThrownBy(() -> service.createPreset(Map.of(
+        "name", "GPT-5.5",
+        "fallbackPresetIds", List.of("preset_missing")
+    )))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("Fallback 预设不存在。")
+        .extracting("status")
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void createPresetRejectsUnconfiguredFallbackPreset() {
+    ModelPresetEntity fallback = preset("preset_2", false);
+    when(mapper.countAll()).thenReturn(0);
+    when(normalizer.normalizePayload(any(), org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(selection("openai", "gpt-5.5"));
+    when(normalizer.parseBooleanFlag(org.mockito.ArgumentMatchers.isNull(), eq(true))).thenReturn(true);
+    when(mapper.findById("preset_2")).thenReturn(fallback);
+    when(normalizer.isConfigured(fallback)).thenReturn(false);
+
+    assertThatThrownBy(() -> service.createPreset(Map.of(
+        "name", "GPT-5.5",
+        "fallbackPresetIds", List.of("preset_2")
+    )))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("Fallback 预设“preset_2”尚未配置完成，请先补全配置。")
+        .extracting("status")
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void updatePresetRejectsSelfFallback() {
+    ModelPresetEntity preset = preset("preset_1", false);
+    when(mapper.findById("preset_1")).thenReturn(preset);
+    when(normalizer.normalizePayload(any(), eq(preset))).thenReturn(selection("openai", "gpt-6"));
+
+    assertThatThrownBy(() -> service.updatePreset("preset_1", Map.of(
+        "name", "GPT-6",
+        "isDefault", false,
+        "fallbackPresetIds", List.of("preset_1")
+    )))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("预设不能引用自身作为 Fallback。")
+        .extracting("status")
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void updatePresetRejectsCyclicFallbackChain() {
+    ModelPresetEntity owner = preset("preset_1", false);
+    ModelPresetEntity fallback = preset("preset_2", false);
+    fallback.setFallbackPresetIds("[\"preset_1\"]");
+    when(mapper.findById("preset_1")).thenReturn(owner);
+    when(mapper.findById("preset_2")).thenReturn(fallback);
+    when(normalizer.normalizePayload(any(), eq(owner))).thenReturn(selection("openai", "gpt-6"));
+    when(normalizer.isConfigured(fallback)).thenReturn(true);
+
+    assertThatThrownBy(() -> service.updatePreset("preset_1", Map.of(
+        "name", "GPT-6",
+        "isDefault", false,
+        "fallbackPresetIds", List.of("preset_2")
+    )))
+        .isInstanceOf(ApiException.class)
+        .hasMessage("Fallback 配置不能形成循环引用。")
+        .extracting("status")
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void saveAndSyncAppliesFullPrimaryAndFallbackChainToAllInstances() {
+    ModelPresetEntity preset = preset("preset_1", false);
+    ModelPresetEntity fallback = preset("preset_2", false);
+    InstanceEntity stopped = instance("inst_stopped", "停止实例", "stopped");
+    InstanceEntity running = instance("inst_running", "运行实例", "running");
+    Map<String, Object> payload = Map.of(
+        "name", "GPT-6",
+        "isDefault", false,
+        "fallbackPresetIds", List.of("preset_2"),
+        "syncReferencedInstances", true
+    );
+    when(mapper.findById("preset_1")).thenReturn(preset);
+    when(mapper.findById("preset_2")).thenReturn(fallback);
+    when(normalizer.normalizePayload(payload, preset)).thenReturn(selection("openai", "gpt-6"));
+    when(normalizer.parseBooleanFlag(false, false)).thenReturn(false);
+    when(normalizer.parseBooleanFlag(true, false)).thenReturn(true);
+    when(normalizer.isConfigured(preset)).thenReturn(true);
+    when(normalizer.isConfigured(fallback)).thenReturn(true);
+    when(normalizer.normalizePreset(preset)).thenReturn(selection("openai", "gpt-6"));
+    when(normalizer.normalizePreset(fallback)).thenReturn(selection("anthropic", "claude-4"));
+    when(instanceAggregateMapper.listAll()).thenReturn(List.of(stopped, running));
+    when(openClawRuntime.inspectInstance(stopped)).thenReturn(RuntimeState.stopped());
+    when(openClawRuntime.inspectInstance(running)).thenReturn(new RuntimeState(true, "running", "now"));
+
+    ModelPresetUpdateResult result = service.updatePreset("preset_1", payload);
+
+    ArgumentCaptor<InstanceModelEntity> captor = ArgumentCaptor.forClass(InstanceModelEntity.class);
+    verify(mapper).update(preset);
+    verify(instanceMutationMapper, org.mockito.Mockito.times(2)).deleteModelsForInstance(any());
+    verify(instanceMutationMapper, org.mockito.Mockito.times(4)).insertModel(captor.capture());
+    verify(fileService).writeInstanceFiles(eq(stopped), any());
+    verify(provisioningService).startProvisioning("inst_running");
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getSortOrder)
+        .containsExactly(0, 1, 0, 1);
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getPresetId)
+        .containsExactly("preset_1", "preset_2", "preset_1", "preset_2");
+    assertThat(captor.getAllValues()).extracting(InstanceModelEntity::getModelId)
+        .containsExactly("gpt-6", "claude-4", "gpt-6", "claude-4");
+    assertThat(result.sync().requested()).isTrue();
+    assertThat(result.sync().affectedInstances()).isEqualTo(2);
+    assertThat(result.sync().updatedInstanceIds()).containsExactly("inst_stopped", "inst_running");
+    assertThat(result.sync().restartedInstanceIds()).containsExactly("inst_running");
+  }
+
+  @Test
+  void updateWithoutSyncLeavesInstancesUntouched() {
+    ModelPresetEntity preset = preset("preset_1", false);
+    Map<String, Object> payload = Map.of("name", "GPT-6", "isDefault", false);
+    when(mapper.findById("preset_1")).thenReturn(preset);
+    when(normalizer.normalizePayload(payload, preset)).thenReturn(selection("openai", "gpt-6"));
+    when(normalizer.parseBooleanFlag(false, false)).thenReturn(false);
+    when(normalizer.parseBooleanFlag(org.mockito.ArgumentMatchers.isNull(), eq(false))).thenReturn(false);
+    when(normalizer.isConfigured(preset)).thenReturn(true);
+
+    ModelPresetUpdateResult result = service.updatePreset("preset_1", payload);
+
+    verify(mapper).update(preset);
+    verify(instanceMutationMapper, org.mockito.Mockito.never()).deleteModelsForInstance(any());
+    verify(instanceMutationMapper, org.mockito.Mockito.never()).insertModel(any());
+    assertThat(result.sync().requested()).isFalse();
+  }
+
+  @Test
+  void deletingPresetCleansUpFallbackReferencesFromOtherPresets() {
+    ModelPresetEntity deleting = preset("preset_1", false);
+    ModelPresetEntity referencing = preset("preset_2", false);
+    referencing.setFallbackPresetIds("[\"preset_1\"]");
+    when(mapper.findById("preset_1")).thenReturn(deleting);
+    when(mapper.listAll()).thenReturn(List.of(deleting, referencing));
+
+    List<String> affected = service.deletePreset("preset_1");
+
+    verify(mapper).delete("preset_1");
+    verify(mapper).update(referencing);
+    assertThat(referencing.getFallbackPresetIds()).isNull();
+    assertThat(affected).containsExactly("preset_2");
   }
 
   private static NormalizedModelSelection selection(String providerId, String modelId) {

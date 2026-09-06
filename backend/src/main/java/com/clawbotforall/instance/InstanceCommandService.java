@@ -1,11 +1,14 @@
 package com.clawbotforall.instance;
 
+import com.clawbotforall.model.ModelChainEntry;
 import com.clawbotforall.model.ModelPresetEntity;
+import com.clawbotforall.model.ModelPresetFallbacks;
 import com.clawbotforall.model.ModelPresetMapper;
 import com.clawbotforall.model.ModelPresetNormalizer;
 import com.clawbotforall.model.NormalizedModelSelection;
 import com.clawbotforall.web.ApiException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.dao.DuplicateKeyException;
@@ -67,6 +70,7 @@ public class InstanceCommandService {
     try {
       instanceMutationMapper.insertInstance(draft.instance());
       instanceMutationMapper.insertModel(draft.model());
+      insertFallbackChain(draft.instance().getId(), runtimeModel.fallbackChain());
       instanceMutationMapper.insertProvisioning(draft.provisioning());
       instanceMutationMapper.insertModelAuth(draft.modelAuth());
     } catch (DuplicateKeyException error) {
@@ -74,11 +78,12 @@ public class InstanceCommandService {
     }
 
     log.info(
-        "OpenClaw 实例记录已创建：instanceId={}, name={}, port={}, presetId={}",
+        "OpenClaw 实例记录已创建：instanceId={}, name={}, port={}, presetId={}, chainSize={}",
         draft.instance().getId(),
         draft.instance().getName(),
         draft.instance().getPort(),
-        runtimeModel.presetId()
+        runtimeModel.presetId(),
+        runtimeModel.fallbackChain().size() + 1
     );
     return draft.instance();
   }
@@ -188,6 +193,9 @@ public class InstanceCommandService {
     log.info("已将配对微信账号标记为运行可用：instanceId={}, accountCount={}", instanceId, accounts.size());
   }
 
+  /**
+   * 解析所选预设的主模型与其一级 Fallback 链，整链做运行时可用性校验。
+   */
   private ResolvedRuntimeModel resolveRuntimeModel(Map<String, Object> payload) {
     String presetId = trimString(payload.get("presetId"));
     if (presetId.isBlank()) {
@@ -199,7 +207,58 @@ public class InstanceCommandService {
     }
     NormalizedModelSelection model = modelPresetNormalizer.normalizePreset(preset);
     modelPresetNormalizer.validateRuntimeUsable(model, preset.getName());
-    return new ResolvedRuntimeModel(model, presetId);
+
+    List<ModelChainEntry> fallbackChain = new ArrayList<>();
+    for (String fallbackId : ModelPresetFallbacks.parse(preset.getFallbackPresetIds())) {
+      ModelPresetEntity fallbackPreset = modelPresetMapper.findById(fallbackId);
+      if (fallbackPreset == null) {
+        throw new ApiException(
+            HttpStatus.BAD_REQUEST,
+            "所选预设的 Fallback 模型预设已不存在，请先调整预设配置。"
+        );
+      }
+      NormalizedModelSelection fallbackModel = modelPresetNormalizer.normalizePreset(fallbackPreset);
+      modelPresetNormalizer.validateRuntimeUsable(fallbackModel, fallbackPreset.getName());
+      fallbackChain.add(new ModelChainEntry(fallbackModel, fallbackPreset.getId()));
+    }
+
+    return new ResolvedRuntimeModel(model, presetId, List.copyOf(fallbackChain));
+  }
+
+  /**
+   * 将一级 Fallback 链按 sort_order 从 1 起写入实例模型记录。
+   */
+  private void insertFallbackChain(String instanceId, List<ModelChainEntry> fallbackChain) {
+    int sortOrder = 1;
+    for (ModelChainEntry entry : fallbackChain) {
+      instanceMutationMapper.insertModel(toInstanceModel(instanceId, sortOrder, entry));
+      sortOrder++;
+    }
+  }
+
+  private static InstanceModelEntity toInstanceModel(
+      String instanceId,
+      int sortOrder,
+      ModelChainEntry entry
+  ) {
+    InstanceModelEntity entity = new InstanceModelEntity();
+    entity.setInstanceId(instanceId);
+    entity.setSortOrder(sortOrder);
+    entity.setPresetId(entry.presetId());
+    entity.setProviderKey(entry.model().providerKey());
+    entity.setProviderId(entry.model().providerId());
+    entity.setModelId(entry.model().modelId());
+    entity.setApiMode(entry.model().apiMode());
+    entity.setAuthType(entry.model().authType());
+    entity.setAuthProviderId(entry.model().authProviderId());
+    entity.setAuthMethodId(entry.model().authMethodId());
+    entity.setBaseUrl(entry.model().baseUrl());
+    entity.setApiKey(entry.model().apiKey());
+    entity.setProviderConfig(entry.model().providerConfigJson());
+    entity.setExtra(entry.model().extraJson());
+    entity.setContextWindow(entry.model().contextWindow());
+    entity.setMaxTokens(entry.model().maxTokens());
+    return entity;
   }
 
   private static String trimString(Object value) {
@@ -208,6 +267,7 @@ public class InstanceCommandService {
 
   private record ResolvedRuntimeModel(
       NormalizedModelSelection model,
-      String presetId
+      String presetId,
+      List<ModelChainEntry> fallbackChain
   ) {}
 }

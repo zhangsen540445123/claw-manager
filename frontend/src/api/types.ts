@@ -25,6 +25,7 @@ export interface PublicModelPreset {
   maxTokens: number;
   hasBaseUrl: boolean;
   hasApiKey: boolean;
+  fallbackPresetIds: string[];
   createdAt: string;
 }
 
@@ -415,6 +416,11 @@ export interface ModelPresetSyncResult {
   affectedInstances: number;
   updatedInstanceIds: string[];
   restartedInstanceIds: string[];
+}
+
+export interface ModelPresetDeleteResult {
+  ok: boolean;
+  removedFromFallbackPresets: string[];
 }
 
 export interface InstanceStats {

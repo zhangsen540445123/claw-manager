@@ -19,6 +19,7 @@ public class ModelPresetEntity {
   private String apiKey;
   private String providerConfig;
   private String extra;
+  private String fallbackPresetIds;
   private int contextWindow;
   private int maxTokens;
   private String createdAt;
@@ -141,6 +142,14 @@ public class ModelPresetEntity {
 
   public void setExtra(String extra) {
     this.extra = extra;
+  }
+
+  public String getFallbackPresetIds() {
+    return fallbackPresetIds;
+  }
+
+  public void setFallbackPresetIds(String fallbackPresetIds) {
+    this.fallbackPresetIds = fallbackPresetIds;
   }
 
   public int getContextWindow() {

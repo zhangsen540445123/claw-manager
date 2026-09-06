@@ -450,7 +450,7 @@ function openControlUi(instance: PublicInstance) {
                       circle
                       :icon="Trash2"
                       :loading="actionLoading === `preset:delete:${row.id}`"
-                      @click="runAction(`preset:delete:${row.id}`, () => admin.deletePreset(row.id))"
+                      @click="runAction(`preset:delete:${row.id}`, async () => { await admin.deletePreset(row.id); })"
                     />
                   </el-tooltip>
                 </template>

@@ -2,6 +2,7 @@ package com.clawbotforall.model;
 
 import com.clawbotforall.auth.AuthenticatedAdmin;
 import com.clawbotforall.web.ApiException;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -85,8 +86,8 @@ public class ModelPresetController {
       Authentication authentication
   ) {
     requireAdmin(authentication);
-    modelPresetService.deletePreset(presetId);
-    return Map.of("ok", true);
+    List<String> removed = modelPresetService.deletePreset(presetId);
+    return Map.of("ok", true, "removedFromFallbackPresets", removed);
   }
 
   @PostMapping("/admin/model-presets/{presetId}/default")
