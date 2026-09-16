@@ -970,10 +970,11 @@ public class WechatBindLinkService {
   private void markConnected(WechatBindLinkEntity link) {
     String accountId = defaultString(link.getTargetAccountId()).trim();
     String wechatUserId = defaultString(link.getScannedWechatUserId()).trim();
+    boolean preserveMiniappAssociation = hasText(link.getMiniappOpenidHash());
     link.setStatus("connected");
     link.setErrorMessage(null);
     String now = Instant.now().toString();
-    redactTerminalAudit(link);
+    redactTerminalAudit(link, preserveMiniappAssociation);
     link.setCompletedAt(now);
     link.setUpdatedAt(now);
     linkMapper.update(link);
