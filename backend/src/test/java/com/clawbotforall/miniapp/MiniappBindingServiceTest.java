@@ -118,6 +118,7 @@ class MiniappBindingServiceTest {
         "openid_hash_1", "token_2", "2026-07-19T12:00:00Z");
     verify(bindingMapper, never()).updateBindToken(
         "openid_hash_1", "token_2", "2026-07-19T12:00:00Z");
+    assertThat(result.status()).isEqualTo("connected");
     assertThat(result.canCreateUserKey()).isTrue();
     assertThat(binding.getBindStatus()).isEqualTo("connected");
   }

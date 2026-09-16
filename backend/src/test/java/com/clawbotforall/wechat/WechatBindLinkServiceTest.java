@@ -641,13 +641,14 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
-  void newUserLinkPublishesScannedAndInitializingBeforeConnected() {
+  void miniappLinkPublishesScannedAndInitializingBeforeConnectedAndPreservesAssociation() {
     InstanceEntity instance = instance("inst_1", "实例一", "running");
     WechatBindLinkEntity stored = newLink("token_status_steps");
     stored.setStatus("waiting_scan");
     stored.setPhone("13900000001");
     stored.setInstanceId("inst_1");
     stored.setTargetAccountId("cmwx_status_steps");
+    stored.setMiniappOpenidHash("miniapp_hash_1");
     AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
     List<String> statusUpdates = new ArrayList<>();
     when(linkMapper.findByToken("token_status_steps")).thenAnswer(invocation -> saved.get());
@@ -679,13 +680,13 @@ class WechatBindLinkServiceTest {
     assertThat(saved.get().getQrLink()).isNull();
     assertThat(saved.get().getTargetAccountId()).isNull();
     assertThat(saved.get().getScannedWechatUserId()).isNull();
-    assertThat(saved.get().getMiniappOpenidHash()).isNull();
+    assertThat(saved.get().getMiniappOpenidHash()).isEqualTo("miniapp_hash_1");
     assertThat(saved.get().getCleanupError()).isNull();
     verify(applicationEventPublisher).publishEvent(new WechatBindConnectedEvent(
         "inst_1",
         "554603a4df61-im-bot",
         "wechat-user",
-        ""
+        "miniapp_hash_1"
     ));
   }
 
