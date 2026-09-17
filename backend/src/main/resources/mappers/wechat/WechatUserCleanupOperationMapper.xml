@@ -36,17 +36,17 @@
   </select>
   <select id="findActiveByIdentityForUpdate" resultMap="OperationMap">
     SELECT * FROM wechat_user_cleanup_operations
-    WHERE instance_id COLLATE utf8mb4_unicode_ci = #{instanceId} COLLATE utf8mb4_unicode_ci
+    WHERE instance_id COLLATE utf8mb4_unicode_ci = #{instanceId}
       AND status IN ('pending','cleaning','cleanup_failed')
       AND (
         (#{phone} IS NOT NULL AND #{phone} != ''
-          AND phone COLLATE utf8mb4_unicode_ci = #{phone} COLLATE utf8mb4_unicode_ci)
+          AND phone COLLATE utf8mb4_unicode_ci = #{phone})
         OR (#{wechatUserId} IS NOT NULL AND #{wechatUserId} != ''
-          AND wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId} COLLATE utf8mb4_unicode_ci)
+          AND wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId})
         OR (#{accountId} IS NOT NULL AND #{accountId} != ''
-          AND account_id COLLATE utf8mb4_unicode_ci = #{accountId} COLLATE utf8mb4_unicode_ci)
+          AND account_id COLLATE utf8mb4_unicode_ci = #{accountId})
         OR (#{agentId} IS NOT NULL AND #{agentId} != ''
-          AND agent_id COLLATE utf8mb4_unicode_ci = #{agentId} COLLATE utf8mb4_unicode_ci)
+          AND agent_id COLLATE utf8mb4_unicode_ci = #{agentId})
       )
     ORDER BY created_at DESC LIMIT 1 FOR UPDATE
   </select>

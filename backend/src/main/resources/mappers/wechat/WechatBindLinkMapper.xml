@@ -60,7 +60,7 @@
         OR (
           #{targetAccountId} IS NOT NULL
           AND #{targetAccountId} != ''
-          AND target_account_id COLLATE utf8mb4_unicode_ci = #{targetAccountId} COLLATE utf8mb4_unicode_ci
+          AND target_account_id COLLATE utf8mb4_unicode_ci = #{targetAccountId}
         )
       )
     ORDER BY created_at DESC, token ASC
@@ -162,11 +162,11 @@
       )
       AND (
         (#{phone} IS NOT NULL AND #{phone} != ''
-          AND phone COLLATE utf8mb4_unicode_ci = #{phone} COLLATE utf8mb4_unicode_ci)
+          AND phone COLLATE utf8mb4_unicode_ci = #{phone})
         OR (#{accountId} IS NOT NULL AND #{accountId} != ''
-          AND target_account_id COLLATE utf8mb4_unicode_ci = #{accountId} COLLATE utf8mb4_unicode_ci)
+          AND target_account_id COLLATE utf8mb4_unicode_ci = #{accountId})
         OR (#{wechatUserId} IS NOT NULL AND #{wechatUserId} != ''
-          AND scanned_wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId} COLLATE utf8mb4_unicode_ci)
+          AND scanned_wechat_user_id COLLATE utf8mb4_unicode_ci = #{wechatUserId})
       )
     ORDER BY created_at DESC
     LIMIT 1
