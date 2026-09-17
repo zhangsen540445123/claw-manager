@@ -55,7 +55,7 @@ class WechatUserQueryServiceTest {
     when(aggregateMapper.listAllWechatAccounts()).thenReturn(List.of(account));
     when(aggregateMapper.listWechatAccountChannelsByInstanceIds(List.of("inst-1"))).thenReturn(List.of(channel));
     when(identityMapper.findByWechatUserId("wechat-1")).thenReturn(identity);
-    when(cleanupMapper.listActive()).thenReturn(List.of(cleaning, ghost));
+    when(cleanupMapper.listVisible()).thenReturn(List.of(cleaning, ghost));
 
     List<PublicWechatUser> users = new WechatUserQueryService(
         aggregateMapper, identityMapper, miniappBindingMapper, cleanupMapper).listUsers();
@@ -85,7 +85,7 @@ class WechatUserQueryServiceTest {
     when(aggregateMapper.listAllWechatAccounts()).thenReturn(List.of(account));
     when(aggregateMapper.listWechatAccountChannelsByInstanceIds(List.of("inst-1"))).thenReturn(List.of());
     when(identityMapper.findByWechatUserId("wechat-1")).thenReturn(null);
-    when(cleanupMapper.listActive()).thenReturn(List.of(pending));
+    when(cleanupMapper.listVisible()).thenReturn(List.of(pending));
 
     List<PublicWechatUser> users = new WechatUserQueryService(
         aggregateMapper, identityMapper, miniappBindingMapper, cleanupMapper).listUsers();
@@ -102,12 +102,63 @@ class WechatUserQueryServiceTest {
     when(aggregateMapper.listAll()).thenReturn(List.of(instance));
     when(aggregateMapper.listAllWechatAccounts()).thenReturn(List.of());
     when(aggregateMapper.listWechatAccountChannelsByInstanceIds(List.of("inst-1"))).thenReturn(List.of());
-    when(cleanupMapper.listActive()).thenReturn(List.of(pending));
+    when(cleanupMapper.listVisible()).thenReturn(List.of(pending));
 
     List<PublicWechatUser> users = new WechatUserQueryService(
         aggregateMapper, identityMapper, miniappBindingMapper, cleanupMapper).listUsers();
 
     assertThat(users).singleElement().extracting(PublicWechatUser::recordState).isEqualTo("cleaning");
+  }
+
+  @Test
+  void exposesCancelledGhostCleanupAsSupersededAuditEntry() {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst-1");
+    WechatUserCleanupOperationEntity cancelled = operation("op-cancelled", "inst-1", "ghost-account", "cancelled");
+    cancelled.setStage("superseded");
+    cancelled.setLastError("绑定已完成，已跳过幽灵账号清理。");
+
+    when(aggregateMapper.listAll()).thenReturn(List.of(instance));
+    when(aggregateMapper.listAllWechatAccounts()).thenReturn(List.of());
+    when(aggregateMapper.listWechatAccountChannelsByInstanceIds(List.of("inst-1"))).thenReturn(List.of());
+    when(cleanupMapper.listVisible()).thenReturn(List.of(cancelled));
+
+    List<PublicWechatUser> users = new WechatUserQueryService(
+        aggregateMapper, identityMapper, miniappBindingMapper, cleanupMapper).listUsers();
+
+    assertThat(users).singleElement().satisfies(user -> {
+      assertThat(user.recordState()).isEqualTo("superseded");
+      assertThat(user.retryable()).isFalse();
+      assertThat(user.cleanupStage()).isEqualTo("superseded");
+      assertThat(user.cleanupError()).contains("已跳过");
+    });
+  }
+
+  @Test
+  void doesNotDuplicateSupersededOperationWhenBoundAccountIsStillVisible() {
+    InstanceEntity instance = new InstanceEntity();
+    instance.setId("inst-1");
+    WechatPairedAccountEntity account = new WechatPairedAccountEntity();
+    account.setInstanceId("inst-1");
+    account.setAccountId("account-1");
+    account.setWechatUserId("wechat-1");
+    WechatUserCleanupOperationEntity cancelled = operation("op-cancelled", "inst-1", "account-1", "cancelled");
+    cancelled.setStage("superseded");
+
+    when(aggregateMapper.listAll()).thenReturn(List.of(instance));
+    when(aggregateMapper.listAllWechatAccounts()).thenReturn(List.of(account));
+    when(aggregateMapper.listWechatAccountChannelsByInstanceIds(List.of("inst-1"))).thenReturn(List.of());
+    when(identityMapper.findByWechatUserId("wechat-1")).thenReturn(null);
+    when(cleanupMapper.listVisible()).thenReturn(List.of(cancelled));
+
+    List<PublicWechatUser> users = new WechatUserQueryService(
+        aggregateMapper, identityMapper, miniappBindingMapper, cleanupMapper).listUsers();
+
+    assertThat(users).singleElement().satisfies(user -> {
+      assertThat(user.accountId()).isEqualTo("account-1");
+      assertThat(user.recordState()).isEqualTo("superseded");
+      assertThat(user.cleanupOperationId()).isEqualTo("op-cancelled");
+    });
   }
 
   private static WechatUserCleanupOperationEntity operation(

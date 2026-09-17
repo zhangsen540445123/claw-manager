@@ -12,9 +12,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.runtime.InstanceStats;
 import com.clawbotforall.wechat.WechatBindLinkMapper;
+import com.clawbotforall.wechat.WechatUserCleanupOperationEntity;
 import com.clawbotforall.wechat.WechatUserCleanupOperationMapper;
+import com.clawbotforall.wechat.WechatUserCleanupService;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.ProxyTarget;
 import com.clawbotforall.runtime.RunnerImageStatus;
@@ -78,6 +81,12 @@ class ApplicationIntegrationTest {
   @Autowired
   WechatUserCleanupOperationMapper wechatUserCleanupOperationMapper;
 
+  @Autowired
+  WechatUserCleanupService wechatUserCleanupService;
+
+  @Autowired
+  InstanceFileService instanceFileService;
+
   @MockBean
   OpenClawRuntime openClawRuntime;
 
@@ -106,6 +115,172 @@ class ApplicationIntegrationTest {
     assertThat(wechatUserCleanupOperationMapper.findActiveByIdentityForUpdate(
         "missing_instance", null, "wechat_user_1", "account_1", null))
         .isNull();
+  }
+
+  @Test
+  void accountSyncCleanupCreatedBeforeAccountLandsIsSupersededAndPreservesState() throws Exception {
+    String instanceId = "inst_cleanup_race";
+    String accountId = "wx_cleanup_race";
+    String wechatUserId = "wechat-cleanup-race";
+    String agentId = "user_0123456789abcdef0123456789abcdef";
+    String openidHash = "cleanup-race-openid-hash";
+    String openvikingUserId = "openviking-cleanup-race";
+    String timestamp = "2026-09-18T00:00:00Z";
+
+    jdbcTemplate.update(
+        """
+            INSERT INTO instances
+              (id, name, slug, status, port, dashboard_url, container_name, gateway_token,
+               plugins_allow, plugins_entries, created_at, updated_at)
+            VALUES (?, ?, ?, 'running', 39999, ?, ?, ?, '[]', '[]', ?, ?)
+            """,
+        instanceId,
+        "Cleanup Race",
+        "cleanup-race",
+        "http://127.0.0.1:39999",
+        "cleanup-race",
+        "cleanup-race-token",
+        timestamp,
+        timestamp
+    );
+
+    WechatUserCleanupOperationEntity operation = new WechatUserCleanupOperationEntity();
+    operation.setOperationId("op_cleanup_race");
+    operation.setInstanceId(instanceId);
+    operation.setSource("account_sync");
+    operation.setSubjectHash("cleanup-race-subject");
+    operation.setWechatUserId(wechatUserId);
+    operation.setAccountId(accountId);
+    operation.setAgentId(agentId);
+    operation.setOpenvikingUserId(openvikingUserId);
+    operation.setApiPeerIdsJson("[]");
+    operation.setOldSessionIdsJson("[]");
+    operation.setProtectedAgentIdsJson("[]");
+    operation.setSnapshotJson("""
+        {"evidenceTypes":["wechat_account_state"],"instanceRunningBeforeCleanup":false}
+        """);
+    operation.setStatus("pending");
+    operation.setStage("validated");
+    operation.setAttemptCount(0);
+    operation.setCreatedAt(timestamp);
+    operation.setUpdatedAt(timestamp);
+    assertThat(wechatUserCleanupOperationMapper.insert(operation)).isEqualTo(1);
+
+    jdbcTemplate.update(
+        """
+            INSERT INTO user_agent_identities
+              (agent_id, wechat_user_id, openviking_user_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+        agentId,
+        wechatUserId,
+        openvikingUserId,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO wechat_paired_accounts
+              (account_id, phone, instance_id, wechat_user_id, remark, base_url, saved_at, bound_at, updated_at)
+            VALUES (?, NULL, ?, ?, NULL, ?, ?, ?, ?)
+            """,
+        accountId,
+        instanceId,
+        wechatUserId,
+        "https://wechat.example.test",
+        timestamp,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_bindings
+              (openid_hash, openid, instance_id, agent_id, wechat_user_id, openviking_user_id,
+               bind_status, current_bind_token, bound_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'bound', NULL, ?, ?, ?)
+            """,
+        openidHash,
+        "openid-cleanup-race",
+        instanceId,
+        agentId,
+        wechatUserId,
+        openvikingUserId,
+        timestamp,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_keys
+              (openid_hash, openid, user_key, key_preview, enabled, created_at, updated_at, last_used_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, NULL)
+            """,
+        openidHash,
+        "openid-cleanup-race",
+        "cleanup-race-user-key",
+        "cleanup...user-key",
+        timestamp,
+        timestamp
+    );
+
+    Path credential = instanceFileService.paths(instanceId).homeDir()
+        .resolve(".openclaw/openclaw-weixin/accounts")
+        .resolve(accountId + ".json");
+    Files.createDirectories(credential.getParent());
+    Files.writeString(credential, "{\"token\":\"must-remain\"}");
+
+    wechatUserCleanupService.resume(operation.getOperationId());
+
+    String status = "";
+    long deadline = System.currentTimeMillis() + 5_000;
+    while (System.currentTimeMillis() < deadline) {
+      status = jdbcTemplate.queryForObject(
+          "SELECT status FROM wechat_user_cleanup_operations WHERE operation_id = ?",
+          String.class,
+          operation.getOperationId()
+      );
+      if ("cancelled".equals(status)) {
+        break;
+      }
+      Thread.sleep(50);
+    }
+
+    assertThat(status).isEqualTo("cancelled");
+    Map<String, Object> persistedOperation = jdbcTemplate.queryForMap(
+        """
+            SELECT stage, completed_at, deleted_bindings, deleted_files, deleted_database_rows, last_error
+            FROM wechat_user_cleanup_operations
+            WHERE operation_id = ?
+            """,
+        operation.getOperationId()
+    );
+    assertThat(persistedOperation.get("stage")).isEqualTo("superseded");
+    assertThat(persistedOperation.get("completed_at")).isNotNull();
+    assertThat(((Number) persistedOperation.get("deleted_bindings")).intValue()).isZero();
+    assertThat(((Number) persistedOperation.get("deleted_files")).intValue()).isZero();
+    assertThat(((Number) persistedOperation.get("deleted_database_rows")).intValue()).isZero();
+    assertThat((String) persistedOperation.get("last_error")).contains("已跳过");
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM wechat_paired_accounts WHERE account_id = ?",
+        Long.class,
+        accountId
+    )).isEqualTo(1L);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM user_agent_identities WHERE agent_id = ?",
+        Long.class,
+        agentId
+    )).isEqualTo(1L);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_bindings WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isEqualTo(1L);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_keys WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isEqualTo(1L);
+    assertThat(credential).exists();
   }
 
   @Test

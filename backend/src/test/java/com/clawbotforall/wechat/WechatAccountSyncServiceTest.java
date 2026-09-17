@@ -126,6 +126,18 @@ class WechatAccountSyncServiceTest {
   }
 
   @Test
+  void skipsGhostCleanupWhenInstanceHasActiveBindingWork() throws Exception {
+    InstanceEntity instance = instanceWithStateAccount();
+    when(aggregateMapper.listWechatAccountsByInstanceIds(List.of("inst_1"))).thenReturn(List.of(), List.of());
+    when(bindLinkMapper.listProtectedAccountIds(eq("inst_1"), anyString())).thenReturn(List.of());
+    when(bindLinkMapper.hasActiveBindingWork(eq("inst_1"), anyString())).thenReturn(true);
+
+    service.syncInstanceAccounts(instance);
+
+    verify(cleanupService, never()).startResidue(any(), any(), anyString());
+  }
+
+  @Test
   void schedulesUnprotectedGhostAccountThroughPersistentCleanupService() throws Exception {
     InstanceEntity instance = instanceWithStateAccount();
     Path stateDir = tempDir.resolve("home").resolve(".openclaw").resolve("openclaw-weixin");

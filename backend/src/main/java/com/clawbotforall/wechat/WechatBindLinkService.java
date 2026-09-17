@@ -568,7 +568,8 @@ public class WechatBindLinkService {
     WechatPairedAccountEntity existingByAccount = aggregateMapper.findWechatAccountByAccountId(accountId);
     if (existingByAccount != null) {
       refreshOriginalAccountCredential(instance, accountId, existingByAccount);
-      cleanupRejectedNewLogin(instance, link, accountId, protectedAccountId(instance, existingByAccount));
+      cleanupRejectedNewLoginCredentials(
+          instance, completion.requestedAccountId(), accountId, protectedAccountId(instance, existingByAccount));
       restartExistingWechatChannel(existingByAccount);
       markRejected(link, "该微信已绑定到其他手机号或实例，请联系管理员处理。");
       return linkMapper.findByToken(link.getToken());
@@ -577,7 +578,8 @@ public class WechatBindLinkService {
     WechatPairedAccountEntity existingByWechatUser = aggregateMapper.findWechatAccountByWechatUserId(wechatUserId);
     if (existingByWechatUser != null) {
       refreshOriginalAccountCredential(instance, accountId, existingByWechatUser);
-      cleanupRejectedNewLogin(instance, link, accountId, protectedAccountId(instance, existingByWechatUser));
+      cleanupRejectedNewLoginCredentials(
+          instance, completion.requestedAccountId(), accountId, protectedAccountId(instance, existingByWechatUser));
       restartExistingWechatChannel(existingByWechatUser);
       markRejected(link, "该微信已绑定到其他手机号或实例，请联系管理员处理。");
       return linkMapper.findByToken(link.getToken());
@@ -598,7 +600,7 @@ public class WechatBindLinkService {
     try {
       mutationMapper.insertWechatAccount(account);
     } catch (DuplicateKeyException error) {
-      cleanupRejectedNewLogin(instance, link, accountId, "");
+      cleanupRejectedNewLoginCredentials(instance, completion.requestedAccountId(), accountId, "");
       markRejected(link, "该手机号或微信账号已完成绑定，请联系管理员处理。");
       return linkMapper.findByToken(link.getToken());
     }
@@ -829,6 +831,18 @@ public class WechatBindLinkService {
     cleanupRejectedNewLogin(instance.getId(), link, actualAccountId, protectedAccountId);
   }
 
+  private void cleanupRejectedNewLoginCredentials(
+      InstanceEntity instance,
+      String requestedAccountId,
+      String actualAccountId,
+      String protectedAccountId
+  ) {
+    java.util.LinkedHashSet<String> accountIds = new java.util.LinkedHashSet<>();
+    accountIds.add(defaultString(requestedAccountId).trim());
+    accountIds.add(defaultString(actualAccountId).trim());
+    accountIds.forEach(accountId -> cleanupAccountStateIfUnbound(instance, accountId, protectedAccountId));
+  }
+
   private void cleanupRejectedNewLogin(
       String instanceId,
       WechatBindLinkEntity link,
@@ -938,7 +952,11 @@ public class WechatBindLinkService {
 
   private WechatBindLinkEntity markScanned(WechatBindLinkEntity link, WechatBindService.BindCompletion completion) {
     clearQr(link);
+    String accountId = defaultString(completion.accountId()).trim();
     String wechatUserId = defaultString(completion.wechatUserId()).trim();
+    if ("new".equals(link.getMode()) && !accountId.isBlank()) {
+      link.setTargetAccountId(accountId);
+    }
     if (!wechatUserId.isBlank()) {
       link.setScannedWechatUserId(wechatUserId);
     }
@@ -946,7 +964,7 @@ public class WechatBindLinkService {
     link.setErrorMessage(null);
     link.setUpdatedAt(Instant.now().toString());
     linkMapper.update(link);
-    logStatusChange(link, "scanned", defaultString(completion.accountId()).trim(), wechatUserId, "");
+    logStatusChange(link, "scanned", accountId, wechatUserId, "");
     return link;
   }
 

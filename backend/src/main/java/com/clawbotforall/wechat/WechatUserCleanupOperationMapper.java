@@ -18,6 +18,7 @@ public interface WechatUserCleanupOperationMapper {
       @Param("agentId") String agentId);
   List<WechatUserCleanupOperationEntity> listByInstance(@Param("instanceId") String instanceId);
   List<WechatUserCleanupOperationEntity> listActive();
+  List<WechatUserCleanupOperationEntity> listVisible();
   int insert(WechatUserCleanupOperationEntity operation);
   int update(WechatUserCleanupOperationEntity operation);
   int redactByInstanceId(@Param("instanceId") String instanceId, @Param("updatedAt") String updatedAt);

@@ -149,6 +149,29 @@
       AND account_id != ''
   </select>
 
+  <select id="hasActiveBindingWork" resultType="boolean">
+    SELECT (
+      EXISTS(
+        SELECT 1
+        FROM wechat_bind_links
+        WHERE instance_id = #{instanceId}
+          AND (
+            status IN ('cleaning', 'cleanup_failed')
+            OR (
+              status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
+              AND (expires_at IS NULL OR expires_at &gt; #{now})
+            )
+          )
+      )
+      OR EXISTS(
+        SELECT 1
+        FROM wechat_rebind_operations
+        WHERE (old_instance_id = #{instanceId} OR new_instance_id = #{instanceId})
+          AND status IN ('pending', 'cleaning', 'provisioning', 'cleanup_failed')
+      )
+    )
+  </select>
+
   <select id="findActiveForUserForUpdate" resultMap="WechatBindLinkMap">
     SELECT *
     FROM wechat_bind_links

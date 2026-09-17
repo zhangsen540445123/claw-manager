@@ -85,11 +85,12 @@ public class WechatAccountSyncService {
     String now = Instant.now().toString();
     Set<String> protectedAccountIds = new LinkedHashSet<>(
         bindLinkMapper.listProtectedAccountIds(instance.getId(), now));
+    boolean activeBindingWork = bindLinkMapper.hasActiveBindingWork(instance.getId(), now);
     List<WechatPairedAccountEntity> ghostAccounts = new ArrayList<>();
     for (WechatPairedAccountEntity raw : rawAccounts) {
       WechatPairedAccountEntity existingAccount = existingByAccountId.get(raw.getAccountId());
       if (existingAccount == null) {
-        if (!protectedAccountIds.contains(raw.getAccountId())) {
+        if (!activeBindingWork && !protectedAccountIds.contains(raw.getAccountId())) {
           ghostAccounts.add(raw);
         }
         continue;
