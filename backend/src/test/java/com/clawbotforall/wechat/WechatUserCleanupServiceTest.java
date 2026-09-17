@@ -257,6 +257,7 @@ class WechatUserCleanupServiceTest {
     when(aggregateMapper.findWechatAccountByAccountIdForUpdate("account-1")).thenReturn(account);
     when(identityMapper.findByWechatUserIdForUpdate("wechat-user")).thenReturn(identity);
     when(miniappBindingMapper.listByAgentId(identity.getAgentId())).thenReturn(List.of());
+    when(miniappBindingMapper.deleteByOpenidHashes("inst-1", List.of("stale-openid"))).thenReturn(1);
     when(dataCleaner.readOldSessionIds("inst-1", identity.getAgentId())).thenReturn(List.of());
     when(gatewayRpcService.deleteUserAgent(instance, identity.getAgentId(), List.of("account-1"),
         List.of("wechat-user"), List.of("api:stale-openid"), List.of())).thenReturn(
@@ -265,6 +266,7 @@ class WechatUserCleanupServiceTest {
     WechatUserCleanupOperationEntity result = service.start(instance, "account-1", "user_center");
 
     assertThat(result.getStatus()).isEqualTo("completed");
+    verify(miniappBindingMapper).deleteByOpenidHashes("inst-1", List.of("stale-openid"));
     verify(gatewayRpcService).deleteUserAgent(instance, identity.getAgentId(), List.of("account-1"),
         List.of("wechat-user"), List.of("api:stale-openid"), List.of());
   }

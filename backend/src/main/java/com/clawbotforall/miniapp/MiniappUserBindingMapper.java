@@ -22,6 +22,11 @@ public interface MiniappUserBindingMapper {
 
   int deleteByAgentId(@Param("agentId") String agentId);
 
+  int deleteByOpenidHashes(
+      @Param("instanceId") String instanceId,
+      @Param("openidHashes") List<String> openidHashes
+  );
+
   int deleteByInstanceId(@Param("instanceId") String instanceId);
 
   int insert(MiniappUserBindingEntity binding);

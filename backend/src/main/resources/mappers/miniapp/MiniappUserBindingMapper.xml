@@ -116,6 +116,14 @@
   <delete id="deleteByAgentId">
     DELETE FROM miniapp_user_bindings WHERE agent_id = #{agentId}
   </delete>
+  <delete id="deleteByOpenidHashes">
+    DELETE FROM miniapp_user_bindings
+    WHERE instance_id = #{instanceId}
+      AND openid_hash IN
+      <foreach collection="openidHashes" item="openidHash" open="(" separator="," close=")">
+        #{openidHash}
+      </foreach>
+  </delete>
   <delete id="deleteByInstanceId">
     DELETE FROM miniapp_user_bindings WHERE instance_id = #{instanceId}
   </delete>
