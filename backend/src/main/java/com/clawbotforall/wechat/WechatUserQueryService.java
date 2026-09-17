@@ -60,7 +60,7 @@ public class WechatUserQueryService {
       miniappsByUser.put(userKey(miniapp.instanceId(), miniapp.wechatUserId()), miniapp);
     }
 
-    List<WechatUserCleanupOperationEntity> operations = safe(cleanupMapper.listActive());
+    List<WechatUserCleanupOperationEntity> operations = safe(cleanupMapper.listVisible());
     Map<String, WechatUserCleanupOperationEntity> operationsByAccount = new HashMap<>();
     Map<String, WechatUserCleanupOperationEntity> operationsByWechatUser = new HashMap<>();
     for (WechatUserCleanupOperationEntity operation : operations) {
@@ -140,7 +140,10 @@ public class WechatUserQueryService {
     if (operation == null) {
       return "active";
     }
-    return "cleanup_failed".equals(operation.getStatus()) ? "cleanup_failed" : "cleaning";
+    if ("cleanup_failed".equals(operation.getStatus())) {
+      return "cleanup_failed";
+    }
+    return "cancelled".equals(operation.getStatus()) ? "superseded" : "cleaning";
   }
 
   private static String accountKey(String instanceId, String accountId) {

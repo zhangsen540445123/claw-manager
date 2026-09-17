@@ -56,6 +56,12 @@
   <select id="listActive" resultMap="OperationMap">
     SELECT * FROM wechat_user_cleanup_operations WHERE status IN ('pending','cleaning','cleanup_failed') ORDER BY created_at ASC
   </select>
+  <select id="listVisible" resultMap="OperationMap">
+    SELECT * FROM wechat_user_cleanup_operations
+    WHERE status IN ('pending','cleaning','cleanup_failed','cancelled')
+    ORDER BY created_at DESC
+    LIMIT 200
+  </select>
   <insert id="insert" parameterType="com.clawbotforall.wechat.WechatUserCleanupOperationEntity">
     INSERT INTO wechat_user_cleanup_operations
       (operation_id,instance_id,source,subject_hash,phone,wechat_user_id,account_id,agent_id,openviking_user_id,

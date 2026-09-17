@@ -34,7 +34,8 @@ const recordStateOptions = [
   { label: "全部清理状态", value: "" },
   { label: "正常", value: "active" },
   { label: "清理中", value: "cleaning" },
-  { label: "清理失败", value: "cleanup_failed" }
+  { label: "清理失败", value: "cleanup_failed" },
+  { label: "已跳过", value: "superseded" }
 ];
 
 const instanceOptions = computed(() => {
@@ -152,6 +153,7 @@ function recordStateLabel(state: string) {
     case "active": return "正常";
     case "cleaning": return "清理中";
     case "cleanup_failed": return "清理失败";
+    case "superseded": return "已跳过";
     default: return state || "未知";
   }
 }
@@ -161,6 +163,7 @@ function recordStateType(state: string): "success" | "warning" | "danger" | "inf
     case "active": return "success";
     case "cleaning": return "warning";
     case "cleanup_failed": return "danger";
+    case "superseded": return "info";
     default: return "info";
   }
 }
@@ -175,6 +178,7 @@ function cleanupStageLabel(stage: string) {
     database_identity_deleted: "数据库身份已删除",
     history_redacted: "历史记录已脱敏",
     gateway_restarted: "Gateway 已恢复",
+    superseded: "已跳过：绑定已完成",
     completed: "清理完成"
   };
   return labels[stage] || stage || "等待开始";

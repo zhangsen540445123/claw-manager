@@ -651,10 +651,14 @@ class WechatBindLinkServiceTest {
     stored.setMiniappOpenidHash("miniapp_hash_1");
     AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
     List<String> statusUpdates = new ArrayList<>();
+    List<String> scannedTargetAccountIds = new ArrayList<>();
     when(linkMapper.findByToken("token_status_steps")).thenAnswer(invocation -> saved.get());
     when(linkMapper.update(any())).thenAnswer(invocation -> {
       WechatBindLinkEntity updated = invocation.getArgument(0);
       statusUpdates.add(updated.getStatus());
+      if ("scanned".equals(updated.getStatus())) {
+        scannedTargetAccountIds.add(updated.getTargetAccountId());
+      }
       saved.set(updated);
       return 1;
     });
@@ -674,6 +678,7 @@ class WechatBindLinkServiceTest {
     );
 
     assertThat(statusUpdates).containsSubsequence("scanned", "initializing", "connected");
+    assertThat(scannedTargetAccountIds).containsExactly("554603a4df61-im-bot");
     assertThat(saved.get().getStatus()).isEqualTo("connected");
     assertThat(saved.get().getCompletedAt()).isNotBlank();
     assertThat(saved.get().getQrPayload()).isNull();

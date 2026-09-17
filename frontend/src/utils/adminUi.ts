@@ -48,6 +48,7 @@ export function cleanupStageLabel(stage: string) {
     wechat_account_migrated: "微信账号已迁移",
     openviking_key_rotated: "OpenViking Key 已轮换",
     gateway_restarted: "Gateway 已重启",
+    superseded: "已跳过：绑定已完成",
     completed: "清理迁移已完成"
   };
   return labels[stage] || stage || "-";

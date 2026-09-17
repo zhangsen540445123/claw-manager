@@ -476,6 +476,49 @@ class WechatUserCleanupServiceTest {
   }
 
   @Test
+  void cancelsAccountSyncGhostCleanupWhenActiveBindingWorkExists() {
+    InstanceEntity instance = instance();
+    WechatUserResidueEvidence evidence = new WechatUserResidueEvidence(
+        "account-only-ghost", "wechat-user", null, null,
+        List.of(), List.of(), List.of("wechat_account_state")
+    );
+    when(bindLinkMapper.hasActiveBindingWork(eq("inst-1"), anyString())).thenReturn(true);
+
+    WechatUserCleanupOperationEntity result = service.startResidue(instance, evidence, "account_sync");
+
+    assertThat(result.getStatus()).isEqualTo("cancelled");
+    assertThat(result.getStage()).isEqualTo("superseded");
+    assertThat(result.getCompletedAt()).isNotBlank();
+    assertThat(result.getDeletedBindings()).isZero();
+    assertThat(result.getDeletedFiles()).isZero();
+    assertThat(result.getDeletedDatabaseRows()).isZero();
+    verify(gatewayRpcService, never()).stopWechatChannel(any(), any());
+    verify(accountSyncService, never()).removeAccountStateFiles(any(), anyString());
+    verify(mutationMapper, never()).deleteWechatAccount(anyString(), anyString());
+  }
+
+  @Test
+  void cancelsAccountSyncGhostCleanupAfterChannelsStoppedWhenAccountBecomesPersisted() {
+    InstanceEntity instance = instance();
+    WechatPairedAccountEntity persisted = account();
+    WechatUserResidueEvidence evidence = new WechatUserResidueEvidence(
+        "account-only-ghost", "wechat-user", null, null,
+        List.of(), List.of(), List.of("wechat_account_state")
+    );
+    when(aggregateMapper.findWechatAccountByAccountId("account-only-ghost"))
+        .thenReturn(null, null, persisted);
+    when(bindLinkMapper.hasActiveBindingWork(eq("inst-1"), anyString())).thenReturn(false);
+
+    WechatUserCleanupOperationEntity result = service.startResidue(instance, evidence, "account_sync");
+
+    assertThat(result.getStatus()).isEqualTo("cancelled");
+    assertThat(result.getStage()).isEqualTo("superseded");
+    verify(gatewayRpcService).stopWechatChannel(instance, List.of("account-only-ghost"));
+    verify(accountSyncService, never()).removeAccountStateFiles(any(), anyString());
+    verify(mutationMapper, never()).deleteWechatAccount(anyString(), anyString());
+  }
+
+  @Test
   void rejectsBareAgentDirectoryAsResidueEvidence() {
     WechatUserResidueEvidence evidence = new WechatUserResidueEvidence(
         null, null, "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", null,

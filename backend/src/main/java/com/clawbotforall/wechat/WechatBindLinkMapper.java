@@ -42,6 +42,11 @@ public interface WechatBindLinkMapper {
       @Param("now") String now
   );
 
+  boolean hasActiveBindingWork(
+      @Param("instanceId") String instanceId,
+      @Param("now") String now
+  );
+
   WechatBindLinkEntity findActiveForUserForUpdate(
       @Param("instanceId") String instanceId,
       @Param("phone") String phone,

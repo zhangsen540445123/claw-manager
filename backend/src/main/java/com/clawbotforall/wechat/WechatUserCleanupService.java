@@ -48,6 +48,9 @@ public class WechatUserCleanupService {
       "identity_wechat_binding", "identity_agent_config", "binding_agent_peer",
       "miniapp_agent_instance", "cleanup_snapshot", "rebind_snapshot", "wechat_account_state"
   );
+  private static final String SUPERSEDED_STATUS = "cancelled";
+  private static final String SUPERSEDED_STAGE = "superseded";
+  private static final String SUPERSEDED_REASON = "绑定流程进行中或微信账号已完成绑定，已跳过幽灵账号清理。";
   private static final java.util.regex.Pattern AGENT_ID = java.util.regex.Pattern.compile("user_[0-9a-f]{32}");
   private static final List<String> STAGES = List.of(
       "validated", "channels_stopped", "routing_deleted", "local_agent_data_deleted",
@@ -363,16 +366,6 @@ public class WechatUserCleanupService {
     boolean accountStateOnly = text(evidence.agentId()).isBlank()
         && evidence.evidenceTypes().stream().map(WechatUserCleanupService::text)
             .anyMatch("wechat_account_state"::equals);
-    if (accountStateOnly) {
-      WechatPairedAccountEntity persisted = aggregateMapper.findWechatAccountByAccountId(evidence.accountId());
-      if (persisted != null) {
-        throw new ApiException(HttpStatus.CONFLICT, "微信账号已落库，不能按幽灵凭证清理。");
-      }
-      List<String> protectedAccountIds = bindLinkMapper.listProtectedAccountIds(instance.getId(), now());
-      if (protectedAccountIds != null && protectedAccountIds.contains(text(evidence.accountId()))) {
-        throw new ApiException(HttpStatus.CONFLICT, "微信账号仍处于绑定或清理流程，已跳过幽灵清理。");
-      }
-    }
     String now = now();
     WechatUserCleanupOperationEntity operation = new WechatUserCleanupOperationEntity();
     operation.setOperationId(UUID.randomUUID().toString());
@@ -394,6 +387,11 @@ public class WechatUserCleanupService {
         "evidenceTypes", normalized(evidence.evidenceTypes()),
         "instanceRunningBeforeCleanup", openClawRuntime.inspectInstance(instance).running()
     )));
+    if (accountStateOnly && shouldSupersedeNewResidue(instance, evidence, now)) {
+      markSuperseded(operation, now);
+      operationMapper.insert(operation);
+      return new CaptureResult(operation, false);
+    }
     operation.setStatus("cleaning");
     operation.setStage("validated");
     operation.setAttemptCount(1);
@@ -401,6 +399,22 @@ public class WechatUserCleanupService {
     operation.setUpdatedAt(now);
     operationMapper.insert(operation);
     return new CaptureResult(operation, true);
+  }
+
+  private boolean shouldSupersedeNewResidue(
+      InstanceEntity instance, WechatUserResidueEvidence evidence, String now) {
+    String accountId = text(evidence.accountId());
+    if (!accountId.isBlank()) {
+      WechatPairedAccountEntity persisted = aggregateMapper.findWechatAccountByAccountId(accountId);
+      if (persisted != null && instance.getId().equals(persisted.getInstanceId())) {
+        return true;
+      }
+    }
+    if (bindLinkMapper.hasActiveBindingWork(instance.getId(), now)) {
+      return true;
+    }
+    List<String> protectedAccountIds = bindLinkMapper.listProtectedAccountIds(instance.getId(), now);
+    return protectedAccountIds != null && protectedAccountIds.contains(accountId);
   }
 
 
@@ -441,9 +455,15 @@ public class WechatUserCleanupService {
       InstanceEntity instance, WechatUserCleanupOperationEntity operation) {
     try {
       hydrateMissingAgentEvidence(operation);
+      if (supersedeIfNeeded(operation)) {
+        return operation;
+      }
       if (before(operation, "channels_stopped")) {
         gatewayRpcService.stopWechatChannel(instance, accountIds(operation));
         advance(operation, "channels_stopped");
+      }
+      if (supersedeIfNeeded(operation)) {
+        return operation;
       }
       if (before(operation, "routing_deleted")) {
         if (!text(operation.getAgentId()).isBlank()) {
@@ -460,12 +480,18 @@ public class WechatUserCleanupService {
         }
         advance(operation, "routing_deleted");
       }
+      if (supersedeIfNeeded(operation)) {
+        return operation;
+      }
       if (before(operation, "local_agent_data_deleted")) {
         if (!text(operation.getAgentId()).isBlank()) {
           dataCleaner.deleteOldUserData(operation.getInstanceId(), operation.getAgentId(), sessions(operation), apiPeers(operation));
           operation.setDeletedFiles(operation.getDeletedFiles() + 1);
         }
         advance(operation, "local_agent_data_deleted");
+      }
+      if (supersedeIfNeeded(operation)) {
+        return operation;
       }
       if (before(operation, "wechat_files_deleted")) {
         for (String accountId : accountIds(operation)) {
@@ -474,10 +500,24 @@ public class WechatUserCleanupService {
         }
         advance(operation, "wechat_files_deleted");
       }
+      if (supersedeIfNeeded(operation)) {
+        return operation;
+      }
       if (before(operation, "database_identity_deleted")) {
-        int deletedRows = Objects.requireNonNull(transactions.execute(status -> deleteDatabaseIdentity(operation)));
+        int deletedRows = Objects.requireNonNull(transactions.execute(status -> {
+          if (supersedeIfNeededForUpdate(operation)) {
+            return 0;
+          }
+          return deleteDatabaseIdentity(operation);
+        }));
+        if (SUPERSEDED_STATUS.equals(operation.getStatus())) {
+          return operation;
+        }
         operation.setDeletedDatabaseRows(deletedRows);
         advance(operation, "database_identity_deleted");
+      }
+      if (supersedeIfNeeded(operation)) {
+        return operation;
       }
       if (before(operation, "history_redacted")) {
         redactHistory(operation);
@@ -502,6 +542,57 @@ public class WechatUserCleanupService {
       fail(operation, error);
     }
     return operation;
+  }
+
+  private boolean supersedeIfNeeded(WechatUserCleanupOperationEntity operation) {
+    if (!isGhostAccountCleanup(operation)) {
+      return false;
+    }
+    if (isAccountPersisted(operation, false) || bindLinkMapper.hasActiveBindingWork(operation.getInstanceId(), now())) {
+      supersede(operation);
+      return true;
+    }
+    return false;
+  }
+
+  private boolean supersedeIfNeededForUpdate(WechatUserCleanupOperationEntity operation) {
+    if (!isGhostAccountCleanup(operation)) {
+      return false;
+    }
+    if (isAccountPersisted(operation, true) || bindLinkMapper.hasActiveBindingWork(operation.getInstanceId(), now())) {
+      supersede(operation);
+      return true;
+    }
+    return false;
+  }
+
+  private boolean isGhostAccountCleanup(WechatUserCleanupOperationEntity operation) {
+    return "account_sync".equals(text(operation.getSource()))
+        || (text(operation.getAgentId()).isBlank() && hasSnapshotEvidence(operation, "wechat_account_state"));
+  }
+
+  private boolean isAccountPersisted(WechatUserCleanupOperationEntity operation, boolean forUpdate) {
+    String accountId = text(operation.getAccountId());
+    if (accountId.isBlank()) {
+      return false;
+    }
+    WechatPairedAccountEntity persisted = forUpdate
+        ? aggregateMapper.findWechatAccountByAccountIdForUpdate(accountId)
+        : aggregateMapper.findWechatAccountByAccountId(accountId);
+    return persisted != null && text(operation.getInstanceId()).equals(text(persisted.getInstanceId()));
+  }
+
+  private void supersede(WechatUserCleanupOperationEntity operation) {
+    markSuperseded(operation, now());
+    operationMapper.update(operation);
+  }
+
+  private void markSuperseded(WechatUserCleanupOperationEntity operation, String timestamp) {
+    operation.setStatus(SUPERSEDED_STATUS);
+    operation.setStage(SUPERSEDED_STAGE);
+    operation.setLastError(SUPERSEDED_REASON);
+    operation.setUpdatedAt(timestamp);
+    operation.setCompletedAt(timestamp);
   }
 
   private void hydrateMissingAgentEvidence(WechatUserCleanupOperationEntity operation) {
