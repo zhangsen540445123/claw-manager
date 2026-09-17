@@ -688,6 +688,9 @@ public class WechatUserCleanupService {
         .distinct()
         .toList();
     List<String> sessionKeyHashes = sessions(operation).stream().filter(value -> !value.isBlank()).distinct().toList();
+    if (!senderHashes.isEmpty()) {
+      deleted += miniappBindingMapper.deleteByOpenidHashes(operation.getInstanceId(), senderHashes);
+    }
     if (!senderHashes.isEmpty() || !sessionKeyHashes.isEmpty()) {
       deleted += traceMapper.deleteByIdentityEvidence(operation.getInstanceId(), senderHashes, sessionKeyHashes);
     }
