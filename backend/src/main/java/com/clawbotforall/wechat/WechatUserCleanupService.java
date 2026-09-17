@@ -299,12 +299,14 @@ public class WechatUserCleanupService {
       throw new ApiException(HttpStatus.CONFLICT, "该用户正在重新绑定，暂时不能解绑。");
     }
     UserAgentIdentityEntity identity = identityMapper.findByWechatUserIdForUpdate(account.getWechatUserId());
-    List<String> apiPeers = identity == null ? List.of() : miniappBindingMapper.listByAgentId(identity.getAgentId()).stream()
-        .map(MiniappUserBindingEntity::getOpenidHash)
-        .filter(value -> value != null && !value.isBlank())
-        .map(value -> "api:" + value.trim())
-        .distinct()
-        .toList();
+    List<String> apiPeers = identity == null ? List.of()
+        : mergeApiPeerIds(
+            miniappBindingMapper.listByAgentId(identity.getAgentId()).stream()
+                .map(MiniappUserBindingEntity::getOpenidHash)
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> "api:" + value.trim())
+                .toList(),
+            recoverApiPeerIds(instance.getId(), identity.getAgentId()));
     List<String> sessions = identity == null ? List.of()
         : dataCleaner.readOldSessionIds(instance.getId(), identity.getAgentId());
     String subjectHash = subjectHash(instance.getId(), account, identity);
@@ -503,9 +505,15 @@ public class WechatUserCleanupService {
   }
 
   private void hydrateMissingAgentEvidence(WechatUserCleanupOperationEntity operation) {
-    if (hasSnapshotEvidence(operation, "wechat_account_state")
-        || !text(operation.getAgentId()).isBlank()
-        || (text(operation.getAccountId()).isBlank() && text(operation.getWechatUserId()).isBlank())) {
+    if (hasSnapshotEvidence(operation, "wechat_account_state")) {
+      return;
+    }
+    String existingAgentId = text(operation.getAgentId());
+    if (!existingAgentId.isBlank()) {
+      hydrateMissingApiPeers(operation, existingAgentId);
+      return;
+    }
+    if (text(operation.getAccountId()).isBlank() && text(operation.getWechatUserId()).isBlank()) {
       return;
     }
     Path configPath = fileService.paths(operation.getInstanceId()).homeDir().resolve("openclaw.json");
@@ -539,12 +547,13 @@ public class WechatUserCleanupService {
       return;
     }
     String agentId = matchingAgents.iterator().next();
-    List<String> apiPeers = safeMiniappBindings(agentId).stream()
-        .map(MiniappUserBindingEntity::getOpenidHash)
-        .filter(value -> value != null && !value.isBlank())
-        .map(value -> "api:" + value.trim())
-        .distinct()
-        .toList();
+    List<String> apiPeers = mergeApiPeerIds(
+        safeMiniappBindings(agentId).stream()
+            .map(MiniappUserBindingEntity::getOpenidHash)
+            .filter(value -> value != null && !value.isBlank())
+            .map(value -> "api:" + value.trim())
+            .toList(),
+        recoverApiPeerIds(operation.getInstanceId(), agentId));
     operation.setAgentId(agentId);
     operation.setApiPeerIdsJson(writeJson(apiPeers));
     if (text(operation.getProtectedAgentIdsJson()).isBlank()) {
@@ -560,6 +569,68 @@ public class WechatUserCleanupService {
     operation.setSnapshotJson(writeJson(snapshot));
     operation.setUpdatedAt(now());
     operationMapper.update(operation);
+  }
+
+  private void hydrateMissingApiPeers(WechatUserCleanupOperationEntity operation, String agentId) {
+    List<String> recovered = recoverApiPeerIds(operation.getInstanceId(), agentId);
+    if (recovered.isEmpty()) {
+      return;
+    }
+    List<String> existing = apiPeers(operation);
+    List<String> merged = mergeApiPeerIds(existing, recovered);
+    if (merged.equals(existing)) {
+      return;
+    }
+    operation.setApiPeerIdsJson(writeJson(merged));
+    operation.setUpdatedAt(now());
+    operationMapper.update(operation);
+  }
+
+  private List<String> recoverApiPeerIds(String instanceId, String agentId) {
+    if (text(instanceId).isBlank() || text(agentId).isBlank()) {
+      return List.of();
+    }
+    Path configPath = fileService.paths(instanceId).homeDir().resolve("openclaw.json");
+    if (!Files.exists(configPath)) {
+      return List.of();
+    }
+    java.util.LinkedHashSet<String> recovered = new java.util.LinkedHashSet<>();
+    try {
+      JsonNode root = objectMapper.readTree(configPath.toFile());
+      for (JsonNode binding : root.path("bindings")) {
+        if (!agentId.equals(text(binding.path("agentId").asText()))) {
+          continue;
+        }
+        JsonNode match = binding.path("match");
+        if (!"claw-manager-api".equals(text(match.path("channel").asText()))) {
+          continue;
+        }
+        String peerId = text(match.path("peer").path("id").asText()).trim();
+        if (peerId.startsWith("api:")) {
+          recovered.add(peerId);
+        }
+      }
+    } catch (IOException error) {
+      throw new IllegalStateException("读取 OpenClaw API 用户路由失败。", error);
+    }
+    return List.copyOf(recovered);
+  }
+
+  private static List<String> mergeApiPeerIds(List<String> existing, List<String> recovered) {
+    java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>();
+    for (String value : existing == null ? List.<String>of() : existing) {
+      String normalized = text(value).trim();
+      if (!normalized.isBlank()) {
+        merged.add(normalized);
+      }
+    }
+    for (String value : recovered == null ? List.<String>of() : recovered) {
+      String normalized = text(value).trim();
+      if (!normalized.isBlank()) {
+        merged.add(normalized);
+      }
+    }
+    return List.copyOf(merged);
   }
 
   private Map<String, Object> snapshotValues(WechatUserCleanupOperationEntity operation) {

@@ -231,6 +231,75 @@ class WechatUserCleanupServiceTest {
   }
 
   @Test
+  void capturesApiPeerFromOpenClawBindingWhenMiniappBindingIsStale() throws Exception {
+    InstanceEntity instance = instance();
+    WechatPairedAccountEntity account = account();
+    UserAgentIdentityEntity identity = identity();
+    InstancePaths paths = paths();
+    Files.writeString(paths.homeDir().resolve("openclaw.json"), """
+        {
+          "agents": {"list": [{"id": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},
+          "bindings": [
+            {
+              "agentId": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "match": {"channel": "openclaw-weixin", "accountId": "account-1",
+                "peer": {"kind": "direct", "id": "wechat-user"}}
+            },
+            {
+              "agentId": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "match": {"channel": "claw-manager-api", "accountId": "global",
+                "peer": {"kind": "direct", "id": "api:stale-openid"}}
+            }
+          ]
+        }
+        """);
+    when(fileService.paths("inst-1")).thenReturn(paths);
+    when(aggregateMapper.findWechatAccountByAccountIdForUpdate("account-1")).thenReturn(account);
+    when(identityMapper.findByWechatUserIdForUpdate("wechat-user")).thenReturn(identity);
+    when(miniappBindingMapper.listByAgentId(identity.getAgentId())).thenReturn(List.of());
+    when(dataCleaner.readOldSessionIds("inst-1", identity.getAgentId())).thenReturn(List.of());
+    when(gatewayRpcService.deleteUserAgent(instance, identity.getAgentId(), List.of("account-1"),
+        List.of("wechat-user"), List.of("api:stale-openid"), List.of())).thenReturn(
+        new OpenClawGatewayRpcService.DeleteUserAgentResult(true, true, true, List.of(), List.of()));
+
+    WechatUserCleanupOperationEntity result = service.start(instance, "account-1", "user_center");
+
+    assertThat(result.getStatus()).isEqualTo("completed");
+    verify(gatewayRpcService).deleteUserAgent(instance, identity.getAgentId(), List.of("account-1"),
+        List.of("wechat-user"), List.of("api:stale-openid"), List.of());
+  }
+
+  @Test
+  void retryRecoversApiPeerFromOpenClawBindingForFailedRoutingCleanup() throws Exception {
+    InstanceEntity instance = instance();
+    WechatUserCleanupOperationEntity failed = activeOperation("cleanup_failed", "channels_stopped");
+    String agentId = failed.getAgentId();
+    InstancePaths paths = paths();
+    Files.writeString(paths.homeDir().resolve("openclaw.json"), """
+        {
+          "agents": {"list": [{"id": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},
+          "bindings": [{
+            "agentId": "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "match": {"channel": "claw-manager-api", "accountId": "global",
+              "peer": {"kind": "direct", "id": "api:stale-openid"}}
+          }]
+        }
+        """);
+    when(fileService.paths("inst-1")).thenReturn(paths);
+    when(operationMapper.findByIdForUpdate(failed.getOperationId())).thenReturn(failed);
+    when(aggregateMapper.findById("inst-1")).thenReturn(instance);
+    when(gatewayRpcService.deleteUserAgent(instance, agentId, List.of("account-1"),
+        List.of("wechat-user"), List.of("api:stale-openid"), List.of())).thenReturn(
+        new OpenClawGatewayRpcService.DeleteUserAgentResult(true, true, true, List.of(), List.of()));
+
+    WechatUserCleanupOperationEntity completed = service.retry(failed.getOperationId());
+
+    assertThat(completed.getStatus()).isEqualTo("completed");
+    verify(gatewayRpcService).deleteUserAgent(instance, agentId, List.of("account-1"),
+        List.of("wechat-user"), List.of("api:stale-openid"), List.of());
+  }
+
+  @Test
   void doesNotStartWechatChannelsWhenInstanceWasStoppedBeforeCleanup() {
     InstanceEntity instance = instance();
     configureSuccessfulCleanup(instance);
