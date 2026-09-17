@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.clawbotforall.runtime.InstanceStats;
+import com.clawbotforall.wechat.WechatBindLinkMapper;
+import com.clawbotforall.wechat.WechatUserCleanupOperationMapper;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.runtime.ProxyTarget;
 import com.clawbotforall.runtime.RunnerImageStatus;
@@ -70,6 +72,12 @@ class ApplicationIntegrationTest {
   @Autowired
   IntegrationTraceService integrationTraceService;
 
+  @Autowired
+  WechatBindLinkMapper wechatBindLinkMapper;
+
+  @Autowired
+  WechatUserCleanupOperationMapper wechatUserCleanupOperationMapper;
+
   @MockBean
   OpenClawRuntime openClawRuntime;
 
@@ -88,6 +96,16 @@ class ApplicationIntegrationTest {
     registry.add("clawbot.runtime.gateway-ready-timeout-ms", () -> "50");
     registry.add("clawbot.runtime.gateway-ready-check-interval-ms", () -> "10");
     registry.add("clawbot.runtime.gateway-ready-probe-timeout-ms", () -> "50");
+  }
+
+  @Test
+  void cleanupLookupsAcceptNullOptionalIdentifiersWithRealMySql() {
+    assertThat(wechatBindLinkMapper.findActiveForUserForUpdate(
+        "missing_instance", null, "account_1", "wechat_user_1", "2026-09-17T00:00:00Z"))
+        .isNull();
+    assertThat(wechatUserCleanupOperationMapper.findActiveByIdentityForUpdate(
+        "missing_instance", null, "wechat_user_1", "account_1", null))
+        .isNull();
   }
 
   @Test
