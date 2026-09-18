@@ -8,7 +8,6 @@ import com.clawbotforall.instance.WechatAccountChannelEntity;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingMapper;
-import com.clawbotforall.miniapp.MiniappUserKeyMapper;
 import com.clawbotforall.openviking.OpenVikingUserKeyService;
 import com.clawbotforall.useragent.UserAgentIdentityEntity;
 import com.clawbotforall.useragent.UserAgentIdentityMapper;
@@ -62,7 +61,6 @@ public class WechatUserRebindService {
   private final UserAgentIdentityMapper identityMapper;
   private final UserAgentIdentityService identityService;
   private final MiniappUserBindingMapper miniappBindingMapper;
-  private final MiniappUserKeyMapper miniappKeyMapper;
   private final OpenClawGatewayRpcService gatewayRpcService;
   private final OpenClawUserDataCleaner dataCleaner;
   private final WechatAccountSyncService accountSyncService;
@@ -79,7 +77,6 @@ public class WechatUserRebindService {
       UserAgentIdentityMapper identityMapper,
       UserAgentIdentityService identityService,
       MiniappUserBindingMapper miniappBindingMapper,
-      MiniappUserKeyMapper miniappKeyMapper,
       OpenClawGatewayRpcService gatewayRpcService,
       OpenClawUserDataCleaner dataCleaner,
       WechatAccountSyncService accountSyncService,
@@ -95,7 +92,6 @@ public class WechatUserRebindService {
     this.identityMapper = identityMapper;
     this.identityService = identityService;
     this.miniappBindingMapper = miniappBindingMapper;
-    this.miniappKeyMapper = miniappKeyMapper;
     this.gatewayRpcService = gatewayRpcService;
     this.dataCleaner = dataCleaner;
     this.accountSyncService = accountSyncService;
@@ -296,7 +292,6 @@ public class WechatUserRebindService {
         advance(operation, "channels_stopped");
       }
       if (before(operation, "miniapp_deleted")) {
-        miniappKeyMapper.deleteByAgentId(operation.getOldAgentId());
         miniappBindingMapper.deleteByAgentId(operation.getOldAgentId());
         advance(operation, "miniapp_deleted");
       }

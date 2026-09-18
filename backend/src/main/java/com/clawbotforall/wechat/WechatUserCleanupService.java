@@ -7,7 +7,6 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingMapper;
-import com.clawbotforall.miniapp.MiniappUserKeyMapper;
 import com.clawbotforall.openviking.OpenVikingUserKeyMapper;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.trace.IntegrationTraceMapper;
@@ -63,7 +62,6 @@ public class WechatUserCleanupService {
   private final InstanceMutationMapper mutationMapper;
   private final UserAgentIdentityMapper identityMapper;
   private final MiniappUserBindingMapper miniappBindingMapper;
-  private final MiniappUserKeyMapper miniappKeyMapper;
   private final OpenVikingUserKeyMapper openVikingUserKeyMapper;
   private final OpenClawGatewayRpcService gatewayRpcService;
   private final OpenClawUserDataCleaner dataCleaner;
@@ -85,7 +83,6 @@ public class WechatUserCleanupService {
       InstanceMutationMapper mutationMapper,
       UserAgentIdentityMapper identityMapper,
       MiniappUserBindingMapper miniappBindingMapper,
-      MiniappUserKeyMapper miniappKeyMapper,
       OpenVikingUserKeyMapper openVikingUserKeyMapper,
       OpenClawGatewayRpcService gatewayRpcService,
       OpenClawUserDataCleaner dataCleaner,
@@ -104,7 +101,6 @@ public class WechatUserCleanupService {
     this.mutationMapper = mutationMapper;
     this.identityMapper = identityMapper;
     this.miniappBindingMapper = miniappBindingMapper;
-    this.miniappKeyMapper = miniappKeyMapper;
     this.openVikingUserKeyMapper = openVikingUserKeyMapper;
     this.gatewayRpcService = gatewayRpcService;
     this.dataCleaner = dataCleaner;
@@ -786,7 +782,6 @@ public class WechatUserCleanupService {
       deleted += traceMapper.deleteByIdentityEvidence(operation.getInstanceId(), senderHashes, sessionKeyHashes);
     }
     if (!text(operation.getAgentId()).isBlank()) {
-      deleted += miniappKeyMapper.deleteByAgentId(operation.getAgentId());
       deleted += miniappBindingMapper.deleteByAgentId(operation.getAgentId());
     }
     if (!text(operation.getOpenvikingUserId()).isBlank()) {

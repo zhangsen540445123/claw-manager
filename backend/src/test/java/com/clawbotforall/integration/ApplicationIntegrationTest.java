@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.clawbotforall.instance.InstanceDeletionService;
 import com.clawbotforall.instance.InstanceFileService;
 import com.clawbotforall.runtime.InstanceStats;
 import com.clawbotforall.wechat.WechatBindLinkMapper;
@@ -85,6 +86,9 @@ class ApplicationIntegrationTest {
   WechatUserCleanupService wechatUserCleanupService;
 
   @Autowired
+  InstanceDeletionService instanceDeletionService;
+
+  @Autowired
   InstanceFileService instanceFileService;
 
   @MockBean
@@ -115,6 +119,205 @@ class ApplicationIntegrationTest {
     assertThat(wechatUserCleanupOperationMapper.findActiveByIdentityForUpdate(
         "missing_instance", null, "wechat_user_1", "account_1", null))
         .isNull();
+  }
+
+  @Test
+  void deletingMiniappBindingDoesNotCascadeDeleteKey() {
+    String instanceId = "inst_key_cascade";
+    String openidHash = "key-cascade-openid-hash";
+    String timestamp = "2026-09-18T00:00:00Z";
+    insertInstance(instanceId, "Key Cascade", 39991, timestamp);
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_bindings
+              (openid_hash, openid, instance_id, agent_id, wechat_user_id, openviking_user_id,
+               bind_status, current_bind_token, bound_at, created_at, updated_at)
+            VALUES (?, ?, ?, NULL, ?, ?, 'connected', NULL, ?, ?, ?)
+            """,
+        openidHash,
+        "openid-key-cascade",
+        instanceId,
+        "wechat-key-cascade",
+        "openviking-key-cascade",
+        timestamp,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_keys
+              (openid_hash, openid, user_key, key_preview, enabled, created_at, updated_at, last_used_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, NULL)
+            """,
+        openidHash,
+        "openid-key-cascade",
+        "cm_user_cascade_retained",
+        "cm_user...ined",
+        timestamp,
+        timestamp
+    );
+
+    assertThat(jdbcTemplate.update(
+        "DELETE FROM miniapp_user_bindings WHERE openid_hash = ?",
+        openidHash
+    )).isEqualTo(1);
+
+    Map<String, Object> retainedKey = jdbcTemplate.queryForMap(
+        "SELECT user_key, enabled FROM miniapp_user_keys WHERE openid_hash = ?",
+        openidHash
+    );
+    assertThat(retainedKey.get("user_key")).isEqualTo("cm_user_cascade_retained");
+    assertThat((Boolean) retainedKey.get("enabled")).isTrue();
+  }
+
+  @Test
+  void userCenterCleanupPreservesMiniappKey() throws Exception {
+    String instanceId = "inst_key_cleanup";
+    String agentId = "user_1123456789abcdef0123456789abcdef";
+    String openidHash = "user-center-key-openid-hash";
+    String wechatUserId = "wechat-key-cleanup";
+    String timestamp = "2026-09-18T00:00:00Z";
+    insertInstance(instanceId, "Key Cleanup", 39992, timestamp);
+    jdbcTemplate.update(
+        """
+            INSERT INTO user_agent_identities
+              (agent_id, wechat_user_id, openviking_user_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+        agentId,
+        wechatUserId,
+        "openviking-key-cleanup",
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_bindings
+              (openid_hash, openid, instance_id, agent_id, wechat_user_id, openviking_user_id,
+               bind_status, current_bind_token, bound_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'connected', NULL, ?, ?, ?)
+            """,
+        openidHash,
+        "openid-key-cleanup",
+        instanceId,
+        agentId,
+        wechatUserId,
+        "openviking-key-cleanup",
+        timestamp,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_keys
+              (openid_hash, openid, user_key, key_preview, enabled, created_at, updated_at, last_used_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, NULL)
+            """,
+        openidHash,
+        "openid-key-cleanup",
+        "cm_user_cleanup_retained",
+        "cm_user...ined",
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO wechat_user_cleanup_operations
+              (operation_id, instance_id, source, subject_hash, phone, wechat_user_id, account_id,
+               agent_id, openviking_user_id, api_peer_ids_json, old_session_ids_json,
+               protected_agent_ids_json, snapshot_json, status, stage, attempt_count,
+               created_at, updated_at)
+            VALUES (?, ?, 'user_center', ?, NULL, ?, NULL, ?, ?, '[]', '[]', '[]', NULL, 'pending',
+                    'wechat_files_deleted', 1, ?, ?)
+            """,
+        "op_user_center_key_retention",
+        instanceId,
+        "user-center-key-subject",
+        wechatUserId,
+        agentId,
+        "openviking-key-cleanup",
+        timestamp,
+        timestamp
+    );
+
+    wechatUserCleanupService.resume("op_user_center_key_retention");
+    awaitCleanupStatus("op_user_center_key_retention", "completed");
+
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_keys WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isEqualTo(1L);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT user_key FROM miniapp_user_keys WHERE openid_hash = ?",
+        String.class,
+        openidHash
+    )).isEqualTo("cm_user_cleanup_retained");
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_bindings WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isZero();
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM user_agent_identities WHERE agent_id = ?",
+        Long.class,
+        agentId
+    )).isZero();
+  }
+
+  @Test
+  void deletingInstancePreservesMiniappKey() throws Exception {
+    String instanceId = "inst_key_delete";
+    String openidHash = "instance-delete-key-openid-hash";
+    String timestamp = "2026-09-18T00:00:00Z";
+    insertInstance(instanceId, "Key Delete", 39993, timestamp);
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_bindings
+              (openid_hash, openid, instance_id, agent_id, wechat_user_id, openviking_user_id,
+               bind_status, current_bind_token, bound_at, created_at, updated_at)
+            VALUES (?, ?, ?, NULL, NULL, NULL, 'pending', NULL, NULL, ?, ?)
+            """,
+        openidHash,
+        "openid-key-delete",
+        instanceId,
+        timestamp,
+        timestamp
+    );
+    jdbcTemplate.update(
+        """
+            INSERT INTO miniapp_user_keys
+              (openid_hash, openid, user_key, key_preview, enabled, created_at, updated_at, last_used_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, NULL)
+            """,
+        openidHash,
+        "openid-key-delete",
+        "cm_user_instance_retained",
+        "cm_user...ined",
+        timestamp,
+        timestamp
+    );
+
+    when(openClawRuntime.inspectInstance(any()))
+        .thenReturn(new RuntimeState(false, "stopped", timestamp));
+    var operation = instanceDeletionService.start(instanceId, true);
+    awaitInstanceDeleteStatus(operation.getOperationId(), "completed");
+
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_keys WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isEqualTo(1L);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM miniapp_user_bindings WHERE openid_hash = ?",
+        Long.class,
+        openidHash
+    )).isZero();
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM instances WHERE id = ?",
+        Long.class,
+        instanceId
+    )).isZero();
   }
 
   @Test
@@ -286,7 +489,7 @@ class ApplicationIntegrationTest {
   @Test
   void bootsWithRealMySqlAndRedisThenAuthenticatesAdminCookieSession() throws Exception {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Long.class))
-        .isEqualTo(7);
+        .isEqualTo(8);
     assertThat(jdbcTemplate.queryForObject(
         """
             SELECT COUNT(*)
@@ -960,5 +1163,59 @@ class ApplicationIntegrationTest {
     Cookie cookie = login.getResponse().getCookie("clawbot_session");
     assertThat(cookie).isNotNull();
     return cookie;
+  }
+
+  private void insertInstance(String instanceId, String name, int port, String timestamp) {
+    jdbcTemplate.update(
+        """
+            INSERT INTO instances
+              (id, name, slug, status, port, dashboard_url, container_name, gateway_token,
+               plugins_allow, plugins_entries, created_at, updated_at)
+            VALUES (?, ?, ?, 'running', ?, ?, ?, ?, '[]', '[]', ?, ?)
+            """,
+        instanceId,
+        name,
+        instanceId.replace('_', '-'),
+        port,
+        "http://127.0.0.1:" + port,
+        instanceId.replace('_', '-'),
+        instanceId + "-token",
+        timestamp,
+        timestamp
+    );
+  }
+
+  private void awaitCleanupStatus(String operationId, String expectedStatus) throws Exception {
+    long deadline = System.currentTimeMillis() + 5_000;
+    String status = "";
+    while (System.currentTimeMillis() < deadline) {
+      status = jdbcTemplate.queryForObject(
+          "SELECT status FROM wechat_user_cleanup_operations WHERE operation_id = ?",
+          String.class,
+          operationId
+      );
+      if (expectedStatus.equals(status)) {
+        return;
+      }
+      Thread.sleep(50);
+    }
+    assertThat(status).isEqualTo(expectedStatus);
+  }
+
+  private void awaitInstanceDeleteStatus(String operationId, String expectedStatus) throws Exception {
+    long deadline = System.currentTimeMillis() + 5_000;
+    String status = "";
+    while (System.currentTimeMillis() < deadline) {
+      status = jdbcTemplate.queryForObject(
+          "SELECT status FROM instance_delete_operations WHERE operation_id = ?",
+          String.class,
+          operationId
+      );
+      if (expectedStatus.equals(status)) {
+        return;
+      }
+      Thread.sleep(50);
+    }
+    assertThat(status).isEqualTo(expectedStatus);
   }
 }

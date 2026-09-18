@@ -17,7 +17,6 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingMapper;
-import com.clawbotforall.miniapp.MiniappUserKeyMapper;
 import com.clawbotforall.openviking.OpenVikingUserKeyService;
 import com.clawbotforall.useragent.UserAgentIdentityEntity;
 import com.clawbotforall.useragent.UserAgentIdentityMapper;
@@ -49,7 +48,6 @@ class WechatUserRebindServiceTest {
   @Mock UserAgentIdentityMapper identityMapper;
   @Mock UserAgentIdentityService identityService;
   @Mock MiniappUserBindingMapper miniappBindingMapper;
-  @Mock MiniappUserKeyMapper miniappKeyMapper;
   @Mock OpenClawGatewayRpcService gatewayRpcService;
   @Mock OpenClawUserDataCleaner dataCleaner;
   @Mock WechatAccountSyncService accountSyncService;
@@ -94,7 +92,6 @@ class WechatUserRebindServiceTest {
         identityMapper,
         identityService,
         miniappBindingMapper,
-        miniappKeyMapper,
         gatewayRpcService,
         dataCleaner,
         accountSyncService,
@@ -135,10 +132,9 @@ class WechatUserRebindServiceTest {
     assertThat(operation.get().getNewAgentId()).matches("user_[0-9a-f]{32}");
     assertThat(operation.get().getOpenvikingUserId()).isEqualTo("wx_memory");
 
-    InOrder order = inOrder(gatewayRpcService, miniappKeyMapper, miniappBindingMapper, identityService,
+    InOrder order = inOrder(gatewayRpcService, miniappBindingMapper, identityService,
         dataCleaner, mutationMapper, userKeyService);
     order.verify(gatewayRpcService).stopWechatChannel(instance, List.of("account-old", "account-new"));
-    order.verify(miniappKeyMapper).deleteByAgentId(identity.getAgentId());
     order.verify(miniappBindingMapper).deleteByAgentId(identity.getAgentId());
     order.verify(identityService).replaceForRebind(eq("inst_1"), eq("wechat-user"), eq(identity.getAgentId()), any());
     order.verify(dataCleaner).deleteOldUserData("inst_1", identity.getAgentId(), List.of("session-old"),

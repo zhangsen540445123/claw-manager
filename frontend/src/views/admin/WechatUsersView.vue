@@ -295,7 +295,7 @@ async function deleteWechatAccount(user: PublicWechatUser) {
         `将彻底解绑手机号 ${user.phone || "-"} 对应的当前系统用户，并删除：`,
         "• 微信账号状态和凭证",
         "• Agent 配置、会话、trajectory 和 workspace",
-        "• 小程序绑定和 Key",
+        "• 小程序绑定（用户 Key 保留，重新绑定同一个小程序 openid 后继续使用）",
         "• 本地 OpenViking Key 和运行状态",
         "• 当前系统数据库身份数据",
         "",

@@ -1,7 +1,6 @@
 package com.clawbotforall.instance;
 
 import com.clawbotforall.miniapp.MiniappUserBindingMapper;
-import com.clawbotforall.miniapp.MiniappUserKeyMapper;
 import com.clawbotforall.runtime.OpenClawRuntime;
 import com.clawbotforall.trace.IntegrationTraceMapper;
 import com.clawbotforall.web.ApiException;
@@ -43,7 +42,6 @@ public class InstanceDeletionService {
   private final InstanceMutationMapper mutationMapper;
   private final InstanceDeleteOperationMapper operationMapper;
   private final MiniappUserBindingMapper miniappBindingMapper;
-  private final MiniappUserKeyMapper miniappUserKeyMapper;
   private final WechatUserCleanupService cleanupService;
   private final WechatUserCleanupOperationMapper cleanupOperationMapper;
   private final WechatUserResidueScanner residueScanner;
@@ -62,7 +60,6 @@ public class InstanceDeletionService {
       InstanceMutationMapper mutationMapper,
       InstanceDeleteOperationMapper operationMapper,
       MiniappUserBindingMapper miniappBindingMapper,
-      MiniappUserKeyMapper miniappUserKeyMapper,
       WechatUserCleanupService cleanupService,
       WechatUserCleanupOperationMapper cleanupOperationMapper,
       WechatUserResidueScanner residueScanner,
@@ -78,7 +75,6 @@ public class InstanceDeletionService {
     this.mutationMapper = mutationMapper;
     this.operationMapper = operationMapper;
     this.miniappBindingMapper = miniappBindingMapper;
-    this.miniappUserKeyMapper = miniappUserKeyMapper;
     this.cleanupService = cleanupService;
     this.cleanupOperationMapper = cleanupOperationMapper;
     this.residueScanner = residueScanner;
@@ -324,7 +320,6 @@ public class InstanceDeletionService {
   }
 
   private void removeResidualDatabaseRows(String instanceId) {
-    miniappUserKeyMapper.deleteByInstanceId(instanceId);
     miniappBindingMapper.deleteByInstanceId(instanceId);
     mutationMapper.deleteWechatAccountsForInstance(instanceId);
   }

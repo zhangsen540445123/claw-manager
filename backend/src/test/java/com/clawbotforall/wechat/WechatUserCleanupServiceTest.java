@@ -19,7 +19,6 @@ import com.clawbotforall.instance.InstanceMutationMapper;
 import com.clawbotforall.instance.WechatPairedAccountEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingEntity;
 import com.clawbotforall.miniapp.MiniappUserBindingMapper;
-import com.clawbotforall.miniapp.MiniappUserKeyMapper;
 import com.clawbotforall.openviking.OpenVikingUserKeyMapper;
 import com.clawbotforall.runtime.InstancePaths;
 import com.clawbotforall.runtime.OpenClawRuntime;
@@ -62,7 +61,6 @@ class WechatUserCleanupServiceTest {
   @Mock InstanceMutationMapper mutationMapper;
   @Mock UserAgentIdentityMapper identityMapper;
   @Mock MiniappUserBindingMapper miniappBindingMapper;
-  @Mock MiniappUserKeyMapper miniappKeyMapper;
   @Mock OpenVikingUserKeyMapper openVikingUserKeyMapper;
   @Mock OpenClawGatewayRpcService gatewayRpcService;
   @Mock OpenClawUserDataCleaner dataCleaner;
@@ -101,7 +99,7 @@ class WechatUserCleanupServiceTest {
   private WechatUserCleanupService createService(ExecutorService executor) {
     return new WechatUserCleanupService(
         operationMapper, aggregateMapper, mutationMapper, identityMapper,
-        miniappBindingMapper, miniappKeyMapper, openVikingUserKeyMapper,
+        miniappBindingMapper, openVikingUserKeyMapper,
         gatewayRpcService, dataCleaner, accountSyncService, bindLinkMapper,
         rebindOperationMapper, traceMapper, openClawRuntime, fileService, objectMapper, new RecordingTransactionManager(), executor
     );
@@ -215,9 +213,8 @@ class WechatUserCleanupServiceTest {
     verify(gatewayRpcService).stopWechatChannel(instance, List.of("account-1"));
     verify(dataCleaner).deleteOldUserData("inst-1", identity.getAgentId(), List.of("session-1"), List.of("api:openid-hash"));
     verify(accountSyncService).removeAccountStateFiles(fileService.paths("inst-1"), "account-1");
-    InOrder databaseOrder = inOrder(miniappKeyMapper, miniappBindingMapper, openVikingUserKeyMapper,
+    InOrder databaseOrder = inOrder(miniappBindingMapper, openVikingUserKeyMapper,
         identityMapper, mutationMapper);
-    databaseOrder.verify(miniappKeyMapper).deleteByAgentId(identity.getAgentId());
     databaseOrder.verify(miniappBindingMapper).deleteByAgentId(identity.getAgentId());
     databaseOrder.verify(openVikingUserKeyMapper).deleteByOpenvikingUserId("wx-memory");
     databaseOrder.verify(identityMapper).deleteByAgentId(identity.getAgentId());
@@ -749,7 +746,6 @@ class WechatUserCleanupServiceTest {
     WechatUserCleanupOperationEntity result = service.resume("cleanup-existing");
 
     assertThat(result.getStatus()).isEqualTo("completed");
-    verify(miniappKeyMapper, never()).deleteByAgentId(anyString());
     verify(miniappBindingMapper, never()).deleteByAgentId(anyString());
     verify(openVikingUserKeyMapper, never()).deleteByOpenvikingUserId(anyString());
     verify(identityMapper, never()).deleteByAgentId(anyString());

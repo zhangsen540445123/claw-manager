@@ -746,7 +746,7 @@ HMAC 防重放表。
 
 | 字段 | 作用 |
 | --- | --- |
-| `openid_hash` | 关联 `miniapp_user_bindings.openid_hash` |
+| `openid_hash` | 按 `miniapp_user_bindings.openid_hash` 关联小程序绑定；解绑或实例删除不会级联删除 Key |
 | `openid` | 原始 openid，便于排查和校验 |
 | `user_key` | `cm_user_...` 完整用户 key，当前按明文保存 |
 | `key_preview` | 脱敏展示值 |
@@ -754,6 +754,8 @@ HMAC 防重放表。
 | `created_at` | 创建时间 |
 | `updated_at` | 更新时间 |
 | `last_used_at` | 最近生成、查看或聊天使用时间 |
+
+Claw Manager 在彻底解绑、重新绑定和实例删除时保留 `miniapp_user_keys` 行及其 `enabled` 状态，不删除、不停用、不修改 Key。解绑期间没有完整 `connected` 绑定，聊天路由会拒绝请求；同一小程序 `openid` 再次绑定后，原 `cm_user_...` Key 会自动恢复可用。只有用户显式执行 Key 重置时才会替换 Key。
 
 ### `wechat_bind_links`
 
