@@ -321,6 +321,65 @@ class ApplicationIntegrationTest {
   }
 
   @Test
+  void expiredQrDoesNotCountAsActiveBindingWorkButLiveQrDoes() {
+    String instanceId = "inst_qr_expiry";
+    String accountId = "account_qr_expiry";
+    String now = "2026-09-19T10:00:00Z";
+    insertInstance(instanceId, "QR Expiry", 39994, now);
+    jdbcTemplate.update(
+        """
+            INSERT INTO wechat_bind_links
+              (token, mode, phone, instance_id, target_account_id, scanned_wechat_user_id, status,
+               qr_mode, qr_payload, qr_link, qr_expires_at, error_message, created_by_admin_id,
+               miniapp_openid_hash, created_at, started_at, expires_at, completed_at, updated_at)
+            VALUES (?, 'existing', NULL, ?, ?, NULL, 'waiting_scan', 'link', 'expired-payload',
+                    'https://qr.expired.test', ?, NULL, NULL, NULL, ?, NULL, ?, NULL, ?),
+                   (?, 'existing', NULL, ?, ?, NULL, 'waiting_scan', 'link', 'live-payload',
+                    'https://qr.live.test', ?, NULL, NULL, NULL, ?, NULL, ?, NULL, ?)
+            """,
+        "wbl_qr_expired",
+        instanceId,
+        accountId,
+        "2026-09-19T09:00:00Z",
+        "2026-09-19T08:00:00Z",
+        "2026-09-20T10:00:00Z",
+        now,
+        "wbl_qr_live",
+        instanceId,
+        accountId,
+        "2026-09-19T10:30:00Z",
+        "2026-09-19T09:01:00Z",
+        "2026-09-20T10:00:00Z",
+        now
+    );
+
+    assertThat(wechatBindLinkMapper.findActiveForUserForUpdate(
+        instanceId, null, accountId, null, now)).extracting("token").isEqualTo("wbl_qr_live");
+    assertThat(wechatBindLinkMapper.hasActiveBindingWork(instanceId, now)).isTrue();
+    assertThat(wechatBindLinkMapper.listProtectedAccountIds(instanceId, now)).contains(accountId);
+
+    jdbcTemplate.update(
+        "UPDATE wechat_bind_links SET qr_expires_at = ? WHERE token = ?",
+        "2026-09-19T09:30:00Z",
+        "wbl_qr_live"
+    );
+
+    assertThat(wechatBindLinkMapper.findActiveForUserForUpdate(
+        instanceId, null, accountId, null, now)).isNull();
+    assertThat(wechatBindLinkMapper.hasActiveBindingWork(instanceId, now)).isFalse();
+    assertThat(wechatBindLinkMapper.listProtectedAccountIds(instanceId, now)).doesNotContain(accountId);
+
+    jdbcTemplate.update(
+        "UPDATE wechat_bind_links SET status = 'cleaning' WHERE token = ?",
+        "wbl_qr_expired"
+    );
+    assertThat(wechatBindLinkMapper.findActiveForUserForUpdate(
+        instanceId, null, accountId, null, now)).extracting("token").isEqualTo("wbl_qr_expired");
+    assertThat(wechatBindLinkMapper.hasActiveBindingWork(instanceId, now)).isTrue();
+    assertThat(wechatBindLinkMapper.listProtectedAccountIds(instanceId, now)).contains(accountId);
+  }
+
+  @Test
   void accountSyncCleanupCreatedBeforeAccountLandsIsSupersededAndPreservesState() throws Exception {
     String instanceId = "inst_cleanup_race";
     String accountId = "wx_cleanup_race";

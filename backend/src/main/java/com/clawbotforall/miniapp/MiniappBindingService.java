@@ -127,7 +127,9 @@ public class MiniappBindingService {
     boolean connected = "connected".equals(binding.getBindStatus())
         && !blank(binding.getOpenvikingUserId())
         && !blank(binding.getAgentId());
-    String status = connected ? "connected" : link == null ? binding.getBindStatus() : link.status();
+    String status = link != null && isActiveLinkStatus(link.status())
+        ? link.status()
+        : connected ? "connected" : link == null ? binding.getBindStatus() : link.status();
     return new MiniappBindLinkResult(
         openid,
         link == null ? binding.getCurrentBindToken() : link.token(),
@@ -141,6 +143,14 @@ public class MiniappBindingService {
 
   private ExternalApiIdentity resolveOpenid(String openid) {
     return identityService.resolve(openid, openVikingSettingsService.effectiveSettings().identityHashSecret());
+  }
+
+  private static boolean isActiveLinkStatus(String status) {
+    return "created".equals(status)
+        || "starting".equals(status)
+        || "waiting_scan".equals(status)
+        || "scanned".equals(status)
+        || "initializing".equals(status);
   }
 
   private static boolean hasCompletePersistedIdentity(MiniappUserBindingEntity binding) {
