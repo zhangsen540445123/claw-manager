@@ -127,6 +127,11 @@
           OR (
             status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
             AND (expires_at IS NULL OR expires_at &gt; #{now})
+            AND (
+              status &lt;&gt; 'waiting_scan'
+              OR qr_expires_at IS NULL
+              OR qr_expires_at &gt; #{now}
+            )
           )
         )
       UNION ALL
@@ -160,6 +165,11 @@
             OR (
               status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
               AND (expires_at IS NULL OR expires_at &gt; #{now})
+              AND (
+                status &lt;&gt; 'waiting_scan'
+                OR qr_expires_at IS NULL
+                OR qr_expires_at &gt; #{now}
+              )
             )
           )
       )
@@ -181,6 +191,11 @@
         OR (
           status IN ('created', 'starting', 'waiting_scan', 'scanned', 'initializing')
           AND (expires_at IS NULL OR expires_at &gt; #{now})
+          AND (
+            status &lt;&gt; 'waiting_scan'
+            OR qr_expires_at IS NULL
+            OR qr_expires_at &gt; #{now}
+          )
         )
       )
       AND (
