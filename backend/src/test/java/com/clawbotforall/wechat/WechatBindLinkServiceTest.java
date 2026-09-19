@@ -549,6 +549,33 @@ class WechatBindLinkServiceTest {
   }
 
   @Test
+  void treatsAlreadyConnectedExistingLoginAsSuccessfulUsingPersistedWechatUserId() {
+    InstanceEntity instance = instance("inst_1", "实例一", "running");
+    WechatBindLinkEntity stored = existingLink("token_existing_already_connected", "inst_1");
+    stored.setStatus("waiting_scan");
+    stored.setTargetAccountId("wx_existing");
+    WechatPairedAccountEntity oldAccount = pairedAccount("wx_existing", "13572873189", "inst_1");
+    AtomicReference<WechatBindLinkEntity> saved = new AtomicReference<>(stored);
+    when(linkMapper.findByToken("token_existing_already_connected")).thenAnswer(invocation -> saved.get());
+    when(aggregateMapper.findById("inst_1")).thenReturn(instance);
+    when(aggregateMapper.findWechatAccountByAccountId("wx_existing")).thenReturn(oldAccount);
+    WechatBindLinkEntity connected = existingLink("token_existing_already_connected", "inst_1");
+    connected.setStatus("connected");
+    when(rebindService.startOrResume(stored, oldAccount, instance, "wx_existing", "wechat-user"))
+        .thenReturn(connected);
+
+    service.completeBindAfterLogin(
+        "token_existing_already_connected",
+        alreadyConnectedCompletion("wx_existing", "", ""),
+        "https://admin.example.test"
+    );
+
+    verify(rebindService).startOrResume(stored, oldAccount, instance, "wx_existing", "wechat-user");
+    assertThat(saved.get().getStatus()).isNotEqualTo("rejected");
+    verify(accountSyncService, never()).removeAccountStateFiles(any(InstancePaths.class), eq("wx_existing"));
+  }
+
+  @Test
   void cleansActualTemporaryAccountWhenExistingDatabaseAccountDisappearedBeforeFinalize() {
     InstanceEntity instance = instance("inst_1", "实例一", "running");
     WechatBindLinkEntity stored = existingLink("token_existing_missing_account", "inst_1");
@@ -1409,6 +1436,22 @@ class WechatBindLinkServiceTest {
 
   private static WechatBindService.BindStartResult startResult(String accountId, String qrLink) {
     return new WechatBindService.BindStartResult(accountId, null, "link", "", qrLink, "等待扫码");
+  }
+
+  private static WechatBindService.BindCompletion alreadyConnectedCompletion(
+      String requestedAccountId,
+      String accountId,
+      String wechatUserId
+  ) {
+    return new WechatBindService.BindCompletion(
+        requestedAccountId,
+        accountId,
+        "",
+        wechatUserId,
+        "https://wechat.example.test",
+        "已连接过此 OpenClaw，无需重复连接。",
+        true
+    );
   }
 
   private static WechatBindService.BindCompletion completion(

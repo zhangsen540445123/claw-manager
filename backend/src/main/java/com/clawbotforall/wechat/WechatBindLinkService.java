@@ -641,6 +641,20 @@ public class WechatBindLinkService {
       return linkMapper.findByToken(link.getToken());
     }
     String scannedWechatUserId = defaultString(completion.wechatUserId()).trim();
+    if (completion.alreadyConnected()) {
+      if (actualAccountId.isBlank()) {
+        actualAccountId = expectedAccountId;
+      }
+      if (scannedWechatUserId.isBlank()) {
+        scannedWechatUserId = defaultString(pairedAccount.getWechatUserId()).trim();
+        log.info(
+            "老用户扫码已连接当前 OpenClaw，使用历史微信身份继续重新绑定：instanceId={}, accountHash={}, wechatUserHash={}",
+            instance.getId(),
+            WechatLogSanitizer.identityHashPreview(actualAccountId),
+            WechatLogSanitizer.identityHashPreview(scannedWechatUserId)
+        );
+      }
+    }
     if (actualAccountId.isBlank() || scannedWechatUserId.isBlank()) {
       cleanupRejectedNewLogin(instance, link, actualAccountId, expectedAccountId);
       markRejected(link, "无法识别扫码微信用户，请重新扫码或联系管理员处理。");
