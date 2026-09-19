@@ -20,6 +20,38 @@ public interface MiniappUserBindingMapper {
 
   List<MiniappUserBindingEntity> listByAgentId(@Param("agentId") String agentId);
 
+  int prepareForRebind(
+      @Param("openidHashes") List<String> openidHashes,
+      @Param("agentId") String agentId,
+      @Param("updatedAt") String updatedAt
+  );
+
+  int restoreAfterRebind(
+      @Param("openidHashes") List<String> openidHashes,
+      @Param("instanceId") String instanceId,
+      @Param("agentId") String agentId,
+      @Param("wechatUserId") String wechatUserId,
+      @Param("openvikingUserId") String openvikingUserId,
+      @Param("bindStatus") String bindStatus,
+      @Param("updatedAt") String updatedAt
+  );
+
+  int migrateAfterRebind(
+      @Param("openidHashes") List<String> openidHashes,
+      @Param("instanceId") String instanceId,
+      @Param("agentId") String agentId,
+      @Param("wechatUserId") String wechatUserId,
+      @Param("openvikingUserId") String openvikingUserId,
+      @Param("updatedAt") String updatedAt
+  );
+
+  int finishRebind(
+      @Param("openidHashes") List<String> openidHashes,
+      @Param("instanceId") String instanceId,
+      @Param("agentId") String agentId,
+      @Param("updatedAt") String updatedAt
+  );
+
   int deleteByAgentId(@Param("agentId") String agentId);
 
   int deleteByOpenidHashes(

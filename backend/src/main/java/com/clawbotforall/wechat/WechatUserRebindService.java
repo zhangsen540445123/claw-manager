@@ -44,9 +44,10 @@ public class WechatUserRebindService {
   private static final List<String> STAGES = List.of(
       "validated",
       "channels_stopped",
-      "miniapp_deleted",
+      "miniapp_prepared",
       "identity_replaced",
       "routing_replaced",
+      "miniapp_binding_migrated",
       "local_files_deleted",
       "wechat_account_migrated",
       "openviking_key_rotated",
@@ -180,6 +181,20 @@ public class WechatUserRebindService {
       if (instance == null) {
         throw new ApiException(HttpStatus.CONFLICT, "原 OpenClaw 实例不存在，无法恢复旧微信通道。");
       }
+      if (stageIndex(operation.getStage()) >= stageIndex("channels_stopped")
+          && stageIndex(operation.getStage()) < stageIndex("identity_replaced")
+          && !openidHashes(operation).isEmpty()) {
+        int restored = miniappBindingMapper.restoreAfterRebind(
+            openidHashes(operation),
+            operation.getOldInstanceId(),
+            operation.getOldAgentId(),
+            operation.getWechatUserId(),
+            operation.getOpenvikingUserId(),
+            "connected",
+            now()
+        );
+        requireBindingMutationCount(restored, openidHashes(operation).size(), "恢复小程序绑定");
+      }
       WechatPairedAccountEntity persistedNewAccount = aggregateMapper.findWechatAccountByAccountId(
           operation.getNewAccountId());
       String oldAccountId = text(operation.getOldAccountId());
@@ -291,9 +306,14 @@ public class WechatUserRebindService {
         gatewayRpcService.stopWechatChannel(instance, accountIds(operation));
         advance(operation, "channels_stopped");
       }
-      if (before(operation, "miniapp_deleted")) {
-        miniappBindingMapper.deleteByAgentId(operation.getOldAgentId());
-        advance(operation, "miniapp_deleted");
+      if (before(operation, "miniapp_prepared")) {
+        // Release the old Agent FK without deleting the binding row or its miniapp_user_keys row.
+        if (!openidHashes(operation).isEmpty()) {
+          int prepared = miniappBindingMapper.prepareForRebind(
+              openidHashes(operation), operation.getOldAgentId(), now());
+          requireBindingMutationCount(prepared, openidHashes(operation).size(), "准备小程序绑定重绑");
+        }
+        advance(operation, "miniapp_prepared");
       }
       if (before(operation, "identity_replaced")) {
         UserAgentIdentityResult replacement = identityService.replaceForRebind(
@@ -319,6 +339,20 @@ public class WechatUserRebindService {
           throw new IllegalStateException("OpenClaw 用户路由替换未完整持久化或应用到运行时。");
         }
         advance(operation, "routing_replaced");
+      }
+      if (before(operation, "miniapp_binding_migrated")) {
+        if (!openidHashes(operation).isEmpty()) {
+          int migrated = miniappBindingMapper.migrateAfterRebind(
+              openidHashes(operation),
+              operation.getNewInstanceId(),
+              operation.getNewAgentId(),
+              operation.getWechatUserId(),
+              operation.getOpenvikingUserId(),
+              now()
+          );
+          requireBindingMutationCount(migrated, openidHashes(operation).size(), "迁移小程序绑定");
+        }
+        advance(operation, "miniapp_binding_migrated");
       }
       if (before(operation, "local_files_deleted")) {
         dataCleaner.deleteOldUserData(
@@ -420,6 +454,17 @@ public class WechatUserRebindService {
     }
     transactions.executeWithoutResult(status -> {
       String timestamp = now();
+      if (!openidHashes(operation).isEmpty()) {
+        // Complete the binding first. If this update fails, the operation remains retryable
+        // at its previous stage instead of being recorded as completed with a pending binding.
+        int finished = miniappBindingMapper.finishRebind(
+            openidHashes(operation),
+            operation.getNewInstanceId(),
+            operation.getNewAgentId(),
+            timestamp
+        );
+        requireBindingMutationCount(finished, openidHashes(operation).size(), "完成小程序绑定重绑");
+      }
       operation.setStage("completed");
       operation.setStatus("completed");
       operation.setLastError(null);
@@ -470,8 +515,28 @@ public class WechatUserRebindService {
   }
 
   private int stageIndex(String stage) {
-    int index = STAGES.indexOf(text(stage));
+    String normalized = text(stage);
+    // Tasks created before the preservation fix used this stage name.
+    if ("miniapp_deleted".equals(normalized)) {
+      normalized = "miniapp_prepared";
+    }
+    int index = STAGES.indexOf(normalized);
     return index < 0 ? 0 : index;
+  }
+
+  private List<String> openidHashes(WechatRebindOperationEntity operation) {
+    return apiPeers(operation).stream()
+        .filter(value -> value.startsWith("api:"))
+        .map(value -> value.substring("api:".length()))
+        .filter(value -> !value.isBlank())
+        .distinct()
+        .toList();
+  }
+
+  private void requireBindingMutationCount(int actual, int expected, String action) {
+    if (actual != expected) {
+      throw new IllegalStateException(action + "影响行数异常，期望 " + expected + "，实际 " + actual + "。");
+    }
   }
 
   private boolean sameInstance(WechatRebindOperationEntity operation) {

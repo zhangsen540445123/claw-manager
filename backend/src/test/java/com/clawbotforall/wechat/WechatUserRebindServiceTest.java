@@ -113,6 +113,10 @@ class WechatUserRebindServiceTest {
     miniapp.setOpenidHash("openid-hash");
     when(identityMapper.findByWechatUserIdForUpdate("wechat-user")).thenReturn(identity);
     when(miniappBindingMapper.listByAgentId(identity.getAgentId())).thenReturn(List.of(miniapp));
+    when(miniappBindingMapper.prepareForRebind(eq(List.of("openid-hash")), eq(identity.getAgentId()), any())).thenReturn(1);
+    when(miniappBindingMapper.migrateAfterRebind(eq(List.of("openid-hash")), eq("inst_1"), any(),
+        eq("wechat-user"), eq("wx_memory"), any())).thenReturn(1);
+    when(miniappBindingMapper.finishRebind(eq(List.of("openid-hash")), eq("inst_1"), any(), any())).thenReturn(1);
     when(dataCleaner.readOldSessionIds("inst_1", identity.getAgentId())).thenReturn(List.of("session-old"));
     when(identityService.replaceForRebind(eq("inst_1"), eq("wechat-user"), eq(identity.getAgentId()), any()))
         .thenAnswer(invocation -> new UserAgentIdentityResult(invocation.getArgument(3), "wx_memory", true));
@@ -135,7 +139,7 @@ class WechatUserRebindServiceTest {
     InOrder order = inOrder(gatewayRpcService, miniappBindingMapper, identityService,
         dataCleaner, mutationMapper, userKeyService);
     order.verify(gatewayRpcService).stopWechatChannel(instance, List.of("account-old", "account-new"));
-    order.verify(miniappBindingMapper).deleteByAgentId(identity.getAgentId());
+    order.verify(miniappBindingMapper).prepareForRebind(eq(List.of("openid-hash")), eq(identity.getAgentId()), any());
     order.verify(identityService).replaceForRebind(eq("inst_1"), eq("wechat-user"), eq(identity.getAgentId()), any());
     order.verify(dataCleaner).deleteOldUserData("inst_1", identity.getAgentId(), List.of("session-old"),
         List.of("api:openid-hash"));
@@ -143,6 +147,8 @@ class WechatUserRebindServiceTest {
     order.verify(mutationMapper).insertWechatAccount(any());
     order.verify(userKeyService).rotateUserKey("wx_memory");
     order.verify(gatewayRpcService).startWechatChannel(instance, List.of("account-new"));
+    verify(miniappBindingMapper, never()).deleteByAgentId(any());
+    verify(miniappBindingMapper).migrateAfterRebind(any(), eq("inst_1"), any(), eq("wechat-user"), eq("wx_memory"), any());
     verify(accountSyncService).removeAccountStateFiles(any(), eq("account-old"));
     verify(accountSyncService).syncInstanceAccounts(instance);
   }

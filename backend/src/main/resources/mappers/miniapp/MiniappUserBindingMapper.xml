@@ -113,6 +113,62 @@
   <select id="listByAgentId" resultMap="MiniappUserBindingMap">
     SELECT * FROM miniapp_user_bindings WHERE agent_id = #{agentId}
   </select>
+
+  <!-- Rebinding releases only the old Agent FK; the binding and miniapp key remain intact. -->
+  <update id="prepareForRebind">
+    UPDATE miniapp_user_bindings
+    SET agent_id = NULL,
+        bind_status = 'rebind_pending',
+        updated_at = #{updatedAt}
+    WHERE openid_hash IN
+    <foreach collection="openidHashes" item="openidHash" open="(" separator="," close=")">
+      #{openidHash}
+    </foreach>
+      AND (agent_id = #{agentId} OR (agent_id IS NULL AND bind_status = 'rebind_pending'))
+  </update>
+
+  <update id="restoreAfterRebind">
+    UPDATE miniapp_user_bindings
+    SET agent_id = #{agentId},
+        wechat_user_id = #{wechatUserId},
+        openviking_user_id = #{openvikingUserId},
+        bind_status = #{bindStatus},
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+      AND (agent_id IS NULL OR agent_id = #{agentId})
+      AND openid_hash IN
+      <foreach collection="openidHashes" item="openidHash" open="(" separator="," close=")">
+        #{openidHash}
+      </foreach>
+  </update>
+
+  <update id="migrateAfterRebind">
+    UPDATE miniapp_user_bindings
+    SET instance_id = #{instanceId},
+        agent_id = #{agentId},
+        wechat_user_id = #{wechatUserId},
+        openviking_user_id = #{openvikingUserId},
+        bind_status = 'rebind_pending',
+        updated_at = #{updatedAt}
+    WHERE openid_hash IN
+    <foreach collection="openidHashes" item="openidHash" open="(" separator="," close=")">
+      #{openidHash}
+    </foreach>
+  </update>
+
+  <update id="finishRebind">
+    UPDATE miniapp_user_bindings
+    SET bind_status = 'connected',
+        bound_at = COALESCE(bound_at, #{updatedAt}),
+        updated_at = #{updatedAt}
+    WHERE instance_id = #{instanceId}
+      AND agent_id = #{agentId}
+      AND openid_hash IN
+      <foreach collection="openidHashes" item="openidHash" open="(" separator="," close=")">
+        #{openidHash}
+      </foreach>
+  </update>
+
   <delete id="deleteByAgentId">
     DELETE FROM miniapp_user_bindings WHERE agent_id = #{agentId}
   </delete>
